@@ -1,7 +1,7 @@
 # ZevClip macOS Receiver
 
-ZevClip is a native SwiftUI macOS app that syncs clipboard text with Android
-over the local network. Android can push text to the Mac with `POST
+ZevClip is a native SwiftUI menu bar app that syncs clipboard text with
+Android over the local network. Android can push text to the Mac with `POST
 /clipboard`, and Android can pull the current Mac clipboard with `GET
 /clipboard`. While the receiver is running, it advertises `ZevClip Mac
 Receiver` as `_zevclip._tcp` using Bonjour so the Android app can find it
@@ -19,13 +19,29 @@ Open `ZevClip.xcodeproj` in Xcode and run the `ZevClip` scheme, or use:
 ./script/build_and_run.sh
 ```
 
-The receiver starts automatically on TCP port `9876`. It can also be started
-and stopped from the app window. The **Local Discovery** section shows whether
-Bonjour is advertising, along with the service name, type, and port.
+ZevClip runs from the macOS menu bar instead of the Dock. The receiver starts
+automatically on TCP port `9876`, and Bonjour advertising starts with it. The
+menu bar item shows receiver, Bonjour, port, and last-sync status.
+
+Use the menu bar item to:
+
+- Start or stop the receiver.
+- Enable or disable **Launch at Login**.
+- Open the settings window.
+- Quit ZevClip.
+
+The settings window shows receiver status, pairing, Bonjour discovery, Launch
+at Login, and the last received clipboard text. The **Local Discovery** section
+shows whether Bonjour is advertising, along with the service name, type, and
+port.
 
 The **Pairing** section shows the current token. It is generated randomly and
 stored in macOS Keychain. Use **Regenerate Pairing Token** if you need to
 invalidate previously paired Android installs.
+
+Launch at Login is managed with the native macOS `SMAppService` API and the
+preference is persisted in app defaults. The pairing token remains persisted in
+Keychain.
 
 Both devices must be connected to the same Wi-Fi/LAN and normally need to be
 on the same subnet for Bonjour discovery.

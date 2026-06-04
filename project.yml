@@ -16,6 +16,7 @@ targets:
       properties:
         CFBundleDisplayName: ZevClip
         LSApplicationCategoryType: public.app-category.utilities
+        LSUIElement: true
         NSBonjourServices:
           - _zevclip._tcp
         NSLocalNetworkUsageDescription: ZevClip receives clipboard text from devices on your local network.

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @ObservedObject var receiver: ClipboardReceiver
+    @ObservedObject var appSettings: AppSettings
 
     private var statusColor: Color {
         switch receiver.status {
@@ -47,6 +48,28 @@ struct ContentView: View {
                     receiver.stopServer()
                 }
                 .disabled(!receiver.canStop)
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Application")
+                    .font(.headline)
+
+                Toggle(
+                    "Launch at Login",
+                    isOn: Binding(
+                        get: { appSettings.launchAtLoginEnabled },
+                        set: { appSettings.setLaunchAtLoginEnabled($0) }
+                    )
+                )
+
+                Text(appSettings.launchAtLoginStatus)
+                    .foregroundStyle(.secondary)
+
+                Text("ZevClip starts the receiver and Bonjour advertising automatically when the app launches.")
+                    .foregroundStyle(.secondary)
+                    .font(.caption)
             }
 
             Divider()
@@ -133,6 +156,6 @@ struct ContentView: View {
             .frame(maxHeight: .infinity)
         }
         .padding(24)
-        .frame(minWidth: 560, minHeight: 650)
+        .frame(minWidth: 560, minHeight: 720)
     }
 }
