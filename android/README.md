@@ -12,9 +12,7 @@ It includes:
 - Bonjour/mDNS discovery of the Mac receiver through Android NSD.
 - QR pairing from the Mac settings window, including stable Mac identity.
 - Simple pairing through a shared token sent as `X-ZevClip-Token`.
-- Manual and optional foreground-only Mac-to-Android clipboard pull.
-- No background polling, foreground service, wakelock, cloud service, or
-  encryption.
+- No polling loop, foreground service, wakelock, cloud service, or encryption.
 
 The app uses Android platform APIs and `HttpURLConnection`. It has no runtime
 third-party networking dependencies. QR scanning uses Google Play services Code
@@ -156,24 +154,6 @@ pbpaste
 
 The output should match the text sent from Android.
 
-### 9. Pull the Mac clipboard to Android
-
-1. Copy text on the Mac, or run:
-
-   ```sh
-   printf 'Hello from Mac' | pbcopy
-   ```
-
-2. Open ZevClip on Android.
-3. Confirm the Mac IP, port, and pairing token are saved.
-4. Tap **Pull Mac Clipboard**.
-5. Paste in any Android text field.
-
-If the Mac clipboard contains text, ZevClip copies it into Android's
-`ClipboardManager`. If the Mac clipboard is empty or non-text, the app reports
-`Mac clipboard is empty/non-text.` If the app reports `Pairing token mismatch.`,
-paste the current Mac token again and tap **Save Pairing Token**.
-
 ## Manual Send fallback
 
 Enter text in ZevClip and tap **Send to Mac**. The status message should show
@@ -192,36 +172,6 @@ must be updated.
 
 Manual Send remains available because Accessibility Service detection and
 Bonjour discovery are best-effort.
-
-## Mac to Android pull
-
-Mac-to-Android sync is focused for reliability. Android sends:
-
-```http
-GET /clipboard
-X-ZevClip-Token: <pairing-token>
-```
-
-The Mac returns HTTP `200` with `text/plain; charset=utf-8` when the current
-Mac clipboard has text, `204 No Content` when it is empty or non-text, and
-`401 Unauthorized` when the token is missing or wrong.
-
-Tap **Pull Mac Clipboard** for a one-time pull.
-
-Optionally enable **Auto-pull Mac clipboard while app is open**. While
-`MainActivity` is visible and resumed, ZevClip checks the Mac clipboard every
-2.5 seconds. It copies only non-empty text that differs from the last pulled
-clipboard text. The loop stops immediately when ZevClip is paused, stopped,
-backgrounded, or the setting is disabled.
-
-Auto-pull uses the saved endpoint and pairing token. If a paired Mac's saved
-address is stale, ZevClip uses Bonjour discovery by `deviceId`, saves the
-resolved address, and retries. Rediscovery attempts are rate-limited when the
-Mac is unavailable.
-
-Fully automatic background Mac-to-Android polling is intentionally avoided to
-save battery and respect Android/OEM background limits. Manual pull remains
-available regardless of the auto-pull setting.
 
 ## Accessibility limitations
 

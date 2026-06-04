@@ -3,8 +3,6 @@ package com.zevclip.sender
 import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.app.StatusBarManager
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.ComponentName
 import android.content.Intent
 import android.content.SharedPreferences
@@ -18,12 +16,10 @@ import android.os.Looper
 import android.os.PowerManager
 import android.provider.Settings
 import android.text.InputType
-import android.util.Log
 import android.view.Gravity
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.widget.Button
-import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -33,7 +29,6 @@ import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import java.text.DateFormat
-import java.security.MessageDigest
 import java.util.Date
 import java.util.Locale
 import kotlin.concurrent.thread
@@ -44,9 +39,6 @@ class MainActivity : Activity() {
     private lateinit var pairingTokenInput: EditText
     private lateinit var textInput: EditText
     private lateinit var sendButton: Button
-    private lateinit var pullButton: Button
-    private lateinit var autoPullCheckBox: CheckBox
-    private lateinit var autoPullStatusText: TextView
     private lateinit var scanPairingQrButton: Button
     private lateinit var statusText: TextView
     private lateinit var discoverButton: Button
@@ -59,10 +51,6 @@ class MainActivity : Activity() {
     private lateinit var tileStatusText: TextView
     private lateinit var discoveryManager: MacDiscoveryManager
     private val mainHandler = Handler(Looper.getMainLooper())
-    private var isActivityResumed = false
-    private var autoPullInFlight = false
-    private var autoPullSession = 0
-    private val autoPullRunnable = Runnable { performAutoPull() }
 
     private val preferencesListener = SharedPreferences.OnSharedPreferenceChangeListener {
         _, key ->
@@ -73,8 +61,7 @@ class MainActivity : Activity() {
             key == ZevClipPreferences.KEY_ACCESSIBILITY_SERVICE_BOUND ||
             key == ZevClipPreferences.KEY_LAST_ACCESSIBILITY_SERVICE_EVENT ||
             key == ZevClipPreferences.KEY_LAST_SERVICE_CONNECTED_AT ||
-            key == ZevClipPreferences.KEY_LAST_AUTO_SEND_AT ||
-            key == ZevClipPreferences.KEY_LAST_AUTO_PULL_STATUS
+            key == ZevClipPreferences.KEY_LAST_AUTO_SEND_AT
         ) {
             runOnUiThread { refreshSyncStatuses() }
         }
@@ -109,16 +96,12 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        isActivityResumed = true
         AccessibilityServiceStatus.logCurrentState(this, "MainActivity.onResume")
         refreshSyncStatuses()
         scheduleAccessibilityRechecks()
-        startAutoPullIfEnabled()
     }
 
     override fun onPause() {
-        isActivityResumed = false
-        stopAutoPull()
         mainHandler.removeCallbacksAndMessages(null)
         ZevClipPreferences.saveEndpoint(
             this,
@@ -136,7 +119,6 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
-        stopAutoPull()
         mainHandler.removeCallbacksAndMessages(null)
         discoveryManager.stop()
         super.onDestroy()
@@ -321,40 +303,6 @@ class MainActivity : Activity() {
         }
         content.addView(portInput, matchWidth())
 
-        content.addView(sectionTitle(R.string.pull_mac_clipboard_title))
-        content.addView(
-            textView(getString(R.string.pull_mac_clipboard_instructions), 14f, Color.DKGRAY),
-            matchWidth()
-        )
-        pullButton = Button(this).apply {
-            text = getString(R.string.pull_mac_clipboard)
-            isAllCaps = false
-            setOnClickListener { pullMacClipboard() }
-        }
-        content.addView(pullButton, matchWidth(topMargin = 8))
-
-        autoPullCheckBox = CheckBox(this).apply {
-            text = getString(R.string.auto_pull_while_open)
-            isChecked = preferences.getBoolean(ZevClipPreferences.KEY_AUTO_PULL_ENABLED, false)
-            setOnCheckedChangeListener { _, isChecked ->
-                ZevClipPreferences.setAutoPullEnabled(this@MainActivity, isChecked)
-                if (isChecked) {
-                    saveEndpointAndTokenFromUi()
-                    setAutoPullStatus(getString(R.string.auto_pull_starting))
-                    startAutoPullIfEnabled()
-                } else {
-                    stopAutoPull()
-                    setAutoPullStatus(getString(R.string.auto_pull_off))
-                }
-            }
-        }
-        content.addView(autoPullCheckBox, matchWidth(topMargin = 8))
-
-        autoPullStatusText = textView("", 14f, Color.DKGRAY).apply {
-            setPadding(0, dp(8), 0, dp(8))
-        }
-        content.addView(autoPullStatusText, matchWidth())
-
         content.addView(fieldLabel(R.string.text_label))
         textInput = EditText(this).apply {
             hint = getString(R.string.text_hint)
@@ -437,188 +385,6 @@ class MainActivity : Activity() {
                 }
             }
         }
-    }
-
-    private fun pullMacClipboard() {
-        val ipAddress = ipAddressInput.text.toString().trim()
-        val portText = portInput.text.toString().trim()
-
-        if (!NetworkInputValidator.validateHost(ipAddress)) {
-            showFailure("Enter a valid Mac IP or host, for example 192.168.1.10.")
-            ipAddressInput.requestFocus()
-            return
-        }
-
-        val port = NetworkInputValidator.parsePort(portText)
-        if (port == null) {
-            showFailure("Enter a port between 1 and 65535.")
-            portInput.requestFocus()
-            return
-        }
-
-        val pairingToken = pairingTokenInput.text.toString().trim()
-        if (pairingToken.isEmpty()) {
-            showFailure("Enter the pairing token shown on the Mac.")
-            pairingTokenInput.requestFocus()
-            return
-        }
-
-        ZevClipPreferences.saveEndpoint(this, ipAddress, port.toString())
-        ZevClipPreferences.savePairingToken(this, pairingToken)
-
-        pullButton.isEnabled = false
-        statusText.setTextColor(Color.DKGRAY)
-        statusText.text = getString(
-            R.string.pulling_from_endpoint,
-            "http://$ipAddress:$port/clipboard"
-        )
-
-        thread(name = "ZevClipPuller") {
-            val result = ResilientClipboardPuller.pullSavedEndpoint(applicationContext)
-            runOnUiThread {
-                if (isDestroyed) return@runOnUiThread
-
-                refreshEndpointInputsFromPreferences()
-                pullButton.isEnabled = true
-                when (result) {
-                    is PullResult.Success -> copyPulledTextToAndroidClipboard(result.text, isAutoPull = false)
-                    PullResult.Empty -> showFailure(getString(R.string.pull_empty))
-                    is PullResult.Failure -> showFailure(result.message)
-                }
-            }
-        }
-    }
-
-    private fun copyPulledTextToAndroidClipboard(text: String, isAutoPull: Boolean): Boolean {
-        return try {
-            val clipboard = getSystemService(ClipboardManager::class.java)
-            val clip = ClipData.newPlainText(getString(R.string.mac_clipboard_clip_label), text)
-            clipboard.setPrimaryClip(clip)
-            val textHash = sha256(text)
-            ZevClipPreferences.setLastPulledHash(this, textHash)
-            ZevClipPreferences.setLastSentHash(this, textHash)
-
-            if (isAutoPull) {
-                val status = getString(
-                    R.string.auto_pull_success,
-                    DateFormat.getTimeInstance(DateFormat.MEDIUM).format(Date())
-                )
-                setAutoPullStatus(status)
-                showSuccess(status)
-            } else {
-                showSuccess(getString(R.string.pull_success, text.toByteArray(Charsets.UTF_8).size))
-            }
-            true
-        } catch (error: SecurityException) {
-            showFailure("Android blocked the clipboard update: ${error.message ?: "permission denied"}")
-            false
-        }
-    }
-
-    private fun startAutoPullIfEnabled() {
-        if (!shouldAutoPull()) {
-            return
-        }
-
-        mainHandler.removeCallbacks(autoPullRunnable)
-        mainHandler.post(autoPullRunnable)
-        Log.i(TAG, "Foreground auto-pull started")
-    }
-
-    private fun stopAutoPull() {
-        autoPullSession += 1
-        mainHandler.removeCallbacks(autoPullRunnable)
-        Log.i(TAG, "Foreground auto-pull stopped")
-    }
-
-    private fun performAutoPull() {
-        if (!shouldAutoPull()) {
-            return
-        }
-
-        if (autoPullInFlight) {
-            scheduleNextAutoPull()
-            return
-        }
-
-        autoPullInFlight = true
-        val session = autoPullSession
-        Log.d(TAG, "Foreground auto-pull checking Mac clipboard")
-        thread(name = "ZevClipAutoPuller") {
-            val result = ResilientClipboardPuller.pullSavedEndpoint(
-                applicationContext,
-                AUTO_PULL_REDISCOVERY_COOLDOWN_MS
-            )
-
-            runOnUiThread {
-                autoPullInFlight = false
-                if (session != autoPullSession || !shouldAutoPull()) {
-                    Log.i(TAG, "Discarded foreground auto-pull result after activity paused")
-                    return@runOnUiThread
-                }
-
-                refreshEndpointInputsFromPreferencesIfUnfocused()
-                when (result) {
-                    is PullResult.Success -> handleAutoPullSuccess(result.text)
-                    PullResult.Empty -> Unit
-                    is PullResult.Failure -> {
-                        setAutoPullStatus(getString(R.string.auto_pull_failed, result.message))
-                        Log.w(TAG, "Foreground auto-pull failed: ${result.message}")
-                    }
-                }
-                scheduleNextAutoPull()
-            }
-        }
-    }
-
-    private fun handleAutoPullSuccess(text: String) {
-        if (text.isEmpty()) {
-            return
-        }
-
-        val textHash = sha256(text)
-        if (textHash == ZevClipPreferences.lastPulledHash(this)) {
-            return
-        }
-
-        if (copyPulledTextToAndroidClipboard(text, isAutoPull = true)) {
-            Log.i(TAG, "Foreground auto-pull copied ${text.length} characters")
-        }
-    }
-
-    private fun scheduleNextAutoPull() {
-        if (!shouldAutoPull()) {
-            return
-        }
-
-        mainHandler.removeCallbacks(autoPullRunnable)
-        mainHandler.postDelayed(autoPullRunnable, AUTO_PULL_INTERVAL_MS)
-    }
-
-    private fun shouldAutoPull(): Boolean {
-        return isActivityResumed && ZevClipPreferences.isAutoPullEnabled(this)
-    }
-
-    private fun setAutoPullStatus(status: String) {
-        if (ZevClipPreferences.lastAutoPullStatus(this) != status) {
-            ZevClipPreferences.setLastAutoPullStatus(this, status)
-        }
-        autoPullStatusText.text = status
-    }
-
-    private fun saveEndpointAndTokenFromUi() {
-        ZevClipPreferences.saveEndpoint(
-            this,
-            ipAddressInput.text.toString(),
-            portInput.text.toString()
-        )
-        ZevClipPreferences.savePairingToken(this, pairingTokenInput.text.toString())
-    }
-
-    private fun sha256(text: String): String {
-        return MessageDigest.getInstance("SHA-256")
-            .digest(text.toByteArray(Charsets.UTF_8))
-            .joinToString(separator = "") { byte -> "%02x".format(byte.toInt() and 0xff) }
     }
 
     private fun scanPairingQr() {
@@ -725,7 +491,6 @@ class MainActivity : Activity() {
         }
 
         lastAutoStatusText.text = getString(R.string.last_auto_send_status, lastAutoStatus)
-        autoPullStatusText.text = ZevClipPreferences.lastAutoPullStatus(this)
         refreshBackgroundHealthStatus(accessibilityState)
         tileStatusText.text = getString(
             R.string.last_tile_status,
@@ -957,12 +722,6 @@ class MainActivity : Activity() {
         if (!ipAddressInput.hasFocus() && !portInput.hasFocus()) {
             refreshEndpointInputsFromPreferences()
         }
-    }
-
-    private companion object {
-        const val TAG = "ZevClip"
-        const val AUTO_PULL_INTERVAL_MS = 2_500L
-        const val AUTO_PULL_REDISCOVERY_COOLDOWN_MS = 30_000L
     }
 
     private fun sectionTitle(textResource: Int): TextView {

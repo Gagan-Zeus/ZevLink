@@ -15,7 +15,6 @@ final class ClipboardHTTPServer {
         onReady: @escaping () -> Void,
         onAdvertisingChanged: @escaping (Bool) -> Void,
         onFailure: @escaping (String) -> Void,
-        onClipboardRequest: @escaping (@escaping (String?) -> Void) -> Void,
         onText: @escaping (String) -> Void
     ) {
         queue.async { [weak self] in
@@ -28,7 +27,6 @@ final class ClipboardHTTPServer {
                 onReady: onReady,
                 onAdvertisingChanged: onAdvertisingChanged,
                 onFailure: onFailure,
-                onClipboardRequest: onClipboardRequest,
                 onText: onText
             )
         }
@@ -56,7 +54,6 @@ final class ClipboardHTTPServer {
         onReady: @escaping () -> Void,
         onAdvertisingChanged: @escaping (Bool) -> Void,
         onFailure: @escaping (String) -> Void,
-        onClipboardRequest: @escaping (@escaping (String?) -> Void) -> Void,
         onText: @escaping (String) -> Void
     ) {
         guard listener == nil else { return }
@@ -115,7 +112,6 @@ final class ClipboardHTTPServer {
                 self?.accept(
                     connection,
                     tokenProvider: tokenProvider,
-                    onClipboardRequest: onClipboardRequest,
                     onText: onText
                 )
             }
@@ -131,7 +127,6 @@ final class ClipboardHTTPServer {
     private func accept(
         _ connection: NWConnection,
         tokenProvider: @escaping () -> String,
-        onClipboardRequest: @escaping (@escaping (String?) -> Void) -> Void,
         onText: @escaping (String) -> Void
     ) {
         let id = ObjectIdentifier(connection)
@@ -139,7 +134,6 @@ final class ClipboardHTTPServer {
             connection: connection,
             queue: queue,
             tokenProvider: tokenProvider,
-            onClipboardRequest: onClipboardRequest,
             onText: onText,
             onClose: { [weak self] in
                 self?.connections[id] = nil
@@ -163,38 +157,28 @@ private final class HTTPConnection {
     private static let maximumBodyLength = 1_048_576
     private static let maximumHeaderLength = 16_384
 
-    private enum RequestMethod {
-        case get
-        case post
-    }
-
     private let connection: NWConnection
     private let queue: DispatchQueue
     private let tokenProvider: () -> String
-    private let onClipboardRequest: (@escaping (String?) -> Void) -> Void
     private let onText: (String) -> Void
     private let onClose: () -> Void
 
     private var buffer = Data()
-    private var requestMethod: RequestMethod?
     private var expectedRequestLength: Int?
     private var headerEndIndex: Int?
     private var responseStarted = false
-    private var waitingForClipboardResponse = false
     private var didFinish = false
 
     init(
         connection: NWConnection,
         queue: DispatchQueue,
         tokenProvider: @escaping () -> String,
-        onClipboardRequest: @escaping (@escaping (String?) -> Void) -> Void,
         onText: @escaping (String) -> Void,
         onClose: @escaping () -> Void
     ) {
         self.connection = connection
         self.queue = queue
         self.tokenProvider = tokenProvider
-        self.onClipboardRequest = onClipboardRequest
         self.onText = onText
         self.onClose = onClose
     }
@@ -270,25 +254,6 @@ private final class HTTPConnection {
             return false
         }
 
-        if requestMethod == .get {
-            guard !waitingForClipboardResponse else { return true }
-            waitingForClipboardResponse = true
-
-            onClipboardRequest { [weak self] text in
-                self?.queue.async {
-                    guard let self, !self.didFinish else { return }
-
-                    if let text, !text.isEmpty {
-                        self.respond(status: "200 OK", body: text)
-                    } else {
-                        self.respondNoContent()
-                    }
-                }
-            }
-
-            return true
-        }
-
         let bodyData = buffer.subdata(in: headerEndIndex..<expectedRequestLength)
         guard let text = String(data: bodyData, encoding: .utf8) else {
             respond(status: "400 Bad Request", body: "Request body must be valid UTF-8 text.")
@@ -329,14 +294,8 @@ private final class HTTPConnection {
             return true
         }
 
-        let method: RequestMethod
-        switch requestParts[0] {
-        case "GET":
-            method = .get
-        case "POST":
-            method = .post
-        default:
-            respond(status: "405 Method Not Allowed", body: "Use GET or POST.")
+        guard requestParts[0] == "POST" else {
+            respond(status: "405 Method Not Allowed", body: "Use POST.")
             return true
         }
 
@@ -360,13 +319,7 @@ private final class HTTPConnection {
             return true
         }
 
-        requestMethod = method
         headerEndIndex = separatorRange.upperBound
-
-        if method == .get {
-            expectedRequestLength = separatorRange.upperBound
-            return true
-        }
 
         guard let contentLengthValue = headers["content-length"] else {
             respond(status: "411 Length Required", body: "Content-Length is required.")
@@ -405,24 +358,6 @@ private final class HTTPConnection {
         response.append(bodyData)
 
         connection.send(content: response, completion: .contentProcessed { [weak self] _ in
-            self?.connection.cancel()
-            self?.finish()
-        })
-    }
-
-    private func respondNoContent() {
-        guard !responseStarted else { return }
-        responseStarted = true
-
-        let header = [
-            "HTTP/1.1 204 No Content",
-            "Content-Length: 0",
-            "Connection: close",
-            "",
-            ""
-        ].joined(separator: "\r\n")
-
-        connection.send(content: Data(header.utf8), completion: .contentProcessed { [weak self] _ in
             self?.connection.cancel()
             self?.finish()
         })

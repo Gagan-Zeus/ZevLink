@@ -71,7 +71,7 @@ final class ClipboardReceiver: ObservableObject {
             onReady: { [weak self] in
                 Task { @MainActor in
                     self?.status = .running
-                    self?.detailMessage = "Listening for GET and POST /clipboard requests."
+                    self?.detailMessage = "Listening for POST /clipboard requests."
                 }
             },
             onAdvertisingChanged: { [weak self] isAdvertising in
@@ -84,11 +84,6 @@ final class ClipboardReceiver: ObservableObject {
                     self?.status = .failed(message)
                     self?.isAdvertising = false
                     self?.detailMessage = message
-                }
-            },
-            onClipboardRequest: { [weak self] completion in
-                Task { @MainActor in
-                    completion(self?.currentClipboardText())
                 }
             },
             onText: { [weak self] text in
@@ -140,17 +135,6 @@ final class ClipboardReceiver: ObservableObject {
         pairingToken = token
         pairingStatus = status
         tokenProvider.updateToken(token)
-    }
-
-    private func currentClipboardText() -> String? {
-        guard
-            let text = NSPasteboard.general.string(forType: .string),
-            !text.isEmpty
-        else {
-            return nil
-        }
-
-        return text
     }
 
     private func receive(_ text: String) {

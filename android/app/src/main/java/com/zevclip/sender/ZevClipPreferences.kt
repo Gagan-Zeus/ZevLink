@@ -17,11 +17,8 @@ object ZevClipPreferences {
     const val KEY_LAST_ACCESSIBILITY_SERVICE_EVENT = "last_accessibility_service_event"
     const val KEY_LAST_SERVICE_CONNECTED_AT = "last_service_connected_at"
     const val KEY_LAST_AUTO_SEND_AT = "last_auto_send_at"
-    const val KEY_AUTO_PULL_ENABLED = "auto_pull_enabled"
-    const val KEY_LAST_AUTO_PULL_STATUS = "last_auto_pull_status"
 
     private const val KEY_LAST_SENT_HASH = "last_auto_sent_hash"
-    private const val KEY_LAST_PULLED_HASH = "last_pulled_hash"
     private const val KEY_LAST_TILE_SUBTITLE = "last_tile_subtitle"
 
     private const val PREFERENCES_NAME = "zevclip_preferences"
@@ -135,29 +132,6 @@ object ZevClipPreferences {
             .apply()
     }
 
-    fun isAutoPullEnabled(context: Context): Boolean {
-        return preferences(context).getBoolean(KEY_AUTO_PULL_ENABLED, false)
-    }
-
-    fun setAutoPullEnabled(context: Context, enabled: Boolean) {
-        preferences(context).edit()
-            .putBoolean(KEY_AUTO_PULL_ENABLED, enabled)
-            .apply()
-    }
-
-    fun lastAutoPullStatus(context: Context): String {
-        return preferences(context).getString(
-            KEY_LAST_AUTO_PULL_STATUS,
-            "Auto-pull is off."
-        ).orEmpty()
-    }
-
-    fun setLastAutoPullStatus(context: Context, status: String) {
-        preferences(context).edit()
-            .putString(KEY_LAST_AUTO_PULL_STATUS, status)
-            .apply()
-    }
-
     fun lastTileStatus(context: Context): String {
         return preferences(context).getString(
             KEY_LAST_TILE_STATUS,
@@ -202,16 +176,6 @@ object ZevClipPreferences {
     fun setLastSentHash(context: Context, hash: String) {
         preferences(context).edit()
             .putString(KEY_LAST_SENT_HASH, hash)
-            .apply()
-    }
-
-    fun lastPulledHash(context: Context): String? {
-        return preferences(context).getString(KEY_LAST_PULLED_HASH, null)
-    }
-
-    fun setLastPulledHash(context: Context, hash: String) {
-        preferences(context).edit()
-            .putString(KEY_LAST_PULLED_HASH, hash)
             .apply()
     }
 

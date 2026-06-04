@@ -1,11 +1,9 @@
 # ZevClip macOS Receiver
 
-ZevClip is a native SwiftUI menu bar app that syncs clipboard text with
-Android over the local network. Android can push text to the Mac with `POST
-/clipboard`, and Android can pull the current Mac clipboard with `GET
-/clipboard`. While the receiver is running, it advertises `ZevClip Mac
-Receiver` as `_zevclip._tcp` using Bonjour so the Android app can find it
-without manual IP entry.
+ZevClip is a native SwiftUI menu bar app that receives clipboard text from
+Android over the local network with `POST /clipboard`. While the receiver is
+running, it advertises `ZevClip Mac Receiver` as `_zevclip._tcp` using Bonjour
+so the Android app can find it without manual IP entry.
 
 The receiver also requires a shared pairing token. Android sends this token in
 the `X-ZevClip-Token` header on every clipboard request; missing or wrong
@@ -57,9 +55,8 @@ on the same subnet for Bonjour discovery.
 2. Open ZevClip on Android.
 3. Tap **Scan Pairing QR** and scan the QR code in the Mac settings window.
 4. Confirm Android reports the saved Mac host, port, token, and paired identity.
-5. Send a manual test message, use one of the Android-to-Mac clipboard sync
-   actions, or tap **Pull Mac Clipboard** to copy the Mac clipboard onto
-   Android.
+5. Send a manual test message or use one of the Android-to-Mac clipboard sync
+   actions.
 
 QR pairing is intended to be one-time. If your router later gives the Mac a new
 IP address, Android first tries the saved endpoint, then uses Bonjour to resolve
@@ -74,9 +71,7 @@ The Android QR scanner uses Google Play services Code Scanner. It does not
 require ZevClip to request camera permission; Google Play services provides the
 scanner UI and returns only the QR text.
 
-## Sync flows
-
-### Android to Mac
+## Android to Mac sync
 
 Android sends plain UTF-8 text with:
 
@@ -89,22 +84,6 @@ Content-Type: text/plain; charset=utf-8
 The Mac validates the token and writes the request body to
 `NSPasteboard.general`.
 
-### Mac to Android
-
-Android fetches the current Mac clipboard with:
-
-```http
-GET /clipboard
-X-ZevClip-Token: <pairing-token>
-```
-
-If the Mac clipboard contains text, the receiver returns HTTP `200` with
-`text/plain; charset=utf-8`. If the clipboard is empty or non-text, it returns
-HTTP `204 No Content`. Missing or wrong tokens return HTTP `401`.
-
-This flow is intentionally manual/focused in the Android app because Android
-background clipboard writes and reads are restricted on modern OS builds.
-
 ## Test locally
 
 Android to Mac:
@@ -113,13 +92,6 @@ Android to Mac:
 curl --data-binary 'Hello from Android' \
   -H 'Content-Type: text/plain; charset=utf-8' \
   -H 'X-ZevClip-Token: paste-token-from-mac' \
-  http://localhost:9876/clipboard
-```
-
-Mac to Android protocol check:
-
-```sh
-curl -H 'X-ZevClip-Token: paste-token-from-mac' \
   http://localhost:9876/clipboard
 ```
 
