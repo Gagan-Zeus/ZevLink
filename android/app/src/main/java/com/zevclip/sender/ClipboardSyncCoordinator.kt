@@ -16,7 +16,7 @@ sealed interface ClipboardSyncResult {
 object ClipboardSyncCoordinator {
     private val pendingHashes = mutableSetOf<String>()
     private val sendStateLock = Any()
-    private val networkExecutor = Executors.newCachedThreadPool { runnable ->
+    private val networkExecutor = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "ZevClipClipboardSender")
     }
 

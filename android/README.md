@@ -132,6 +132,26 @@ but hides clipboard content from the background Accessibility Service.
 ZevClip watches accessibility events for likely copy actions, waits briefly,
 then reads and sends the current clipboard text.
 
+Accessibility auto-send does not depend on `MainActivity`. After pairing and
+enabling Accessibility, closing ZevClip normally leaves the system-bound
+Accessibility Service available to receive copy events. Preferences, duplicate
+suppression, resilient sending, status persistence, and logging run through
+app-level classes.
+
+For Android/OEM builds that hide clipboard contents from a background
+Accessibility Service, ZevClip first uses selected text exposed by
+Accessibility. If selected text is also unavailable, ZevClip briefly opens a
+transparent focused clipboard reader, sends the text, and immediately returns
+to the app where the copy occurred. This remains event-driven and does not use
+polling, a foreground service, or a wakelock.
+
+Use `adb logcat -s ZevClipAccessibility` to verify closed-UI behavior. Copy-event
+and send-result logs include `uiVisible=false` when no ZevClip activity is
+resumed. If Android/OEM policy explicitly denies clipboard access, ZevClip logs
+`Android denied clipboard access; uiVisible=false`. If Android silently hides
+clipboard content and blocks the focused fallback, ZevClip records the failure.
+Use the Quick Settings tile as the reliable manual fallback.
+
 ### 7. Use the Quick Settings fallback
 
 1. Copy text in any Android app.
