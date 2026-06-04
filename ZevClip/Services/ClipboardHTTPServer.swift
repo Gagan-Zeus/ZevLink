@@ -1,0 +1,314 @@
+import Foundation
+import Network
+
+final class ClipboardHTTPServer {
+    private let queue = DispatchQueue(label: "com.zevclip.receiver.http-server")
+    private var listener: NWListener?
+    private var connections: [ObjectIdentifier: HTTPConnection] = [:]
+
+    func start(
+        port: UInt16,
+        onReady: @escaping () -> Void,
+        onFailure: @escaping (String) -> Void,
+        onText: @escaping (String) -> Void
+    ) {
+        queue.async { [weak self] in
+            self?.startOnQueue(
+                port: port,
+                onReady: onReady,
+                onFailure: onFailure,
+                onText: onText
+            )
+        }
+    }
+
+    func stop() {
+        queue.async { [weak self] in
+            guard let self else { return }
+
+            self.listener?.cancel()
+            self.listener = nil
+
+            let activeConnections = Array(self.connections.values)
+            self.connections.removeAll()
+            activeConnections.forEach { $0.cancel() }
+        }
+    }
+
+    private func startOnQueue(
+        port: UInt16,
+        onReady: @escaping () -> Void,
+        onFailure: @escaping (String) -> Void,
+        onText: @escaping (String) -> Void
+    ) {
+        guard listener == nil else { return }
+        guard let networkPort = NWEndpoint.Port(rawValue: port) else {
+            onFailure("Port \(port) is invalid.")
+            return
+        }
+
+        do {
+            let newListener = try NWListener(using: .tcp, on: networkPort)
+            listener = newListener
+
+            newListener.stateUpdateHandler = { [weak self, weak newListener] state in
+                guard let self, let newListener, self.listener === newListener else {
+                    return
+                }
+
+                switch state {
+                case .ready:
+                    onReady()
+                case .failed(let error):
+                    self.listener = nil
+                    newListener.cancel()
+                    let activeConnections = Array(self.connections.values)
+                    self.connections.removeAll()
+                    activeConnections.forEach { $0.cancel() }
+                    onFailure(Self.userMessage(for: error, port: port))
+                default:
+                    break
+                }
+            }
+
+            newListener.newConnectionHandler = { [weak self] connection in
+                self?.accept(connection, onText: onText)
+            }
+
+            newListener.start(queue: queue)
+        } catch {
+            listener = nil
+            onFailure("Could not start the server: \(error.localizedDescription)")
+        }
+    }
+
+    private func accept(_ connection: NWConnection, onText: @escaping (String) -> Void) {
+        let id = ObjectIdentifier(connection)
+        let httpConnection = HTTPConnection(
+            connection: connection,
+            queue: queue,
+            onText: onText,
+            onClose: { [weak self] in
+                self?.connections[id] = nil
+            }
+        )
+
+        connections[id] = httpConnection
+        httpConnection.start()
+    }
+
+    private static func userMessage(for error: NWError, port: UInt16) -> String {
+        if case .posix(let code) = error, code == .EADDRINUSE {
+            return "Port \(port) is already in use. Stop the other service or choose a different port."
+        }
+
+        return "Server stopped: \(error.localizedDescription)"
+    }
+}
+
+private final class HTTPConnection {
+    private static let maximumBodyLength = 1_048_576
+    private static let maximumHeaderLength = 16_384
+
+    private let connection: NWConnection
+    private let queue: DispatchQueue
+    private let onText: (String) -> Void
+    private let onClose: () -> Void
+
+    private var buffer = Data()
+    private var expectedRequestLength: Int?
+    private var headerEndIndex: Int?
+    private var responseStarted = false
+    private var didFinish = false
+
+    init(
+        connection: NWConnection,
+        queue: DispatchQueue,
+        onText: @escaping (String) -> Void,
+        onClose: @escaping () -> Void
+    ) {
+        self.connection = connection
+        self.queue = queue
+        self.onText = onText
+        self.onClose = onClose
+    }
+
+    func start() {
+        connection.stateUpdateHandler = { [weak self] state in
+            switch state {
+            case .failed, .cancelled:
+                self?.finish()
+            default:
+                break
+            }
+        }
+
+        connection.start(queue: queue)
+        receiveMoreData()
+    }
+
+    func cancel() {
+        connection.cancel()
+        finish()
+    }
+
+    private func receiveMoreData() {
+        connection.receive(
+            minimumIncompleteLength: 1,
+            maximumLength: 64 * 1024
+        ) { [weak self] data, _, isComplete, error in
+            guard let self, !self.didFinish else { return }
+
+            if let data, !data.isEmpty {
+                self.buffer.append(data)
+            }
+
+            if error != nil {
+                self.finish()
+                return
+            }
+
+            if self.processRequestIfPossible() {
+                return
+            }
+
+            if isComplete {
+                self.respond(status: "400 Bad Request", body: "Incomplete HTTP request.")
+            } else {
+                self.receiveMoreData()
+            }
+        }
+    }
+
+    @discardableResult
+    private func processRequestIfPossible() -> Bool {
+        if expectedRequestLength == nil {
+            guard parseHeadersIfAvailable() else {
+                if buffer.count > Self.maximumHeaderLength {
+                    respond(status: "431 Request Header Fields Too Large", body: "Headers are too large.")
+                    return true
+                }
+                return false
+            }
+
+            if responseStarted {
+                return true
+            }
+        }
+
+        guard
+            let expectedRequestLength,
+            let headerEndIndex,
+            buffer.count >= expectedRequestLength
+        else {
+            return false
+        }
+
+        let bodyData = buffer.subdata(in: headerEndIndex..<expectedRequestLength)
+        guard let text = String(data: bodyData, encoding: .utf8) else {
+            respond(status: "400 Bad Request", body: "Request body must be valid UTF-8 text.")
+            return true
+        }
+
+        onText(text)
+        respond(status: "200 OK", body: "Clipboard updated.")
+        return true
+    }
+
+    private func parseHeadersIfAvailable() -> Bool {
+        let separator = Data("\r\n\r\n".utf8)
+        guard let separatorRange = buffer.range(of: separator) else {
+            return false
+        }
+
+        guard separatorRange.lowerBound <= Self.maximumHeaderLength else {
+            respond(status: "431 Request Header Fields Too Large", body: "Headers are too large.")
+            return true
+        }
+
+        let headerData = buffer.subdata(in: 0..<separatorRange.lowerBound)
+        guard let headerText = String(data: headerData, encoding: .utf8) else {
+            respond(status: "400 Bad Request", body: "Headers must be valid UTF-8.")
+            return true
+        }
+
+        let lines = headerText.components(separatedBy: "\r\n")
+        guard let requestLine = lines.first else {
+            respond(status: "400 Bad Request", body: "Missing request line.")
+            return true
+        }
+
+        let requestParts = requestLine.split(separator: " ")
+        guard requestParts.count == 3 else {
+            respond(status: "400 Bad Request", body: "Invalid request line.")
+            return true
+        }
+
+        guard requestParts[0] == "POST" else {
+            respond(status: "405 Method Not Allowed", body: "Use POST.")
+            return true
+        }
+
+        guard requestParts[1] == "/clipboard" else {
+            respond(status: "404 Not Found", body: "Use POST /clipboard.")
+            return true
+        }
+
+        var headers: [String: String] = [:]
+        for line in lines.dropFirst() {
+            guard let colon = line.firstIndex(of: ":") else { continue }
+            let name = line[..<colon].trimmingCharacters(in: .whitespaces).lowercased()
+            let value = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+            headers[name] = value
+        }
+
+        guard let contentLengthValue = headers["content-length"] else {
+            respond(status: "411 Length Required", body: "Content-Length is required.")
+            return true
+        }
+
+        guard let contentLength = Int(contentLengthValue), contentLength >= 0 else {
+            respond(status: "400 Bad Request", body: "Content-Length is invalid.")
+            return true
+        }
+
+        guard contentLength <= Self.maximumBodyLength else {
+            respond(status: "413 Content Too Large", body: "Clipboard text is limited to 1 MB.")
+            return true
+        }
+
+        headerEndIndex = separatorRange.upperBound
+        expectedRequestLength = separatorRange.upperBound + contentLength
+        return true
+    }
+
+    private func respond(status: String, body: String) {
+        guard !responseStarted else { return }
+        responseStarted = true
+
+        let bodyData = Data(body.utf8)
+        let header = [
+            "HTTP/1.1 \(status)",
+            "Content-Type: text/plain; charset=utf-8",
+            "Content-Length: \(bodyData.count)",
+            "Connection: close",
+            "",
+            ""
+        ].joined(separator: "\r\n")
+
+        var response = Data(header.utf8)
+        response.append(bodyData)
+
+        connection.send(content: response, completion: .contentProcessed { [weak self] _ in
+            self?.connection.cancel()
+            self?.finish()
+        })
+    }
+
+    private func finish() {
+        guard !didFinish else { return }
+        didFinish = true
+        connection.stateUpdateHandler = nil
+        onClose()
+    }
+}

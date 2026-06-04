@@ -1,0 +1,27 @@
+name: ZevClip
+
+options:
+  bundleIdPrefix: com.zevclip
+  deploymentTarget:
+    macOS: "14.0"
+
+targets:
+  ZevClip:
+    type: application
+    platform: macOS
+    sources:
+      - ZevClip
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.zevclip.receiver
+        PRODUCT_NAME: ZevClip
+        SWIFT_VERSION: "5.0"
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: ZevClip
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.utilities
+        INFOPLIST_KEY_NSLocalNetworkUsageDescription: ZevClip receives clipboard text from devices on your local network.
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        ENABLE_HARDENED_RUNTIME: YES
+        ENABLE_APP_SANDBOX: NO
+

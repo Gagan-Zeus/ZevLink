@@ -1,0 +1,340 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		5B2A64EEB803EC30746CA86F /* ClipboardReceiver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08BB497EA327D472BA901879 /* ClipboardReceiver.swift */; };
+		B8CA797C763F040EDE0356DE /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 320BFAD0195F6C551F287AC0 /* ContentView.swift */; };
+		C405F78AD025A73FDB6198B8 /* ZevClipApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7AA610A696A5F3C375689D0B /* ZevClipApp.swift */; };
+		F720DDC4973512A61918258B /* ClipboardHTTPServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BAF94C62FB5C5E506492DFD /* ClipboardHTTPServer.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		08BB497EA327D472BA901879 /* ClipboardReceiver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardReceiver.swift; sourceTree = "<group>"; };
+		21B01AEF6AD3FEB44682B65B /* ZevClip.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ZevClip.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		320BFAD0195F6C551F287AC0 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		5BAF94C62FB5C5E506492DFD /* ClipboardHTTPServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardHTTPServer.swift; sourceTree = "<group>"; };
+		7AA610A696A5F3C375689D0B /* ZevClipApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZevClipApp.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		0DDF932BE4104494C481018E /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				320BFAD0195F6C551F287AC0 /* ContentView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		5A0371B9E8F1A7DF113C8B94 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				7AA610A696A5F3C375689D0B /* ZevClipApp.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		60F95B60D89E3DD2BE6A13EA /* ZevClip */ = {
+			isa = PBXGroup;
+			children = (
+				5A0371B9E8F1A7DF113C8B94 /* App */,
+				F02D8D283B2206D4FCADBA05 /* Services */,
+				66DE4E9CF14E575465868B29 /* Stores */,
+				0DDF932BE4104494C481018E /* Views */,
+			);
+			path = ZevClip;
+			sourceTree = "<group>";
+		};
+		66DE4E9CF14E575465868B29 /* Stores */ = {
+			isa = PBXGroup;
+			children = (
+				08BB497EA327D472BA901879 /* ClipboardReceiver.swift */,
+			);
+			path = Stores;
+			sourceTree = "<group>";
+		};
+		7D82C13FDCFC5D24E396E126 = {
+			isa = PBXGroup;
+			children = (
+				60F95B60D89E3DD2BE6A13EA /* ZevClip */,
+				ED36DB6D63CB1C593DF8CD68 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		ED36DB6D63CB1C593DF8CD68 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				21B01AEF6AD3FEB44682B65B /* ZevClip.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		F02D8D283B2206D4FCADBA05 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				5BAF94C62FB5C5E506492DFD /* ClipboardHTTPServer.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		023BD14986AF267CD65F31EE /* ZevClip */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 13C51D7459FB004BED71B5CE /* Build configuration list for PBXNativeTarget "ZevClip" */;
+			buildPhases = (
+				DFC8DC62D61BABF6AAC1F5F7 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ZevClip;
+			packageProductDependencies = (
+			);
+			productName = ZevClip;
+			productReference = 21B01AEF6AD3FEB44682B65B /* ZevClip.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		3410B55B6E4A199151291B30 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+				};
+			};
+			buildConfigurationList = 65B49480E40D14CBC7CCC285 /* Build configuration list for PBXProject "ZevClip" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 7D82C13FDCFC5D24E396E126;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = ED36DB6D63CB1C593DF8CD68 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				023BD14986AF267CD65F31EE /* ZevClip */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		DFC8DC62D61BABF6AAC1F5F7 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F720DDC4973512A61918258B /* ClipboardHTTPServer.swift in Sources */,
+				5B2A64EEB803EC30746CA86F /* ClipboardReceiver.swift in Sources */,
+				B8CA797C763F040EDE0356DE /* ContentView.swift in Sources */,
+				C405F78AD025A73FDB6198B8 /* ZevClipApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		3414632B878499164C5430B5 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		484412A76D735AADD1A6D64D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = ZevClip;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "ZevClip receives clipboard text from devices on your local network.";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.zevclip.receiver;
+				PRODUCT_NAME = ZevClip;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		9825F13708208FD2EAF7EB09 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = ZevClip;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "ZevClip receives clipboard text from devices on your local network.";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.zevclip.receiver;
+				PRODUCT_NAME = ZevClip;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		CD216C7C5937FFAA58FF0F9E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		13C51D7459FB004BED71B5CE /* Build configuration list for PBXNativeTarget "ZevClip" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				484412A76D735AADD1A6D64D /* Debug */,
+				9825F13708208FD2EAF7EB09 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		65B49480E40D14CBC7CCC285 /* Build configuration list for PBXProject "ZevClip" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				CD216C7C5937FFAA58FF0F9E /* Debug */,
+				3414632B878499164C5430B5 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 3410B55B6E4A199151291B30 /* Project object */;
+}

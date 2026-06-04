@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ZevClip</string>
+    <string name="screen_title">Send text to Mac</string>
+    <string name="screen_description">Both devices must be on the same local network.</string>
+    <string name="auto_send_title">Accessibility auto-send</string>
+    <string name="accessibility_enabled">Accessibility status: Enabled</string>
+    <string name="accessibility_not_enabled">Accessibility status: Not enabled</string>
+    <string name="open_accessibility_settings">Open Accessibility Settings</string>
+    <string name="last_auto_send_status">Last auto-send: %1$s</string>
+    <string name="auto_send_waiting_for_endpoint">Waiting for a valid Mac IP and port.</string>
+    <string name="manual_send_title">Manual send</string>
+    <string name="mac_ip_label">Mac IP address</string>
+    <string name="mac_ip_hint">192.168.1.10</string>
+    <string name="port_label">Port</string>
+    <string name="text_label">Text to send</string>
+    <string name="text_hint">Type or paste text here</string>
+    <string name="send">Send to Mac</string>
+    <string name="ready">Ready.</string>
+    <string name="sending_to_endpoint">Sending to %1$s…</string>
+    <string name="accessibility_service_description">Best-effort detection of copy actions so ZevClip can send copied text to your Mac.</string>
+</resources>
