@@ -9,7 +9,11 @@ object ZevClipPreferences {
     const val KEY_IP_ADDRESS = "mac_ip_address"
     const val KEY_PORT = "port"
     const val KEY_LAST_AUTO_STATUS = "last_auto_status"
-    const val KEY_LAST_AUTO_SENT_HASH = "last_auto_sent_hash"
+    const val KEY_LAST_TILE_STATUS = "last_tile_status"
+    const val KEY_DISCOVERY_STATUS = "discovery_status"
+
+    private const val KEY_LAST_SENT_HASH = "last_auto_sent_hash"
+    private const val KEY_LAST_TILE_SUBTITLE = "last_tile_subtitle"
 
     private const val PREFERENCES_NAME = "zevclip_preferences"
     private const val LEGACY_ACTIVITY_PREFERENCES_NAME = "MainActivity"
@@ -55,13 +59,50 @@ object ZevClipPreferences {
             .apply()
     }
 
-    fun lastAutoSentHash(context: Context): String? {
-        return preferences(context).getString(KEY_LAST_AUTO_SENT_HASH, null)
+    fun lastTileStatus(context: Context): String {
+        return preferences(context).getString(
+            KEY_LAST_TILE_STATUS,
+            "No Quick Settings sync attempt yet."
+        ).orEmpty()
     }
 
-    fun setLastAutoSentHash(context: Context, hash: String) {
+    fun setLastTileStatus(context: Context, status: String) {
         preferences(context).edit()
-            .putString(KEY_LAST_AUTO_SENT_HASH, hash)
+            .putString(KEY_LAST_TILE_STATUS, status)
+            .apply()
+    }
+
+    fun lastTileSubtitle(context: Context): String {
+        return preferences(context).getString(KEY_LAST_TILE_SUBTITLE, "Ready").orEmpty()
+    }
+
+    fun setLastTileResult(context: Context, subtitle: String, status: String) {
+        preferences(context).edit()
+            .putString(KEY_LAST_TILE_SUBTITLE, subtitle)
+            .putString(KEY_LAST_TILE_STATUS, status)
+            .apply()
+    }
+
+    fun discoveryStatus(context: Context): String {
+        return preferences(context).getString(
+            KEY_DISCOVERY_STATUS,
+            "No discovery attempt yet."
+        ).orEmpty()
+    }
+
+    fun setDiscoveryStatus(context: Context, status: String) {
+        preferences(context).edit()
+            .putString(KEY_DISCOVERY_STATUS, status)
+            .apply()
+    }
+
+    fun lastSentHash(context: Context): String? {
+        return preferences(context).getString(KEY_LAST_SENT_HASH, null)
+    }
+
+    fun setLastSentHash(context: Context, hash: String) {
+        preferences(context).edit()
+            .putString(KEY_LAST_SENT_HASH, hash)
             .apply()
     }
 
@@ -96,4 +137,3 @@ data class Endpoint(
     val ipAddress: String,
     val port: Int
 )
-

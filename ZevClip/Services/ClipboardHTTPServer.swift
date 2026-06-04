@@ -8,14 +8,20 @@ final class ClipboardHTTPServer {
 
     func start(
         port: UInt16,
+        serviceName: String,
+        serviceType: String,
         onReady: @escaping () -> Void,
+        onAdvertisingChanged: @escaping (Bool) -> Void,
         onFailure: @escaping (String) -> Void,
         onText: @escaping (String) -> Void
     ) {
         queue.async { [weak self] in
             self?.startOnQueue(
                 port: port,
+                serviceName: serviceName,
+                serviceType: serviceType,
                 onReady: onReady,
+                onAdvertisingChanged: onAdvertisingChanged,
                 onFailure: onFailure,
                 onText: onText
             )
@@ -37,7 +43,10 @@ final class ClipboardHTTPServer {
 
     private func startOnQueue(
         port: UInt16,
+        serviceName: String,
+        serviceType: String,
         onReady: @escaping () -> Void,
+        onAdvertisingChanged: @escaping (Bool) -> Void,
         onFailure: @escaping (String) -> Void,
         onText: @escaping (String) -> Void
     ) {
@@ -49,7 +58,23 @@ final class ClipboardHTTPServer {
 
         do {
             let newListener = try NWListener(using: .tcp, on: networkPort)
+            newListener.service = NWListener.Service(name: serviceName, type: serviceType)
             listener = newListener
+
+            newListener.serviceRegistrationUpdateHandler = { [weak self, weak newListener] change in
+                guard let self, let newListener, self.listener === newListener else {
+                    return
+                }
+
+                switch change {
+                case .add:
+                    onAdvertisingChanged(true)
+                case .remove:
+                    onAdvertisingChanged(false)
+                @unknown default:
+                    break
+                }
+            }
 
             newListener.stateUpdateHandler = { [weak self, weak newListener] state in
                 guard let self, let newListener, self.listener === newListener else {
@@ -62,6 +87,7 @@ final class ClipboardHTTPServer {
                 case .failed(let error):
                     self.listener = nil
                     newListener.cancel()
+                    onAdvertisingChanged(false)
                     let activeConnections = Array(self.connections.values)
                     self.connections.removeAll()
                     activeConnections.forEach { $0.cancel() }
@@ -78,6 +104,7 @@ final class ClipboardHTTPServer {
             newListener.start(queue: queue)
         } catch {
             listener = nil
+            onAdvertisingChanged(false)
             onFailure("Could not start the server: \(error.localizedDescription)")
         }
     }

@@ -1,9 +1,13 @@
 package com.zevclip.sender
 
 import android.app.Activity
+import android.app.StatusBarManager
+import android.content.ComponentName
 import android.content.Intent
 import android.content.SharedPreferences
 import android.graphics.Color
+import android.graphics.drawable.Icon
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.text.InputType
@@ -15,6 +19,7 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import java.util.Locale
 import kotlin.concurrent.thread
 
 class MainActivity : Activity() {
@@ -23,19 +28,43 @@ class MainActivity : Activity() {
     private lateinit var textInput: EditText
     private lateinit var sendButton: Button
     private lateinit var statusText: TextView
+    private lateinit var discoverButton: Button
+    private lateinit var discoveryStatusText: TextView
     private lateinit var accessibilityStatusText: TextView
     private lateinit var lastAutoStatusText: TextView
+    private lateinit var tileStatusText: TextView
+    private lateinit var discoveryManager: MacDiscoveryManager
 
     private val preferencesListener = SharedPreferences.OnSharedPreferenceChangeListener {
         _, key ->
-        if (key == ZevClipPreferences.KEY_LAST_AUTO_STATUS) {
-            runOnUiThread { refreshAutoSendStatus() }
+        if (
+            key == ZevClipPreferences.KEY_LAST_AUTO_STATUS ||
+            key == ZevClipPreferences.KEY_LAST_TILE_STATUS ||
+            key == ZevClipPreferences.KEY_DISCOVERY_STATUS
+        ) {
+            runOnUiThread { refreshSyncStatuses() }
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(createContentView())
+        discoveryManager = MacDiscoveryManager(
+            context = this,
+            onStatusChanged = { status, isDiscovering ->
+                if (!isDestroyed) {
+                    discoverButton.isEnabled = !isDiscovering
+                    discoveryStatusText.text = getString(R.string.discovery_status, status)
+                }
+            },
+            onEndpointResolved = { host, port ->
+                if (!isDestroyed) {
+                    ipAddressInput.setText(host)
+                    portInput.setText(String.format(Locale.US, "%d", port))
+                    ZevClipPreferences.saveEndpoint(this, host, port.toString())
+                }
+            }
+        )
     }
 
     override fun onStart() {
@@ -46,7 +75,7 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        refreshAutoSendStatus()
+        refreshSyncStatuses()
     }
 
     override fun onPause() {
@@ -64,6 +93,11 @@ class MainActivity : Activity() {
         super.onStop()
     }
 
+    override fun onDestroy() {
+        discoveryManager.stop()
+        super.onDestroy()
+    }
+
     private fun createContentView(): View {
         val preferences = ZevClipPreferences.preferences(this)
         val content = LinearLayout(this).apply {
@@ -77,6 +111,24 @@ class MainActivity : Activity() {
         content.addView(textView(getString(R.string.screen_description), 15f, Color.DKGRAY).apply {
             setPadding(0, dp(6), 0, dp(20))
         })
+
+        content.addView(sectionTitle(R.string.discovery_title))
+        content.addView(
+            textView(getString(R.string.discovery_instructions), 14f, Color.DKGRAY),
+            matchWidth()
+        )
+        discoverButton = Button(this).apply {
+            text = getString(R.string.discover_mac)
+            isAllCaps = false
+            setOnClickListener { discoveryManager.discover() }
+        }
+        content.addView(discoverButton, matchWidth(topMargin = 8))
+
+        discoveryStatusText = textView("", 14f, Color.DKGRAY).apply {
+            setPadding(0, dp(12), 0, dp(8))
+        }
+        content.addView(discoveryStatusText, matchWidth())
+        content.addView(divider(), dividerLayoutParams(topMargin = 12))
 
         content.addView(sectionTitle(R.string.auto_send_title))
         accessibilityStatusText = textView("", 15f, Color.DKGRAY)
@@ -94,6 +146,23 @@ class MainActivity : Activity() {
             setPadding(0, dp(12), 0, dp(8))
         }
         content.addView(lastAutoStatusText, matchWidth())
+        content.addView(divider(), dividerLayoutParams(topMargin = 12))
+
+        content.addView(sectionTitle(R.string.quick_settings_title))
+        content.addView(
+            textView(getString(R.string.quick_settings_instructions), 14f, Color.DKGRAY),
+            matchWidth()
+        )
+        content.addView(Button(this).apply {
+            text = getString(R.string.add_quick_settings_tile)
+            isAllCaps = false
+            setOnClickListener { requestQuickSettingsTile() }
+        }, matchWidth(topMargin = 8))
+
+        tileStatusText = textView("", 14f, Color.DKGRAY).apply {
+            setPadding(0, dp(12), 0, dp(8))
+        }
+        content.addView(tileStatusText, matchWidth())
         content.addView(divider(), dividerLayoutParams(topMargin = 12))
 
         content.addView(sectionTitle(R.string.manual_send_title))
@@ -206,7 +275,7 @@ class MainActivity : Activity() {
         statusText.text = message
     }
 
-    private fun refreshAutoSendStatus() {
+    private fun refreshSyncStatuses() {
         val enabled = AccessibilityServiceStatus.isEnabled(this)
         accessibilityStatusText.setTextColor(
             if (enabled) Color.rgb(24, 120, 54) else Color.rgb(180, 32, 32)
@@ -226,6 +295,47 @@ class MainActivity : Activity() {
         }
 
         lastAutoStatusText.text = getString(R.string.last_auto_send_status, lastAutoStatus)
+        tileStatusText.text = getString(
+            R.string.last_tile_status,
+            ZevClipPreferences.lastTileStatus(this)
+        )
+        discoveryStatusText.text = getString(
+            R.string.discovery_status,
+            ZevClipPreferences.discoveryStatus(this)
+        )
+    }
+
+    private fun requestQuickSettingsTile() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val statusBarManager = getSystemService(StatusBarManager::class.java)
+            val componentName = ComponentName(this, ClipboardTileService::class.java)
+            val icon = Icon.createWithResource(this, R.drawable.ic_sync_clipboard)
+
+            statusBarManager.requestAddTileService(
+                componentName,
+                getString(R.string.sync_clipboard_tile_label),
+                icon,
+                mainExecutor
+            ) { result ->
+                val status = when (result) {
+                    StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ADDED ->
+                        getString(R.string.tile_add_result_added)
+                    StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ALREADY_ADDED ->
+                        getString(R.string.tile_add_result_already_added)
+                    StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_NOT_ADDED ->
+                        getString(R.string.tile_add_result_not_added)
+                    else -> getString(R.string.tile_add_result_open_instructions)
+                }
+
+                ZevClipPreferences.setLastTileStatus(this, status)
+                refreshSyncStatuses()
+            }
+        } else {
+            ZevClipPreferences.setLastTileStatus(
+                this,
+                getString(R.string.tile_add_result_open_instructions)
+            )
+        }
     }
 
     private fun sectionTitle(textResource: Int): TextView {

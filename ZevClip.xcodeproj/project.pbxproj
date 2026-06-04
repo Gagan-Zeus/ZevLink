@@ -17,6 +17,7 @@
 		08BB497EA327D472BA901879 /* ClipboardReceiver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardReceiver.swift; sourceTree = "<group>"; };
 		21B01AEF6AD3FEB44682B65B /* ZevClip.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ZevClip.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		320BFAD0195F6C551F287AC0 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		4AFF2250F5F626D53C0BE6CF /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		5BAF94C62FB5C5E506492DFD /* ClipboardHTTPServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardHTTPServer.swift; sourceTree = "<group>"; };
 		7AA610A696A5F3C375689D0B /* ZevClipApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZevClipApp.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -41,6 +42,7 @@
 		60F95B60D89E3DD2BE6A13EA /* ZevClip */ = {
 			isa = PBXGroup;
 			children = (
+				4AFF2250F5F626D53C0BE6CF /* Info.plist */,
 				5A0371B9E8F1A7DF113C8B94 /* App */,
 				F02D8D283B2206D4FCADBA05 /* Services */,
 				66DE4E9CF14E575465868B29 /* Stores */,
@@ -210,10 +212,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = ZevClip;
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "ZevClip receives clipboard text from devices on your local network.";
+				INFOPLIST_FILE = ZevClip/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -234,10 +233,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = ZevClip;
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "ZevClip receives clipboard text from devices on your local network.";
+				INFOPLIST_FILE = ZevClip/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",

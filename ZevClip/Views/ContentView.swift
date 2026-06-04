@@ -52,6 +52,32 @@ struct ContentView: View {
             Divider()
 
             VStack(alignment: .leading, spacing: 8) {
+                Text("Local Discovery")
+                    .font(.headline)
+
+                LabeledContent("Status") {
+                    Text(receiver.isAdvertising ? "Advertising" : "Not advertising")
+                        .foregroundStyle(receiver.isAdvertising ? .green : .secondary)
+                }
+
+                LabeledContent("Service") {
+                    Text(ClipboardReceiver.serviceName)
+                }
+
+                LabeledContent("Type") {
+                    Text(ClipboardReceiver.serviceType)
+                        .font(.system(.body, design: .monospaced))
+                }
+
+                LabeledContent("Port") {
+                    Text("\(ClipboardReceiver.port)")
+                        .font(.system(.body, design: .monospaced))
+                }
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Text("Last Received")
                         .font(.headline)
@@ -77,7 +103,6 @@ struct ContentView: View {
             .frame(maxHeight: .infinity)
         }
         .padding(24)
-        .frame(minWidth: 500, minHeight: 340)
+        .frame(minWidth: 500, minHeight: 500)
     }
 }
-

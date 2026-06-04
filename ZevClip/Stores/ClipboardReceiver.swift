@@ -24,9 +24,12 @@ final class ClipboardReceiver: ObservableObject {
     }
 
     static let port: UInt16 = 9876
+    static let serviceName = "ZevClip Mac Receiver"
+    static let serviceType = "_zevclip._tcp"
 
     @Published private(set) var status: ServerStatus = .stopped
     @Published private(set) var detailMessage = "Server is stopped."
+    @Published private(set) var isAdvertising = false
     @Published private(set) var lastReceivedText: String?
     @Published private(set) var lastReceivedAt: Date?
 
@@ -48,19 +51,28 @@ final class ClipboardReceiver: ObservableObject {
         guard canStart else { return }
 
         status = .starting
+        isAdvertising = false
         detailMessage = "Opening port \(Self.port)…"
 
         server.start(
             port: Self.port,
+            serviceName: Self.serviceName,
+            serviceType: Self.serviceType,
             onReady: { [weak self] in
                 Task { @MainActor in
                     self?.status = .running
                     self?.detailMessage = "Listening for POST /clipboard requests."
                 }
             },
+            onAdvertisingChanged: { [weak self] isAdvertising in
+                Task { @MainActor in
+                    self?.isAdvertising = isAdvertising
+                }
+            },
             onFailure: { [weak self] message in
                 Task { @MainActor in
                     self?.status = .failed(message)
+                    self?.isAdvertising = false
                     self?.detailMessage = message
                 }
             },
@@ -77,6 +89,7 @@ final class ClipboardReceiver: ObservableObject {
 
         server.stop()
         status = .stopped
+        isAdvertising = false
         detailMessage = "Server is stopped."
     }
 
@@ -101,4 +114,3 @@ final class ClipboardReceiver: ObservableObject {
         detailMessage = "Received \(text.utf8.count) UTF-8 bytes."
     }
 }
-
