@@ -18,7 +18,14 @@ class ClipboardAccessibilityService : AccessibilityService() {
 
     override fun onServiceConnected() {
         super.onServiceConnected()
+        ZevClipPreferences.setAccessibilityServiceState(
+            this,
+            bound = true,
+            event = "connected",
+            connectedAtMillis = System.currentTimeMillis()
+        )
         Log.i(TAG, "Accessibility service connected; waiting for likely copy events")
+        AccessibilityServiceStatus.logCurrentState(this, "onServiceConnected")
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -53,9 +60,18 @@ class ClipboardAccessibilityService : AccessibilityService() {
         Log.w(TAG, "Accessibility service interrupted")
     }
 
+    override fun onUnbind(intent: android.content.Intent?): Boolean {
+        ZevClipPreferences.setAccessibilityServiceState(this, bound = false, event = "unbound")
+        Log.i(TAG, "Accessibility service unbound")
+        AccessibilityServiceStatus.logCurrentState(this, "onUnbind")
+        return super.onUnbind(intent)
+    }
+
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
+        ZevClipPreferences.setAccessibilityServiceState(this, bound = false, event = "destroyed")
         Log.i(TAG, "Accessibility service destroyed")
+        AccessibilityServiceStatus.logCurrentState(this, "onDestroy")
         super.onDestroy()
     }
 
@@ -104,7 +120,9 @@ class ClipboardAccessibilityService : AccessibilityService() {
         ClipboardSyncCoordinator.sendIfChanged(this, text) { result ->
             when (result) {
                 is ClipboardSyncResult.Success -> {
-                    val time = DateFormat.getTimeInstance(DateFormat.MEDIUM).format(Date())
+                    val now = System.currentTimeMillis()
+                    val time = DateFormat.getTimeInstance(DateFormat.MEDIUM).format(Date(now))
+                    ZevClipPreferences.setLastAutoSendAt(this, now)
                     updateStatus("Succeeded at $time (${result.characterCount} characters).")
                     Log.i(TAG, "Automatic clipboard send succeeded")
                 }
@@ -134,7 +152,7 @@ class ClipboardAccessibilityService : AccessibilityService() {
     }
 
     private companion object {
-        const val TAG = "ZevClip"
+        const val TAG = "ZevClipAccessibility"
         const val DEBOUNCE_MS = 750L
         const val CLIPBOARD_READ_DELAY_MS = 180L
     }

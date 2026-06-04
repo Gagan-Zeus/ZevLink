@@ -81,7 +81,7 @@ struct ContentView: View {
                 Text("Enter this token in the Android app. Requests without this token are rejected.")
                     .foregroundStyle(.secondary)
 
-                PairingQRCodeView(token: receiver.pairingToken)
+                PairingQRCodeView(token: receiver.pairingToken, deviceId: receiver.deviceId)
 
                 Text(receiver.pairingToken.isEmpty ? "Token unavailable" : receiver.pairingToken)
                     .font(.system(.body, design: .monospaced))
@@ -127,6 +127,12 @@ struct ContentView: View {
                 LabeledContent("Port") {
                     Text("\(ClipboardReceiver.port)")
                         .font(.system(.body, design: .monospaced))
+                }
+
+                LabeledContent("Device ID") {
+                    Text(receiver.deviceId)
+                        .font(.system(.body, design: .monospaced))
+                        .textSelection(.enabled)
                 }
             }
 

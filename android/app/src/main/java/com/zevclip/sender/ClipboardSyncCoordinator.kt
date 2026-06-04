@@ -36,8 +36,7 @@ object ClipboardSyncCoordinator {
             return
         }
 
-        val pairingToken = ZevClipPreferences.pairingToken(context)
-        if (pairingToken.isBlank()) {
+        if (ZevClipPreferences.pairingToken(context).isBlank()) {
             onComplete(ClipboardSyncResult.NoToken)
             return
         }
@@ -59,7 +58,7 @@ object ClipboardSyncCoordinator {
         }
 
         networkExecutor.execute {
-            val result = ClipboardSender.send(endpoint.ipAddress, endpoint.port, text, pairingToken)
+            val result = ResilientClipboardSender.sendSavedEndpoint(context, text)
 
             synchronized(sendStateLock) {
                 pendingHashes -= textHash

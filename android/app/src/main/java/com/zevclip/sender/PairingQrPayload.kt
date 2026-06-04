@@ -5,6 +5,7 @@ import org.json.JSONObject
 
 data class PairingQrPayload(
     val name: String,
+    val deviceId: String?,
     val host: String,
     val port: Int,
     val token: String
@@ -14,6 +15,7 @@ data class PairingQrPayload(
             return try {
                 val json = JSONObject(rawValue)
                 val name = json.optString("name").trim()
+                val deviceId = json.optString("deviceId").trim().takeIf { it.isNotEmpty() }
                 val host = json.optString("host").trim()
                 val port = json.optInt("port", -1)
                 val token = json.optString("token").trim()
@@ -28,7 +30,7 @@ data class PairingQrPayload(
                     token.isEmpty() ->
                         Result.failure(IllegalArgumentException("QR pairing data is missing a token."))
                     else ->
-                        Result.success(PairingQrPayload(name, host, port, token))
+                        Result.success(PairingQrPayload(name, deviceId, host, port, token))
                 }
             } catch (_: JSONException) {
                 Result.failure(IllegalArgumentException("QR code is not valid ZevClip JSON."))

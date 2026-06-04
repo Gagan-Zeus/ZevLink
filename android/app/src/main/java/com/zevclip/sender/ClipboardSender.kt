@@ -9,13 +9,19 @@ import java.net.URL
 
 sealed interface SendResult {
     data class Success(val message: String) : SendResult
-    data class Failure(val message: String) : SendResult
+    data class Failure(
+        val message: String,
+        val retryableWithDiscovery: Boolean = false
+    ) : SendResult
 }
 
 sealed interface PullResult {
     data class Success(val text: String) : PullResult
     data object Empty : PullResult
-    data class Failure(val message: String) : PullResult
+    data class Failure(
+        val message: String,
+        val retryableWithDiscovery: Boolean = false
+    ) : PullResult
 }
 
 object ClipboardSender {
@@ -57,13 +63,25 @@ object ClipboardSender {
                 SendResult.Failure("Mac receiver returned HTTP $responseCode$detail")
             }
         } catch (_: SocketTimeoutException) {
-            SendResult.Failure("Connection timed out. Check the Mac IP, port, and Wi-Fi network.")
+            SendResult.Failure(
+                "Connection timed out. Check the Mac IP, port, and Wi-Fi network.",
+                retryableWithDiscovery = true
+            )
         } catch (_: ConnectException) {
-            SendResult.Failure("Connection refused. Confirm the Mac receiver is running on port $port.")
+            SendResult.Failure(
+                "Connection refused. Confirm the Mac receiver is running on port $port.",
+                retryableWithDiscovery = true
+            )
         } catch (_: NoRouteToHostException) {
-            SendResult.Failure("Mac is unreachable. Confirm both devices are on the same local network.")
+            SendResult.Failure(
+                "Mac is unreachable. Confirm both devices are on the same local network.",
+                retryableWithDiscovery = true
+            )
         } catch (error: IOException) {
-            SendResult.Failure("Network error: ${error.message ?: "request failed"}")
+            SendResult.Failure(
+                "Network error: ${error.message ?: "request failed"}",
+                retryableWithDiscovery = true
+            )
         } catch (error: SecurityException) {
             SendResult.Failure("Android blocked the request: ${error.message ?: "permission denied"}")
         } finally {
@@ -99,13 +117,25 @@ object ClipboardSender {
                 }
             }
         } catch (_: SocketTimeoutException) {
-            PullResult.Failure("Connection timed out. Check the Mac IP, port, and Wi-Fi network.")
+            PullResult.Failure(
+                "Connection timed out. Check the Mac IP, port, and Wi-Fi network.",
+                retryableWithDiscovery = true
+            )
         } catch (_: ConnectException) {
-            PullResult.Failure("Connection refused. Confirm the Mac receiver is running on port $port.")
+            PullResult.Failure(
+                "Connection refused. Confirm the Mac receiver is running on port $port.",
+                retryableWithDiscovery = true
+            )
         } catch (_: NoRouteToHostException) {
-            PullResult.Failure("Mac is unreachable. Confirm both devices are on the same local network.")
+            PullResult.Failure(
+                "Mac is unreachable. Confirm both devices are on the same local network.",
+                retryableWithDiscovery = true
+            )
         } catch (error: IOException) {
-            PullResult.Failure("Network error: ${error.message ?: "request failed"}")
+            PullResult.Failure(
+                "Network error: ${error.message ?: "request failed"}",
+                retryableWithDiscovery = true
+            )
         } catch (error: SecurityException) {
             PullResult.Failure("Android blocked the clipboard pull: ${error.message ?: "permission denied"}")
         } finally {

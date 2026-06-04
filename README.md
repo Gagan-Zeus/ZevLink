@@ -37,8 +37,11 @@ port.
 
 The **Pairing** section shows the current token. It is generated randomly and
 stored in macOS Keychain. It also shows a QR code that Android can scan to save
-the Mac host, port, and pairing token automatically. Use **Regenerate Pairing
-Token** if you need to invalidate previously paired Android installs.
+the Mac device identity, host, port, and pairing token automatically. The device
+identity is generated once and persisted in app defaults; Bonjour advertises the
+same `deviceId` in its TXT record so Android can find this Mac again if its IP
+address changes. Use **Regenerate Pairing Token** if you need to invalidate
+previously paired Android installs.
 
 Launch at Login is managed with the native macOS `SMAppService` API and the
 preference is persisted in app defaults. The pairing token remains persisted in
@@ -53,10 +56,16 @@ on the same subnet for Bonjour discovery.
    **Advertising**.
 2. Open ZevClip on Android.
 3. Tap **Scan Pairing QR** and scan the QR code in the Mac settings window.
-4. Confirm Android reports the saved Mac host, port, and token.
+4. Confirm Android reports the saved Mac host, port, token, and paired identity.
 5. Send a manual test message, use one of the Android-to-Mac clipboard sync
    actions, or tap **Pull Mac Clipboard** to copy the Mac clipboard onto
    Android.
+
+QR pairing is intended to be one-time. If your router later gives the Mac a new
+IP address, Android first tries the saved endpoint, then uses Bonjour to resolve
+`_zevclip._tcp` and prefers the receiver whose TXT `deviceId` matches the paired
+Mac. Older QR payloads without `deviceId` still work, but Android cannot
+rediscover by identity until you scan a newer QR code.
 
 Manual setup still works: tap **Discover Mac** or type the Mac IP/host, then
 copy the Mac pairing token into Android and tap **Save Pairing Token**.

@@ -1,6 +1,7 @@
 package com.zevclip.sender
 
 import android.app.Activity
+import android.content.ActivityNotFoundException
 import android.app.StatusBarManager
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -9,21 +10,31 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.graphics.Color
 import android.graphics.drawable.Icon
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.os.PowerManager
 import android.provider.Settings
 import android.text.InputType
+import android.util.Log
 import android.view.Gravity
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
+import java.text.DateFormat
+import java.security.MessageDigest
+import java.util.Date
 import java.util.Locale
 import kotlin.concurrent.thread
 
@@ -34,22 +45,36 @@ class MainActivity : Activity() {
     private lateinit var textInput: EditText
     private lateinit var sendButton: Button
     private lateinit var pullButton: Button
+    private lateinit var autoPullCheckBox: CheckBox
+    private lateinit var autoPullStatusText: TextView
     private lateinit var scanPairingQrButton: Button
     private lateinit var statusText: TextView
     private lateinit var discoverButton: Button
     private lateinit var discoveryStatusText: TextView
     private lateinit var pairingStatusText: TextView
     private lateinit var accessibilityStatusText: TextView
+    private lateinit var backgroundHealthStatusText: TextView
+    private lateinit var recheckAccessibilityButton: Button
     private lateinit var lastAutoStatusText: TextView
     private lateinit var tileStatusText: TextView
     private lateinit var discoveryManager: MacDiscoveryManager
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var isActivityResumed = false
+    private var autoPullInFlight = false
+    private var autoPullSession = 0
+    private val autoPullRunnable = Runnable { performAutoPull() }
 
     private val preferencesListener = SharedPreferences.OnSharedPreferenceChangeListener {
         _, key ->
         if (
             key == ZevClipPreferences.KEY_LAST_AUTO_STATUS ||
             key == ZevClipPreferences.KEY_LAST_TILE_STATUS ||
-            key == ZevClipPreferences.KEY_DISCOVERY_STATUS
+            key == ZevClipPreferences.KEY_DISCOVERY_STATUS ||
+            key == ZevClipPreferences.KEY_ACCESSIBILITY_SERVICE_BOUND ||
+            key == ZevClipPreferences.KEY_LAST_ACCESSIBILITY_SERVICE_EVENT ||
+            key == ZevClipPreferences.KEY_LAST_SERVICE_CONNECTED_AT ||
+            key == ZevClipPreferences.KEY_LAST_AUTO_SEND_AT ||
+            key == ZevClipPreferences.KEY_LAST_AUTO_PULL_STATUS
         ) {
             runOnUiThread { refreshSyncStatuses() }
         }
@@ -84,10 +109,17 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        isActivityResumed = true
+        AccessibilityServiceStatus.logCurrentState(this, "MainActivity.onResume")
         refreshSyncStatuses()
+        scheduleAccessibilityRechecks()
+        startAutoPullIfEnabled()
     }
 
     override fun onPause() {
+        isActivityResumed = false
+        stopAutoPull()
+        mainHandler.removeCallbacksAndMessages(null)
         ZevClipPreferences.saveEndpoint(
             this,
             ipAddressInput.text.toString(),
@@ -104,6 +136,8 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        stopAutoPull()
+        mainHandler.removeCallbacksAndMessages(null)
         discoveryManager.stop()
         super.onDestroy()
     }
@@ -194,10 +228,55 @@ class MainActivity : Activity() {
             }
         }, matchWidth(topMargin = 8))
 
+        recheckAccessibilityButton = Button(this).apply {
+            text = getString(R.string.recheck_accessibility_permission)
+            isAllCaps = false
+            setOnClickListener {
+                AccessibilityServiceStatus.logCurrentState(
+                    this@MainActivity,
+                    "Manual accessibility recheck"
+                )
+                refreshSyncStatuses()
+            }
+        }
+        content.addView(recheckAccessibilityButton, matchWidth(topMargin = 8))
+
         lastAutoStatusText = textView("", 14f, Color.DKGRAY).apply {
             setPadding(0, dp(12), 0, dp(8))
         }
         content.addView(lastAutoStatusText, matchWidth())
+
+        content.addView(divider(), dividerLayoutParams(topMargin = 12))
+        content.addView(sectionTitle(R.string.background_health_title))
+        backgroundHealthStatusText = textView("", 14f, Color.DKGRAY).apply {
+            setPadding(0, 0, 0, dp(8))
+        }
+        content.addView(backgroundHealthStatusText, matchWidth())
+
+        content.addView(Button(this).apply {
+            text = getString(R.string.open_app_info)
+            isAllCaps = false
+            setOnClickListener { openAppInfoSettings() }
+        }, matchWidth(topMargin = 8))
+
+        content.addView(Button(this).apply {
+            text = getString(R.string.open_battery_optimization_settings)
+            isAllCaps = false
+            setOnClickListener { openBatteryOptimizationSettings() }
+        }, matchWidth(topMargin = 8))
+
+        content.addView(Button(this).apply {
+            text = getString(R.string.request_ignore_battery_optimization)
+            isAllCaps = false
+            setOnClickListener { requestIgnoreBatteryOptimizations() }
+        }, matchWidth(topMargin = 8))
+
+        content.addView(Button(this).apply {
+            text = getString(R.string.open_autostart_settings)
+            isAllCaps = false
+            setOnClickListener { openAutoStartSettings() }
+        }, matchWidth(topMargin = 8))
+
         content.addView(divider(), dividerLayoutParams(topMargin = 12))
 
         content.addView(sectionTitle(R.string.quick_settings_title))
@@ -253,6 +332,28 @@ class MainActivity : Activity() {
             setOnClickListener { pullMacClipboard() }
         }
         content.addView(pullButton, matchWidth(topMargin = 8))
+
+        autoPullCheckBox = CheckBox(this).apply {
+            text = getString(R.string.auto_pull_while_open)
+            isChecked = preferences.getBoolean(ZevClipPreferences.KEY_AUTO_PULL_ENABLED, false)
+            setOnCheckedChangeListener { _, isChecked ->
+                ZevClipPreferences.setAutoPullEnabled(this@MainActivity, isChecked)
+                if (isChecked) {
+                    saveEndpointAndTokenFromUi()
+                    setAutoPullStatus(getString(R.string.auto_pull_starting))
+                    startAutoPullIfEnabled()
+                } else {
+                    stopAutoPull()
+                    setAutoPullStatus(getString(R.string.auto_pull_off))
+                }
+            }
+        }
+        content.addView(autoPullCheckBox, matchWidth(topMargin = 8))
+
+        autoPullStatusText = textView("", 14f, Color.DKGRAY).apply {
+            setPadding(0, dp(8), 0, dp(8))
+        }
+        content.addView(autoPullStatusText, matchWidth())
 
         content.addView(fieldLabel(R.string.text_label))
         textInput = EditText(this).apply {
@@ -324,10 +425,11 @@ class MainActivity : Activity() {
         )
 
         thread(name = "ZevClipSender") {
-            val result = ClipboardSender.send(ipAddress, port, text, pairingToken)
+            val result = ResilientClipboardSender.sendSavedEndpoint(applicationContext, text)
             runOnUiThread {
                 if (isDestroyed) return@runOnUiThread
 
+                refreshEndpointInputsFromPreferencesIfUnfocused()
                 sendButton.isEnabled = true
                 when (result) {
                     is SendResult.Success -> showSuccess(result.message)
@@ -372,13 +474,14 @@ class MainActivity : Activity() {
         )
 
         thread(name = "ZevClipPuller") {
-            val result = ClipboardSender.pull(ipAddress, port, pairingToken)
+            val result = ResilientClipboardPuller.pullSavedEndpoint(applicationContext)
             runOnUiThread {
                 if (isDestroyed) return@runOnUiThread
 
+                refreshEndpointInputsFromPreferences()
                 pullButton.isEnabled = true
                 when (result) {
-                    is PullResult.Success -> copyPulledTextToAndroidClipboard(result.text)
+                    is PullResult.Success -> copyPulledTextToAndroidClipboard(result.text, isAutoPull = false)
                     PullResult.Empty -> showFailure(getString(R.string.pull_empty))
                     is PullResult.Failure -> showFailure(result.message)
                 }
@@ -386,15 +489,136 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun copyPulledTextToAndroidClipboard(text: String) {
-        try {
+    private fun copyPulledTextToAndroidClipboard(text: String, isAutoPull: Boolean): Boolean {
+        return try {
             val clipboard = getSystemService(ClipboardManager::class.java)
             val clip = ClipData.newPlainText(getString(R.string.mac_clipboard_clip_label), text)
             clipboard.setPrimaryClip(clip)
-            showSuccess(getString(R.string.pull_success, text.toByteArray(Charsets.UTF_8).size))
+            val textHash = sha256(text)
+            ZevClipPreferences.setLastPulledHash(this, textHash)
+            ZevClipPreferences.setLastSentHash(this, textHash)
+
+            if (isAutoPull) {
+                val status = getString(
+                    R.string.auto_pull_success,
+                    DateFormat.getTimeInstance(DateFormat.MEDIUM).format(Date())
+                )
+                setAutoPullStatus(status)
+                showSuccess(status)
+            } else {
+                showSuccess(getString(R.string.pull_success, text.toByteArray(Charsets.UTF_8).size))
+            }
+            true
         } catch (error: SecurityException) {
             showFailure("Android blocked the clipboard update: ${error.message ?: "permission denied"}")
+            false
         }
+    }
+
+    private fun startAutoPullIfEnabled() {
+        if (!shouldAutoPull()) {
+            return
+        }
+
+        mainHandler.removeCallbacks(autoPullRunnable)
+        mainHandler.post(autoPullRunnable)
+        Log.i(TAG, "Foreground auto-pull started")
+    }
+
+    private fun stopAutoPull() {
+        autoPullSession += 1
+        mainHandler.removeCallbacks(autoPullRunnable)
+        Log.i(TAG, "Foreground auto-pull stopped")
+    }
+
+    private fun performAutoPull() {
+        if (!shouldAutoPull()) {
+            return
+        }
+
+        if (autoPullInFlight) {
+            scheduleNextAutoPull()
+            return
+        }
+
+        autoPullInFlight = true
+        val session = autoPullSession
+        Log.d(TAG, "Foreground auto-pull checking Mac clipboard")
+        thread(name = "ZevClipAutoPuller") {
+            val result = ResilientClipboardPuller.pullSavedEndpoint(
+                applicationContext,
+                AUTO_PULL_REDISCOVERY_COOLDOWN_MS
+            )
+
+            runOnUiThread {
+                autoPullInFlight = false
+                if (session != autoPullSession || !shouldAutoPull()) {
+                    Log.i(TAG, "Discarded foreground auto-pull result after activity paused")
+                    return@runOnUiThread
+                }
+
+                refreshEndpointInputsFromPreferencesIfUnfocused()
+                when (result) {
+                    is PullResult.Success -> handleAutoPullSuccess(result.text)
+                    PullResult.Empty -> Unit
+                    is PullResult.Failure -> {
+                        setAutoPullStatus(getString(R.string.auto_pull_failed, result.message))
+                        Log.w(TAG, "Foreground auto-pull failed: ${result.message}")
+                    }
+                }
+                scheduleNextAutoPull()
+            }
+        }
+    }
+
+    private fun handleAutoPullSuccess(text: String) {
+        if (text.isEmpty()) {
+            return
+        }
+
+        val textHash = sha256(text)
+        if (textHash == ZevClipPreferences.lastPulledHash(this)) {
+            return
+        }
+
+        if (copyPulledTextToAndroidClipboard(text, isAutoPull = true)) {
+            Log.i(TAG, "Foreground auto-pull copied ${text.length} characters")
+        }
+    }
+
+    private fun scheduleNextAutoPull() {
+        if (!shouldAutoPull()) {
+            return
+        }
+
+        mainHandler.removeCallbacks(autoPullRunnable)
+        mainHandler.postDelayed(autoPullRunnable, AUTO_PULL_INTERVAL_MS)
+    }
+
+    private fun shouldAutoPull(): Boolean {
+        return isActivityResumed && ZevClipPreferences.isAutoPullEnabled(this)
+    }
+
+    private fun setAutoPullStatus(status: String) {
+        if (ZevClipPreferences.lastAutoPullStatus(this) != status) {
+            ZevClipPreferences.setLastAutoPullStatus(this, status)
+        }
+        autoPullStatusText.text = status
+    }
+
+    private fun saveEndpointAndTokenFromUi() {
+        ZevClipPreferences.saveEndpoint(
+            this,
+            ipAddressInput.text.toString(),
+            portInput.text.toString()
+        )
+        ZevClipPreferences.savePairingToken(this, pairingTokenInput.text.toString())
+    }
+
+    private fun sha256(text: String): String {
+        return MessageDigest.getInstance("SHA-256")
+            .digest(text.toByteArray(Charsets.UTF_8))
+            .joinToString(separator = "") { byte -> "%02x".format(byte.toInt() and 0xff) }
     }
 
     private fun scanPairingQr() {
@@ -436,6 +660,7 @@ class MainActivity : Activity() {
                 pairingTokenInput.setText(payload.token)
                 ZevClipPreferences.saveEndpoint(this, payload.host, payload.port.toString())
                 ZevClipPreferences.savePairingToken(this, payload.token)
+                ZevClipPreferences.saveDeviceId(this, payload.deviceId)
                 ZevClipPreferences.setDiscoveryStatus(
                     this,
                     getString(R.string.qr_pairing_saved_discovery_status, payload.name, payload.host, payload.port)
@@ -473,16 +698,24 @@ class MainActivity : Activity() {
     }
 
     private fun refreshSyncStatuses() {
-        val enabled = AccessibilityServiceStatus.isEnabled(this)
+        val accessibilityState = AccessibilityServiceStatus.currentState(this)
         accessibilityStatusText.setTextColor(
-            if (enabled) Color.rgb(24, 120, 54) else Color.rgb(180, 32, 32)
+            if (accessibilityState.enabled) Color.rgb(24, 120, 54) else Color.rgb(180, 32, 32)
         )
         accessibilityStatusText.text = getString(
-            if (enabled) {
-                R.string.accessibility_enabled
+            R.string.accessibility_state_details,
+            if (accessibilityState.enabled) {
+                getString(R.string.accessibility_permission_enabled)
             } else {
-                R.string.accessibility_not_enabled
-            }
+                getString(R.string.accessibility_permission_disabled)
+            },
+            if (accessibilityState.serviceBound) {
+                getString(R.string.yes)
+            } else {
+                getString(R.string.no)
+            },
+            accessibilityState.lastServiceEvent,
+            accessibilityState.diagnostic
         )
 
         val lastAutoStatus = if (ZevClipPreferences.endpoint(this) == null) {
@@ -492,6 +725,8 @@ class MainActivity : Activity() {
         }
 
         lastAutoStatusText.text = getString(R.string.last_auto_send_status, lastAutoStatus)
+        autoPullStatusText.text = ZevClipPreferences.lastAutoPullStatus(this)
+        refreshBackgroundHealthStatus(accessibilityState)
         tileStatusText.text = getString(
             R.string.last_tile_status,
             ZevClipPreferences.lastTileStatus(this)
@@ -512,6 +747,171 @@ class MainActivity : Activity() {
                 R.string.pairing_token_not_saved
             }
         )
+    }
+
+    private fun scheduleAccessibilityRechecks() {
+        listOf(750L, 2_000L, 4_000L).forEach { delayMs ->
+            mainHandler.postDelayed({
+                if (!isDestroyed) {
+                    AccessibilityServiceStatus.logCurrentState(
+                        this,
+                        "MainActivity delayed accessibility recheck ${delayMs}ms"
+                    )
+                    refreshSyncStatuses()
+                }
+            }, delayMs)
+        }
+    }
+
+    private fun openAppInfoSettings() {
+        startActivity(
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = Uri.fromParts("package", packageName, null)
+            }
+        )
+    }
+
+    private fun openBatteryOptimizationSettings() {
+        val intents = listOf(
+            Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
+            Intent(Settings.ACTION_BATTERY_SAVER_SETTINGS),
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = Uri.fromParts("package", packageName, null)
+            }
+        )
+
+        openFirstAvailableIntent(
+            intents,
+            getString(R.string.settings_screen_unavailable)
+        )
+    }
+
+    private fun requestIgnoreBatteryOptimizations() {
+        if (isIgnoringBatteryOptimizations()) {
+            showSuccess(getString(R.string.battery_optimization_already_ignored))
+            return
+        }
+
+        val requestIntent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+            data = Uri.parse("package:$packageName")
+        }
+
+        openFirstAvailableIntent(
+            listOf(requestIntent, Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)),
+            getString(R.string.battery_optimization_request_unavailable)
+        )
+    }
+
+    private fun openAutoStartSettings() {
+        val intents = listOf(
+            Intent().setComponent(
+                ComponentName(
+                    "com.vivo.permissionmanager",
+                    "com.vivo.permissionmanager.activity.BgStartUpManagerActivity"
+                )
+            ),
+            Intent().setComponent(
+                ComponentName(
+                    "com.vivo.permissionmanager",
+                    "com.vivo.permissionmanager.activity.PurviewTabActivity"
+                )
+            ),
+            Intent().setComponent(
+                ComponentName(
+                    "com.iqoo.secure",
+                    "com.iqoo.secure.ui.phoneoptimize.AddWhiteListActivity"
+                )
+            ),
+            Intent().setComponent(
+                ComponentName(
+                    "com.iqoo.secure",
+                    "com.iqoo.secure.ui.phoneoptimize.BgStartUpManager"
+                )
+            ),
+            Intent().setComponent(
+                ComponentName(
+                    "com.vivo.pem",
+                    "com.vivo.pem.MainActivity"
+                )
+            ),
+            Intent().setComponent(
+                ComponentName(
+                    "com.iqoo.powersaving",
+                    "com.iqoo.powersaving.PowerManagerSettingsActivity"
+                )
+            ),
+            Intent().setComponent(
+                ComponentName(
+                    "com.iqoo.powersaving",
+                    "com.iqoo.powersaving.activity.AppOptimizationActivity"
+                )
+            )
+        )
+
+        openFirstAvailableIntent(
+            intents,
+            getString(R.string.autostart_settings_manual_instructions)
+        )
+    }
+
+    private fun openFirstAvailableIntent(intents: List<Intent>, fallbackMessage: String) {
+        for (intent in intents) {
+            try {
+                startActivity(intent)
+                return
+            } catch (_: ActivityNotFoundException) {
+                continue
+            } catch (_: SecurityException) {
+                continue
+            }
+        }
+
+        showFailure(fallbackMessage)
+        Toast.makeText(this, fallbackMessage, Toast.LENGTH_LONG).show()
+    }
+
+    private fun refreshBackgroundHealthStatus(accessibilityState: AccessibilityServiceStatus.State) {
+        val isIgnoringBatteryOptimizations = isIgnoringBatteryOptimizations()
+        val warning = if (isIgnoringBatteryOptimizations) {
+            ""
+        } else {
+            "\n${getString(R.string.battery_optimization_warning)}"
+        }
+
+        backgroundHealthStatusText.setTextColor(
+            if (accessibilityState.enabled && isIgnoringBatteryOptimizations) {
+                Color.rgb(24, 120, 54)
+            } else {
+                Color.rgb(180, 92, 0)
+            }
+        )
+        backgroundHealthStatusText.text = getString(
+            R.string.background_health_details,
+            yesNo(accessibilityState.enabled),
+            yesNo(isIgnoringBatteryOptimizations),
+            getString(R.string.autostart_status_unknown_open_settings),
+            formatTimestamp(ZevClipPreferences.lastServiceConnectedAt(this)),
+            formatTimestamp(ZevClipPreferences.lastAutoSendAt(this)),
+            warning
+        )
+    }
+
+    private fun isIgnoringBatteryOptimizations(): Boolean {
+        val powerManager = getSystemService(PowerManager::class.java)
+        return powerManager.isIgnoringBatteryOptimizations(packageName)
+    }
+
+    private fun yesNo(value: Boolean): String {
+        return getString(if (value) R.string.yes else R.string.no)
+    }
+
+    private fun formatTimestamp(timestampMillis: Long): String {
+        if (timestampMillis <= 0L) {
+            return getString(R.string.never)
+        }
+
+        return DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.MEDIUM)
+            .format(Date(timestampMillis))
     }
 
     private fun requestQuickSettingsTile() {
@@ -545,6 +945,24 @@ class MainActivity : Activity() {
                 getString(R.string.tile_add_result_open_instructions)
             )
         }
+    }
+
+    private fun refreshEndpointInputsFromPreferences() {
+        val endpoint = ZevClipPreferences.endpoint(this) ?: return
+        ipAddressInput.setText(endpoint.ipAddress)
+        portInput.setText(String.format(Locale.US, "%d", endpoint.port))
+    }
+
+    private fun refreshEndpointInputsFromPreferencesIfUnfocused() {
+        if (!ipAddressInput.hasFocus() && !portInput.hasFocus()) {
+            refreshEndpointInputsFromPreferences()
+        }
+    }
+
+    private companion object {
+        const val TAG = "ZevClip"
+        const val AUTO_PULL_INTERVAL_MS = 2_500L
+        const val AUTO_PULL_REDISCOVERY_COOLDOWN_MS = 30_000L
     }
 
     private fun sectionTitle(textResource: Int): TextView {

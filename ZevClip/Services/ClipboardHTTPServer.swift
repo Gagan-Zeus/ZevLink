@@ -10,6 +10,7 @@ final class ClipboardHTTPServer {
         port: UInt16,
         serviceName: String,
         serviceType: String,
+        deviceId: String,
         tokenProvider: @escaping () -> String,
         onReady: @escaping () -> Void,
         onAdvertisingChanged: @escaping (Bool) -> Void,
@@ -22,6 +23,7 @@ final class ClipboardHTTPServer {
                 port: port,
                 serviceName: serviceName,
                 serviceType: serviceType,
+                deviceId: deviceId,
                 tokenProvider: tokenProvider,
                 onReady: onReady,
                 onAdvertisingChanged: onAdvertisingChanged,
@@ -49,6 +51,7 @@ final class ClipboardHTTPServer {
         port: UInt16,
         serviceName: String,
         serviceType: String,
+        deviceId: String,
         tokenProvider: @escaping () -> String,
         onReady: @escaping () -> Void,
         onAdvertisingChanged: @escaping (Bool) -> Void,
@@ -64,7 +67,12 @@ final class ClipboardHTTPServer {
 
         do {
             let newListener = try NWListener(using: .tcp, on: networkPort)
-            newListener.service = NWListener.Service(name: serviceName, type: serviceType)
+            let txtRecord = NWTXTRecord(["deviceId": deviceId])
+            newListener.service = NWListener.Service(
+                name: serviceName,
+                type: serviceType,
+                txtRecord: txtRecord
+            )
             listener = newListener
 
             newListener.serviceRegistrationUpdateHandler = { [weak self, weak newListener] change in

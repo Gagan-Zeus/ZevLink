@@ -32,6 +32,7 @@ final class ClipboardReceiver: ObservableObject {
     @Published private(set) var isAdvertising = false
     @Published private(set) var pairingToken = ""
     @Published private(set) var pairingStatus = "Pairing token is not loaded."
+    @Published private(set) var deviceId = ""
     @Published private(set) var lastReceivedText: String?
     @Published private(set) var lastReceivedAt: Date?
 
@@ -39,6 +40,7 @@ final class ClipboardReceiver: ObservableObject {
     private let tokenProvider = PairingTokenProvider(token: "")
 
     init() {
+        deviceId = DeviceIdentityStore.loadOrCreateDeviceId()
         loadPairingToken()
         startServer()
     }
@@ -62,6 +64,7 @@ final class ClipboardReceiver: ObservableObject {
             port: Self.port,
             serviceName: Self.serviceName,
             serviceType: Self.serviceType,
+            deviceId: deviceId,
             tokenProvider: { [tokenProvider] in
                 tokenProvider.currentToken()
             },

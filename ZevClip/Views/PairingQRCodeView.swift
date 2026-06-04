@@ -4,6 +4,7 @@ import SwiftUI
 
 struct PairingQRCodeView: View {
     let token: String
+    let deviceId: String
 
     @State private var host = LocalNetworkHost.currentPairingHost()
 
@@ -12,7 +13,7 @@ struct PairingQRCodeView: View {
             Text("Pairing QR")
                 .font(.headline)
 
-            Text("Scan this from Android to save the Mac host, port, and pairing token.")
+            Text("Scan this from Android to save the Mac identity, host, port, and pairing token.")
                 .foregroundStyle(.secondary)
 
             HStack(alignment: .top, spacing: 16) {
@@ -44,6 +45,13 @@ struct PairingQRCodeView: View {
                             .font(.system(.body, design: .monospaced))
                     }
 
+                    LabeledContent("Device ID") {
+                        Text(deviceId)
+                            .font(.system(.caption, design: .monospaced))
+                            .textSelection(.enabled)
+                            .lineLimit(2)
+                    }
+
                     Button("Refresh Host") {
                         host = LocalNetworkHost.currentPairingHost()
                     }
@@ -71,6 +79,7 @@ struct PairingQRCodeView: View {
     private var pairingPayloadData: Data? {
         let payload: [String: Any] = [
             "name": ClipboardReceiver.serviceName,
+            "deviceId": deviceId,
             "host": host,
             "port": Int(ClipboardReceiver.port),
             "token": token
