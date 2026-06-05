@@ -18,6 +18,7 @@ import android.provider.Settings
 import android.text.InputType
 import android.view.Gravity
 import android.view.View
+import android.view.WindowInsets
 import android.view.inputmethod.EditorInfo
 import android.widget.Button
 import android.widget.EditText
@@ -328,6 +329,7 @@ class MainActivity : Activity() {
         return ScrollView(this).apply {
             isFillViewport = true
             addView(content)
+            applySystemBarPadding(content)
         }
     }
 
@@ -784,6 +786,35 @@ class MainActivity : Activity() {
             textSize = size
             setTextColor(color)
         }
+    }
+
+    private fun View.applySystemBarPadding(content: View) {
+        val basePadding = dp(24)
+
+        setOnApplyWindowInsetsListener { _, insets ->
+            val bars = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                insets.getInsets(WindowInsets.Type.systemBars())
+            } else {
+                @Suppress("DEPRECATION")
+                android.graphics.Insets.of(
+                    insets.systemWindowInsetLeft,
+                    insets.systemWindowInsetTop,
+                    insets.systemWindowInsetRight,
+                    insets.systemWindowInsetBottom
+                )
+            }
+
+            setPadding(0, bars.top, 0, bars.bottom)
+            content.setPadding(
+                basePadding + bars.left,
+                basePadding,
+                basePadding + bars.right,
+                basePadding
+            )
+            insets
+        }
+
+        requestApplyInsets()
     }
 
     private fun matchWidth(topMargin: Int = 0): LinearLayout.LayoutParams {
