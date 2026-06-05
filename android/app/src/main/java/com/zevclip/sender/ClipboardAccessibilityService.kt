@@ -2,7 +2,6 @@ package com.zevclip.sender
 
 import android.accessibilityservice.AccessibilityService
 import android.content.ClipboardManager
-import android.content.Intent
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -18,6 +17,11 @@ class ClipboardAccessibilityService : AccessibilityService() {
         }
 
         lastClipboardSignalAt = now
+        if (now - lastCandidateAt > CLIPBOARD_CHANGE_COPY_WINDOW_MS) {
+            Log.d(TAG, "Ignoring clipboard change without a recent user copy action")
+            return@OnPrimaryClipChangedListener
+        }
+
         Log.i(
             TAG,
             "Primary clipboard changed; uiVisible=${ZevClipApplication.isUiVisible(application)}"
@@ -31,7 +35,6 @@ class ClipboardAccessibilityService : AccessibilityService() {
     private var lastCandidateSignature = ""
     private var lastCandidateAt = 0L
     private var lastClipboardSignalAt = 0L
-    private var lastFocusedReadAt = 0L
     private var selectedText: String? = null
     private var selectedTextAt = 0L
     private var clipboardListenerRegistered = false
@@ -196,8 +199,7 @@ class ClipboardAccessibilityService : AccessibilityService() {
                 ?.toString()
                 ?.takeIf { it.isNotBlank() }
         } catch (error: SecurityException) {
-            Log.w(TAG, "Android denied background clipboard read; trying focused fallback", error)
-            openFocusedClipboardReader()
+            AccessibilityClipboardAutoSender.recordClipboardReadDenied(this, error)
             return
         }
 
@@ -207,35 +209,13 @@ class ClipboardAccessibilityService : AccessibilityService() {
                 Log.i(TAG, "Using Accessibility selected-text fallback")
                 AccessibilityClipboardAutoSender.sendIfChanged(this, selectionFallback)
             }
-            else -> openFocusedClipboardReader()
-        }
-    }
-
-    private fun openFocusedClipboardReader() {
-        val now = SystemClock.elapsedRealtime()
-        if (now - lastFocusedReadAt < FOCUSED_READ_DEBOUNCE_MS) {
-            return
-        }
-        lastFocusedReadAt = now
-
-        ZevClipPreferences.setLastAutoStatus(
-            this,
-            "Android hid the background clipboard; trying focused auto-sync."
-        )
-        Log.i(TAG, "Launching focused clipboard reader for OEM-restricted clipboard access")
-
-        val intent = Intent(this, AccessibilityClipboardCaptureActivity::class.java).apply {
-            addFlags(
-                Intent.FLAG_ACTIVITY_NEW_TASK or
-                    Intent.FLAG_ACTIVITY_NO_ANIMATION or
-                    Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS
-            )
-        }
-
-        try {
-            startActivity(intent)
-        } catch (error: RuntimeException) {
-            AccessibilityClipboardAutoSender.recordFocusedReadFailure(this, error)
+            else -> {
+                ZevClipPreferences.setLastAutoStatus(
+                    this,
+                    "Skipped: clipboard text unavailable or not text."
+                )
+                Log.i(TAG, "Skipping clipboard auto-send because no text was readable")
+            }
         }
     }
 
@@ -243,7 +223,7 @@ class ClipboardAccessibilityService : AccessibilityService() {
         const val TAG = "ZevClipAccessibility"
         const val DEBOUNCE_MS = 750L
         const val CLIPBOARD_READ_DELAY_MS = 180L
-        const val FOCUSED_READ_DEBOUNCE_MS = 1_500L
+        const val CLIPBOARD_CHANGE_COPY_WINDOW_MS = 2_000L
         const val SELECTION_MAX_AGE_MS = 15_000L
     }
 }

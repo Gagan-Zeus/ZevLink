@@ -68,17 +68,6 @@ object AccessibilityClipboardAutoSender {
         Log.w(TAG, "Android denied clipboard access; uiVisible=$uiVisible", error)
     }
 
-    fun recordFocusedReadFailure(context: Context, error: RuntimeException) {
-        val appContext = context.applicationContext
-        val uiVisible = isUiVisible(appContext)
-        updateStatus(
-            appContext,
-            "Failed: Android blocked the focused clipboard-read fallback.",
-            uiVisible
-        )
-        Log.w(TAG, "Android blocked focused clipboard reader; uiVisible=$uiVisible", error)
-    }
-
     private fun updateStatus(context: Context, status: String, uiVisible: Boolean) {
         ZevClipPreferences.setLastAutoStatus(context, status)
         Log.i(TAG, "$status uiVisible=$uiVisible")

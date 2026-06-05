@@ -37,13 +37,6 @@
             android:noHistory="true"
             android:theme="@style/Theme.ZevClip" />
 
-        <activity
-            android:name=".AccessibilityClipboardCaptureActivity"
-            android:excludeFromRecents="true"
-            android:exported="false"
-            android:noHistory="true"
-            android:theme="@style/Theme.ZevClip.ClipboardCapture" />
-
         <service
             android:name=".ClipboardAccessibilityService"
             android:exported="true"
