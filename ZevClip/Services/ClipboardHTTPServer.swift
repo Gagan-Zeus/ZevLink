@@ -15,7 +15,8 @@ final class ClipboardHTTPServer {
         onReady: @escaping () -> Void,
         onAdvertisingChanged: @escaping (Bool) -> Void,
         onFailure: @escaping (String) -> Void,
-        onText: @escaping (String) -> Void
+        onText: @escaping (String) -> Void,
+        onAndroidNotification: @escaping (Data) -> Void
     ) {
         queue.async { [weak self] in
             self?.startOnQueue(
@@ -27,7 +28,8 @@ final class ClipboardHTTPServer {
                 onReady: onReady,
                 onAdvertisingChanged: onAdvertisingChanged,
                 onFailure: onFailure,
-                onText: onText
+                onText: onText,
+                onAndroidNotification: onAndroidNotification
             )
         }
     }
@@ -54,7 +56,8 @@ final class ClipboardHTTPServer {
         onReady: @escaping () -> Void,
         onAdvertisingChanged: @escaping (Bool) -> Void,
         onFailure: @escaping (String) -> Void,
-        onText: @escaping (String) -> Void
+        onText: @escaping (String) -> Void,
+        onAndroidNotification: @escaping (Data) -> Void
     ) {
         guard listener == nil else { return }
         guard let networkPort = NWEndpoint.Port(rawValue: port) else {
@@ -112,7 +115,8 @@ final class ClipboardHTTPServer {
                 self?.accept(
                     connection,
                     tokenProvider: tokenProvider,
-                    onText: onText
+                    onText: onText,
+                    onAndroidNotification: onAndroidNotification
                 )
             }
 
@@ -127,7 +131,8 @@ final class ClipboardHTTPServer {
     private func accept(
         _ connection: NWConnection,
         tokenProvider: @escaping () -> String,
-        onText: @escaping (String) -> Void
+        onText: @escaping (String) -> Void,
+        onAndroidNotification: @escaping (Data) -> Void
     ) {
         let id = ObjectIdentifier(connection)
         let httpConnection = HTTPConnection(
@@ -135,6 +140,7 @@ final class ClipboardHTTPServer {
             queue: queue,
             tokenProvider: tokenProvider,
             onText: onText,
+            onAndroidNotification: onAndroidNotification,
             onClose: { [weak self] in
                 self?.connections[id] = nil
             }
@@ -161,11 +167,13 @@ private final class HTTPConnection {
     private let queue: DispatchQueue
     private let tokenProvider: () -> String
     private let onText: (String) -> Void
+    private let onAndroidNotification: (Data) -> Void
     private let onClose: () -> Void
 
     private var buffer = Data()
     private var expectedRequestLength: Int?
     private var headerEndIndex: Int?
+    private var requestPath: String?
     private var responseStarted = false
     private var didFinish = false
 
@@ -174,12 +182,14 @@ private final class HTTPConnection {
         queue: DispatchQueue,
         tokenProvider: @escaping () -> String,
         onText: @escaping (String) -> Void,
+        onAndroidNotification: @escaping (Data) -> Void,
         onClose: @escaping () -> Void
     ) {
         self.connection = connection
         self.queue = queue
         self.tokenProvider = tokenProvider
         self.onText = onText
+        self.onAndroidNotification = onAndroidNotification
         self.onClose = onClose
     }
 
@@ -255,13 +265,24 @@ private final class HTTPConnection {
         }
 
         let bodyData = buffer.subdata(in: headerEndIndex..<expectedRequestLength)
-        guard let text = String(data: bodyData, encoding: .utf8) else {
-            respond(status: "400 Bad Request", body: "Request body must be valid UTF-8 text.")
-            return true
-        }
 
-        onText(text)
-        respond(status: "200 OK", body: "Clipboard updated.")
+        switch requestPath {
+        case "/clipboard":
+            guard let text = String(data: bodyData, encoding: .utf8) else {
+                respond(status: "400 Bad Request", body: "Request body must be valid UTF-8 text.")
+                return true
+            }
+
+            onText(text)
+            respond(status: "200 OK", body: "Clipboard updated.")
+
+        case "/android-notification":
+            onAndroidNotification(bodyData)
+            respond(status: "200 OK", body: "Notification mirrored.")
+
+        default:
+            respond(status: "404 Not Found", body: "Unknown path.")
+        }
         return true
     }
 
@@ -299,8 +320,9 @@ private final class HTTPConnection {
             return true
         }
 
-        guard requestParts[1] == "/clipboard" else {
-            respond(status: "404 Not Found", body: "Use /clipboard.")
+        let path = String(requestParts[1])
+        guard path == "/clipboard" || path == "/android-notification" else {
+            respond(status: "404 Not Found", body: "Use /clipboard or /android-notification.")
             return true
         }
 
@@ -320,6 +342,7 @@ private final class HTTPConnection {
         }
 
         headerEndIndex = separatorRange.upperBound
+        requestPath = path
 
         guard let contentLengthValue = headers["content-length"] else {
             respond(status: "411 Length Required", body: "Content-Length is required.")

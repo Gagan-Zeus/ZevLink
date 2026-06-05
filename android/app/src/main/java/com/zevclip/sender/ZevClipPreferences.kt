@@ -24,6 +24,8 @@ object ZevClipPreferences {
     const val KEY_ANDROID_RECEIVER_LAST_RECEIVED_AT = "android_receiver_last_received_at"
     const val KEY_ANDROID_RECEIVER_LAST_RECEIVED_STATUS = "android_receiver_last_received_status"
     const val KEY_CLIPBOARD_SYNC_ENABLED = "clipboard_sync_enabled"
+    const val KEY_NOTIFICATION_MIRROR_CONNECTED = "notification_mirror_connected"
+    const val KEY_NOTIFICATION_MIRROR_STATUS = "notification_mirror_status"
 
     private const val KEY_ANDROID_DEVICE_ID = "android_device_id"
     private const val KEY_LAST_TILE_SUBTITLE = "last_tile_subtitle"
@@ -186,6 +188,34 @@ object ZevClipPreferences {
     fun setClipboardSyncEnabled(context: Context, isEnabled: Boolean) {
         preferences(context).edit()
             .putBoolean(KEY_CLIPBOARD_SYNC_ENABLED, isEnabled)
+            .apply()
+    }
+
+    fun isNotificationMirrorConnected(context: Context): Boolean {
+        return preferences(context).getBoolean(KEY_NOTIFICATION_MIRROR_CONNECTED, false)
+    }
+
+    fun notificationMirrorStatus(context: Context): String {
+        return preferences(context).getString(
+            KEY_NOTIFICATION_MIRROR_STATUS,
+            "Notification mirroring is waiting for permission."
+        ).orEmpty()
+    }
+
+    fun setNotificationMirrorState(
+        context: Context,
+        isConnected: Boolean,
+        status: String
+    ) {
+        preferences(context).edit()
+            .putBoolean(KEY_NOTIFICATION_MIRROR_CONNECTED, isConnected)
+            .putString(KEY_NOTIFICATION_MIRROR_STATUS, status)
+            .apply()
+    }
+
+    fun setLastNotificationMirrorStatus(context: Context, status: String) {
+        preferences(context).edit()
+            .putString(KEY_NOTIFICATION_MIRROR_STATUS, status)
             .apply()
     }
 

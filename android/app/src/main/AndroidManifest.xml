@@ -71,6 +71,16 @@
             android:name=".AndroidClipboardReceiverService"
             android:exported="false" />
 
+        <service
+            android:name=".AndroidNotificationMirrorService"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
         <meta-data
             android:name="com.google.mlkit.vision.DEPENDENCIES"
             android:value="barcode_ui" />

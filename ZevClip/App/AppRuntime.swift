@@ -32,11 +32,16 @@ final class ZevClipRuntime {
     )
 
     private init() {
+        MacNotificationPresenter.shared.requestAuthorizationIfNeeded()
+
         receiver.onPasteboardWrite = { [weak macClipboardWatcher] text, changeCount in
             macClipboardWatcher?.markProgrammaticPasteboardWrite(
                 text: text,
                 changeCount: changeCount
             )
+        }
+        receiver.onAndroidNotification = { notification in
+            MacNotificationPresenter.shared.show(notification)
         }
         macClipboardWatcher.onTextChanged = { [weak self] change in
             self?.androidClipboardSender.send(change)
@@ -244,6 +249,12 @@ private final class StatusItemController: NSObject {
             menu.addItem(.separator())
             addDisabledItem("From Android", to: menu)
             addDisabledItem(lastReceivedText.truncatedForMenu(), to: menu)
+        }
+
+        if let notification = receiver.lastMirroredNotification {
+            menu.addItem(.separator())
+            addDisabledItem("Last Notification", to: menu)
+            addDisabledItem(notification.displayTitle.truncatedForMenu(), to: menu)
         }
 
         menu.addItem(.separator())

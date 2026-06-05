@@ -35,8 +35,11 @@ final class ClipboardReceiver: ObservableObject {
     @Published private(set) var deviceId = ""
     @Published private(set) var lastReceivedText: String?
     @Published private(set) var lastReceivedAt: Date?
+    @Published private(set) var lastMirroredNotification: AndroidMirroredNotification?
+    @Published private(set) var lastMirroredNotificationAt: Date?
 
     var onPasteboardWrite: ((String, Int) -> Void)?
+    var onAndroidNotification: ((AndroidMirroredNotification) -> Void)?
 
     private let server = ClipboardHTTPServer()
     private let tokenProvider = PairingTokenProvider(token: "")
@@ -91,6 +94,11 @@ final class ClipboardReceiver: ObservableObject {
             onText: { [weak self] text in
                 Task { @MainActor in
                     self?.receive(text)
+                }
+            },
+            onAndroidNotification: { [weak self] data in
+                Task { @MainActor in
+                    self?.receiveAndroidNotification(data)
                 }
             }
         )
@@ -153,5 +161,17 @@ final class ClipboardReceiver: ObservableObject {
         lastReceivedText = text
         lastReceivedAt = Date()
         detailMessage = "Received \(text.utf8.count) UTF-8 bytes."
+    }
+
+    private func receiveAndroidNotification(_ data: Data) {
+        do {
+            let notification = try JSONDecoder().decode(AndroidMirroredNotification.self, from: data)
+            lastMirroredNotification = notification
+            lastMirroredNotificationAt = Date()
+            detailMessage = "Mirrored Android notification from \(notification.appName)."
+            onAndroidNotification?(notification)
+        } catch {
+            detailMessage = "Received Android notification, but could not decode it."
+        }
     }
 }

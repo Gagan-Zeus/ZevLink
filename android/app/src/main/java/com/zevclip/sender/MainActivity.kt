@@ -52,6 +52,7 @@ class MainActivity : Activity() {
     private lateinit var startClipboardSyncButton: Button
     private lateinit var stopClipboardSyncButton: Button
     private lateinit var accessibilityStatusText: TextView
+    private lateinit var notificationMirrorStatusText: TextView
     private lateinit var lastAutoStatusText: TextView
     private lateinit var discoveryManager: MacDiscoveryManager
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -71,7 +72,9 @@ class MainActivity : Activity() {
             key == ZevClipPreferences.KEY_ANDROID_RECEIVER_ADVERTISING ||
             key == ZevClipPreferences.KEY_ANDROID_RECEIVER_LAST_RECEIVED_AT ||
             key == ZevClipPreferences.KEY_ANDROID_RECEIVER_LAST_RECEIVED_STATUS ||
-            key == ZevClipPreferences.KEY_CLIPBOARD_SYNC_ENABLED
+            key == ZevClipPreferences.KEY_CLIPBOARD_SYNC_ENABLED ||
+            key == ZevClipPreferences.KEY_NOTIFICATION_MIRROR_CONNECTED ||
+            key == ZevClipPreferences.KEY_NOTIFICATION_MIRROR_STATUS
         ) {
             runOnUiThread { refreshSyncStatuses() }
         }
@@ -209,6 +212,19 @@ class MainActivity : Activity() {
             isAllCaps = false
             setOnClickListener {
                 startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            }
+        }, matchWidth(topMargin = 8))
+
+        notificationMirrorStatusText = textView("", 14f, Color.DKGRAY).apply {
+            setPadding(0, dp(12), 0, 0)
+        }
+        content.addView(notificationMirrorStatusText, matchWidth())
+
+        content.addView(Button(this).apply {
+            text = getString(R.string.open_notification_access_settings)
+            isAllCaps = false
+            setOnClickListener {
+                startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
             }
         }, matchWidth(topMargin = 8))
 
@@ -520,6 +536,22 @@ class MainActivity : Activity() {
             } else {
                 getString(R.string.accessibility_permission_disabled)
             }
+        )
+
+        val notificationAccessEnabled = NotificationAccessStatus.isEnabled(this)
+        val notificationMirrorConnected = ZevClipPreferences.isNotificationMirrorConnected(this)
+        notificationMirrorStatusText.setTextColor(
+            if (notificationAccessEnabled && notificationMirrorConnected) {
+                Color.rgb(24, 120, 54)
+            } else {
+                Color.rgb(180, 92, 0)
+            }
+        )
+        notificationMirrorStatusText.text = getString(
+            R.string.notification_mirror_compact_status,
+            if (notificationAccessEnabled) getString(R.string.accessibility_permission_enabled)
+            else getString(R.string.accessibility_permission_disabled),
+            ZevClipPreferences.notificationMirrorStatus(this)
         )
 
         val lastAutoStatus = if (endpoint == null) {
