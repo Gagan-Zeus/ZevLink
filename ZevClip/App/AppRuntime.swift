@@ -210,7 +210,7 @@ private final class StatusItemController: NSObject {
 
     private func menuBarImage() -> NSImage? {
         if let image = NSImage(named: "MenuBarIcon") {
-            image.isTemplate = true
+            image.isTemplate = false
             return image
         }
 
