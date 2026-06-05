@@ -10,6 +10,7 @@ import java.net.SocketTimeoutException
 import java.net.URL
 
 data class AndroidNotificationMirrorPayload(
+    val event: String,
     val appName: String,
     val packageName: String,
     val title: String?,
@@ -20,6 +21,7 @@ data class AndroidNotificationMirrorPayload(
 ) {
     fun toJsonBytes(): ByteArray {
         return JSONObject()
+            .put("event", event)
             .put("appName", appName)
             .put("packageName", packageName)
             .put("title", title)

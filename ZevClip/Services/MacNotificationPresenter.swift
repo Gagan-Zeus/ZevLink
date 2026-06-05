@@ -2,6 +2,7 @@ import Foundation
 import UserNotifications
 
 struct AndroidMirroredNotification: Decodable {
+    let event: String?
     let appName: String
     let packageName: String
     let title: String?
@@ -20,6 +21,18 @@ struct AndroidMirroredNotification: Decodable {
             .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
         return candidates.first ?? "New notification"
+    }
+
+    var isRemoval: Bool {
+        event == "removed"
+    }
+
+    var macNotificationIdentifier: String {
+        [
+            "android",
+            packageName,
+            notificationKey ?? "unknown"
+        ].joined(separator: ".")
     }
 }
 
@@ -44,6 +57,11 @@ final class MacNotificationPresenter: NSObject, UNUserNotificationCenterDelegate
     func show(_ notification: AndroidMirroredNotification) {
         requestAuthorizationIfNeeded()
 
+        if notification.isRemoval {
+            remove(notification)
+            return
+        }
+
         let content = UNMutableNotificationContent()
         content.title = notification.displayTitle
         content.body = notification.displayBody
@@ -53,13 +71,19 @@ final class MacNotificationPresenter: NSObject, UNUserNotificationCenterDelegate
             "notificationKey": notification.notificationKey ?? ""
         ]
 
-        let identifier = [
-            "android",
-            notification.packageName,
-            notification.notificationKey ?? UUID().uuidString
-        ].joined(separator: ".")
+        center.add(
+            UNNotificationRequest(
+                identifier: notification.macNotificationIdentifier,
+                content: content,
+                trigger: nil
+            )
+        )
+    }
 
-        center.add(UNNotificationRequest(identifier: identifier, content: content, trigger: nil))
+    private func remove(_ notification: AndroidMirroredNotification) {
+        let identifiers = [notification.macNotificationIdentifier]
+        center.removeDeliveredNotifications(withIdentifiers: identifiers)
+        center.removePendingNotificationRequests(withIdentifiers: identifiers)
     }
 
     func userNotificationCenter(

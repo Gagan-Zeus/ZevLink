@@ -39,23 +39,27 @@ class AndroidNotificationMirrorService : NotificationListenerService() {
             return
         }
 
-        val payload = payload(from = sbn) ?: return
+        val payload = postedPayload(from = sbn) ?: return
         if (shouldSkip(payload, sbn)) {
             return
         }
 
-        networkExecutor.execute {
-            val result = AndroidNotificationMirrorSender.sendSavedEndpoint(this, payload)
-            val status = when (result) {
-                is SendResult.Success -> "Mirrored ${payload.appName} notification."
-                is SendResult.Failure -> "Notification mirror failed: ${result.message}"
-            }
-            ZevClipPreferences.setLastNotificationMirrorStatus(this, status)
-            Log.i(TAG, status)
-        }
+        send(payload)
     }
 
-    private fun payload(from: StatusBarNotification): AndroidNotificationMirrorPayload? {
+    override fun onNotificationRemoved(sbn: StatusBarNotification?) {
+        sbn ?: return
+        if (!ZevClipPreferences.isClipboardSyncEnabled(this)) {
+            return
+        }
+        if (sbn.packageName == packageName) {
+            return
+        }
+
+        send(removedPayload(from = sbn))
+    }
+
+    private fun postedPayload(from: StatusBarNotification): AndroidNotificationMirrorPayload? {
         val sbn = from
         if (sbn.packageName == packageName) {
             return null
@@ -81,6 +85,7 @@ class AndroidNotificationMirrorService : NotificationListenerService() {
         }
 
         return AndroidNotificationMirrorPayload(
+            event = EVENT_POSTED,
             appName = appName,
             packageName = sbn.packageName,
             title = title.takeUnless { it.isNullOrBlank() },
@@ -89,6 +94,37 @@ class AndroidNotificationMirrorService : NotificationListenerService() {
             notificationKey = sbn.key,
             postedAtMillis = sbn.postTime
         )
+    }
+
+    private fun removedPayload(from: StatusBarNotification): AndroidNotificationMirrorPayload {
+        return AndroidNotificationMirrorPayload(
+            event = EVENT_REMOVED,
+            appName = appNameForPackage(from.packageName),
+            packageName = from.packageName,
+            title = null,
+            body = null,
+            subtext = null,
+            notificationKey = from.key,
+            postedAtMillis = from.postTime
+        )
+    }
+
+    private fun send(payload: AndroidNotificationMirrorPayload) {
+        networkExecutor.execute {
+            val result = AndroidNotificationMirrorSender.sendSavedEndpoint(this, payload)
+            val status = when (result) {
+                is SendResult.Success -> {
+                    if (payload.event == EVENT_REMOVED) {
+                        "Cleared mirrored ${payload.appName} notification."
+                    } else {
+                        "Mirrored ${payload.appName} notification."
+                    }
+                }
+                is SendResult.Failure -> "Notification mirror failed: ${result.message}"
+            }
+            ZevClipPreferences.setLastNotificationMirrorStatus(this, status)
+            Log.i(TAG, status)
+        }
     }
 
     private fun shouldSkip(
@@ -152,5 +188,7 @@ class AndroidNotificationMirrorService : NotificationListenerService() {
         const val DUPLICATE_WINDOW_MS = 30_000L
         const val UPDATE_THROTTLE_MS = 2_000L
         const val MAX_TRACKED_NOTIFICATIONS = 100
+        const val EVENT_POSTED = "posted"
+        const val EVENT_REMOVED = "removed"
     }
 }

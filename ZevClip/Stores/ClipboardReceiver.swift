@@ -168,7 +168,9 @@ final class ClipboardReceiver: ObservableObject {
             let notification = try JSONDecoder().decode(AndroidMirroredNotification.self, from: data)
             lastMirroredNotification = notification
             lastMirroredNotificationAt = Date()
-            detailMessage = "Mirrored Android notification from \(notification.appName)."
+            detailMessage = notification.isRemoval
+                ? "Cleared Android notification from \(notification.appName)."
+                : "Mirrored Android notification from \(notification.appName)."
             onAndroidNotification?(notification)
         } catch {
             detailMessage = "Received Android notification, but could not decode it."
