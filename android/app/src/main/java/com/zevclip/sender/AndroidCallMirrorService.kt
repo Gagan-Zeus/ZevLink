@@ -270,7 +270,6 @@ class AndroidCallMirrorService : Service() {
         ) {
             return AndroidCallActionResult(false, "There is no active Android call to end.")
         }
-
         val activeCallId = currentCallId
         if (!callId.isNullOrBlank() && activeCallId != null && callId != activeCallId) {
             return AndroidCallActionResult(false, "That Android call is no longer active.")
@@ -473,7 +472,11 @@ class AndroidCallMirrorService : Service() {
         private const val ACTION_ACCEPT = "accept"
         private const val ACTION_REJECT = "reject"
         private const val ACTION_SILENCE = "silence"
-        private val SUPPORTED_ACTIONS = setOf(ACTION_ACCEPT, ACTION_REJECT, ACTION_SILENCE)
+        private val SUPPORTED_ACTIONS = setOf(
+            ACTION_ACCEPT,
+            ACTION_REJECT,
+            ACTION_SILENCE
+        )
 
         @Volatile
         private var activeService: AndroidCallMirrorService? = null

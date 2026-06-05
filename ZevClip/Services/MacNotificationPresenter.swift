@@ -299,16 +299,20 @@ private final class CallControlPanelController: NSObject {
         self.onAction = onAction
 
         panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 340, height: 136),
-            styleMask: [.titled, .nonactivatingPanel],
+            contentRect: NSRect(x: 0, y: 0, width: 336, height: 126),
+            styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
-        panel.title = "Android Call"
         panel.level = .floating
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.hidesOnDeactivate = false
         panel.isReleasedWhenClosed = false
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        panel.isMovableByWindowBackground = true
+        panel.appearance = NSAppearance(named: .darkAqua)
 
         super.init()
         configureContent()
@@ -352,19 +356,25 @@ private final class CallControlPanelController: NSObject {
     private func configureContent() {
         guard let contentView = panel.contentView else { return }
 
+        contentView.wantsLayer = true
+        contentView.layer?.backgroundColor = NSColor(calibratedWhite: 0.07, alpha: 0.96).cgColor
+        contentView.layer?.cornerRadius = 22
+        contentView.layer?.masksToBounds = true
+
         let stack = NSStackView()
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 7
+        stack.spacing = 6
         stack.translatesAutoresizingMaskIntoConstraints = false
 
-        titleLabel.font = .systemFont(ofSize: 17, weight: .semibold)
+        titleLabel.font = .systemFont(ofSize: 16, weight: .semibold)
+        titleLabel.textColor = .white
         titleLabel.lineBreakMode = .byTruncatingTail
         bodyLabel.font = .systemFont(ofSize: 13)
-        bodyLabel.textColor = .secondaryLabelColor
+        bodyLabel.textColor = NSColor.white.withAlphaComponent(0.74)
         bodyLabel.lineBreakMode = .byTruncatingTail
-        statusLabel.font = .systemFont(ofSize: 12)
-        statusLabel.textColor = .secondaryLabelColor
+        statusLabel.font = .systemFont(ofSize: 11)
+        statusLabel.textColor = NSColor.white.withAlphaComponent(0.64)
 
         let buttonStack = NSStackView()
         buttonStack.orientation = .horizontal
@@ -386,8 +396,8 @@ private final class CallControlPanelController: NSObject {
 
         contentView.addSubview(stack)
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
-            stack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
+            stack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 18),
+            stack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -18),
             stack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 14),
             stack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -14),
             titleLabel.widthAnchor.constraint(equalTo: stack.widthAnchor),
@@ -399,7 +409,8 @@ private final class CallControlPanelController: NSObject {
         button.target = self
         button.action = action
         button.bezelStyle = .rounded
-        button.controlSize = .regular
+        button.controlSize = .small
+        button.font = .systemFont(ofSize: 13, weight: .medium)
     }
 
     private func startTimer() {
