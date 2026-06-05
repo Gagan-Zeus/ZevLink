@@ -52,6 +52,39 @@ final class AndroidClipboardSender: ObservableObject {
         refreshConnectionStatus()
     }
 
+    func dismissAndroidNotification(notificationKey: String) {
+        let trimmedKey = notificationKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedKey.isEmpty else { return }
+        guard let endpoint = resolvedEndpoint else {
+            discoverAndroidReceiver()
+            return
+        }
+
+        let token = tokenProvider().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !token.isEmpty else { return }
+
+        Task { [weak self] in
+            let result = await AndroidClipboardHTTPClient.dismissNotification(
+                notificationKey: trimmedKey,
+                on: endpoint,
+                token: token
+            )
+
+            await MainActor.run {
+                switch result {
+                case .success:
+                    self?.status = "Dismissed Android notification from Mac."
+                case .failure(let message, let isRetryable):
+                    self?.status = message
+                    if isRetryable {
+                        self?.resolvedEndpoint = nil
+                        self?.discoverAndroidReceiver()
+                    }
+                }
+            }
+        }
+    }
+
     private func sendPendingChangeIfPossible() {
         guard sendTask == nil else { return }
         guard let change = pendingChange else { return }
@@ -300,12 +333,66 @@ private enum AndroidClipboardHTTPClient {
         }
     }
 
+    static func dismissNotification(
+        notificationKey: String,
+        on endpoint: AndroidReceiverEndpoint,
+        token: String
+    ) async -> Result {
+        guard let url = notificationActionURL(for: endpoint) else {
+            return .failure("Android notification action URL is invalid.", isRetryable: false)
+        }
+
+        let body = [
+            "action": "dismiss",
+            "notificationKey": notificationKey
+        ]
+
+        guard let bodyData = try? JSONSerialization.data(withJSONObject: body) else {
+            return .failure("Could not encode Android notification dismiss action.", isRetryable: false)
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 5
+        request.setValue(token, forHTTPHeaderField: "X-ZevClip-Token")
+        request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
+        request.httpBody = bodyData
+
+        do {
+            let (responseBody, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                return .failure("Android notification action returned an invalid response.", isRetryable: true)
+            }
+
+            guard httpResponse.statusCode == 200 else {
+                let bodyText = String(data: responseBody, encoding: .utf8)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let detail = bodyText?.isEmpty == false ? " \(bodyText!)" : ""
+                return .failure(
+                    "Android notification action failed (\(httpResponse.statusCode)).\(detail)",
+                    isRetryable: isRetryableStatusCode(httpResponse.statusCode)
+                )
+            }
+
+            return .success(confirmedDeviceId: httpResponse.value(forHTTPHeaderField: Self.androidDeviceIDHeader))
+        } catch {
+            return .failure(
+                "Could not dismiss Android notification: \(error.localizedDescription)",
+                isRetryable: true
+            )
+        }
+    }
+
     private static func clipboardURL(for endpoint: AndroidReceiverEndpoint) -> URL? {
         url(for: endpoint, path: "/clipboard")
     }
 
     private static func statusURL(for endpoint: AndroidReceiverEndpoint) -> URL? {
         url(for: endpoint, path: "/status")
+    }
+
+    private static func notificationActionURL(for endpoint: AndroidReceiverEndpoint) -> URL? {
+        url(for: endpoint, path: "/notification-action")
     }
 
     private static func url(for endpoint: AndroidReceiverEndpoint, path: String) -> URL? {

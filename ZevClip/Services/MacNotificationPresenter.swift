@@ -39,12 +39,22 @@ struct AndroidMirroredNotification: Decodable {
 final class MacNotificationPresenter: NSObject, UNUserNotificationCenterDelegate {
     static let shared = MacNotificationPresenter()
 
+    var onDismiss: ((String) -> Void)?
+
     private let center = UNUserNotificationCenter.current()
     private var authorizationRequested = false
 
     private override init() {
         super.init()
         center.delegate = self
+        center.setNotificationCategories([
+            UNNotificationCategory(
+                identifier: Self.androidNotificationCategory,
+                actions: [],
+                intentIdentifiers: [],
+                options: [.customDismissAction]
+            )
+        ])
     }
 
     func requestAuthorizationIfNeeded() {
@@ -66,6 +76,7 @@ final class MacNotificationPresenter: NSObject, UNUserNotificationCenterDelegate
         content.title = notification.displayTitle
         content.body = notification.displayBody
         content.sound = .default
+        content.categoryIdentifier = Self.androidNotificationCategory
         content.userInfo = [
             "packageName": notification.packageName,
             "notificationKey": notification.notificationKey ?? ""
@@ -92,4 +103,25 @@ final class MacNotificationPresenter: NSObject, UNUserNotificationCenterDelegate
     ) async -> UNNotificationPresentationOptions {
         [.banner, .sound]
     }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse
+    ) async {
+        guard response.actionIdentifier == UNNotificationDismissActionIdentifier else {
+            return
+        }
+
+        let userInfo = response.notification.request.content.userInfo
+        guard
+            let notificationKey = userInfo["notificationKey"] as? String,
+            !notificationKey.isEmpty
+        else {
+            return
+        }
+
+        onDismiss?(notificationKey)
+    }
+
+    private static let androidNotificationCategory = "ANDROID_MIRRORED_NOTIFICATION"
 }

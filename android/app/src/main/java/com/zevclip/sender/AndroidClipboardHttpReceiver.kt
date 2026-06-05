@@ -7,6 +7,7 @@ import android.os.BatteryManager
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.net.InetSocketAddress
 import java.net.ServerSocket
@@ -25,7 +26,8 @@ class AndroidClipboardHttpReceiver(
     private val tokenProvider: () -> String = { ZevClipPreferences.pairingToken(context) },
     private val onReady: (Int) -> Unit = {},
     private val onFailure: (String) -> Unit = {},
-    private val onTextReceived: (String) -> Unit = {}
+    private val onTextReceived: (String) -> Unit = {},
+    private val onNotificationAction: (String) -> Boolean = { false }
 ) {
     private val appContext = context.applicationContext
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -134,8 +136,8 @@ class AndroidClipboardHttpReceiver(
                 return
             }
 
-            if (requestParts[1] != CLIPBOARD_PATH) {
-                output.write(response("404 Not Found", "Use $CLIPBOARD_PATH.").toByteArray(Charsets.UTF_8))
+            if (requestParts[1] != CLIPBOARD_PATH && requestParts[1] != NOTIFICATION_ACTION_PATH) {
+                output.write(response("404 Not Found", "Use $CLIPBOARD_PATH or $NOTIFICATION_ACTION_PATH.").toByteArray(Charsets.UTF_8))
                 return
             }
 
@@ -154,6 +156,11 @@ class AndroidClipboardHttpReceiver(
                 readExactly(input, contentLength)
             } catch (error: HTTPFailure) {
                 output.write(response(error.status, error.message).toByteArray(Charsets.UTF_8))
+                return
+            }
+
+            if (requestParts[1] == NOTIFICATION_ACTION_PATH) {
+                output.write(handleNotificationAction(body).toByteArray(Charsets.UTF_8))
                 return
             }
 
@@ -284,6 +291,34 @@ class AndroidClipboardHttpReceiver(
         )
     }
 
+    private fun handleNotificationAction(body: ByteArray): String {
+        val bodyText = try {
+            decodeUtf8(body)
+        } catch (_: Exception) {
+            return response("400 Bad Request", "Request body must be valid UTF-8 JSON.")
+        }
+
+        val notificationKey = try {
+            val json = JSONObject(bodyText)
+            if (json.optString("action") != "dismiss") {
+                return response("400 Bad Request", "Unsupported notification action.")
+            }
+            json.optString("notificationKey").trim()
+        } catch (_: Exception) {
+            return response("400 Bad Request", "Request body must be valid notification action JSON.")
+        }
+
+        if (notificationKey.isEmpty()) {
+            return response("400 Bad Request", "notificationKey is required.")
+        }
+
+        return if (onNotificationAction(notificationKey)) {
+            response("200 OK", "Android notification cancelled.")
+        } else {
+            response("404 Not Found", "Android notification could not be cancelled.")
+        }
+    }
+
     private fun currentBatteryPercentage(): Int? {
         val batteryManager = appContext.getSystemService(BatteryManager::class.java)
         val percentage = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
@@ -319,6 +354,7 @@ class AndroidClipboardHttpReceiver(
         const val DEFAULT_PORT = 9877
         const val CLIPBOARD_PATH = "/clipboard"
         const val STATUS_PATH = "/status"
+        const val NOTIFICATION_ACTION_PATH = "/notification-action"
 
         private const val TAG = "ZevClipAndroidReceiver"
         private const val TOKEN_HEADER = "x-zevclip-token"

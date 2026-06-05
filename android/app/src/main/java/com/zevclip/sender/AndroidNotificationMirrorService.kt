@@ -15,6 +15,7 @@ class AndroidNotificationMirrorService : NotificationListenerService() {
 
     override fun onListenerConnected() {
         super.onListenerConnected()
+        activeService = this
         ZevClipPreferences.setNotificationMirrorState(
             this,
             isConnected = true,
@@ -24,6 +25,9 @@ class AndroidNotificationMirrorService : NotificationListenerService() {
     }
 
     override fun onListenerDisconnected() {
+        if (activeService === this) {
+            activeService = null
+        }
         ZevClipPreferences.setNotificationMirrorState(
             this,
             isConnected = false,
@@ -31,6 +35,13 @@ class AndroidNotificationMirrorService : NotificationListenerService() {
         )
         Log.i(TAG, "Notification mirror listener disconnected")
         super.onListenerDisconnected()
+    }
+
+    override fun onDestroy() {
+        if (activeService === this) {
+            activeService = null
+        }
+        super.onDestroy()
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
@@ -183,12 +194,29 @@ class AndroidNotificationMirrorService : NotificationListenerService() {
         val sentAtMillis: Long
     )
 
-    private companion object {
-        const val TAG = "ZevClipNotifyMirror"
-        const val DUPLICATE_WINDOW_MS = 30_000L
-        const val UPDATE_THROTTLE_MS = 2_000L
-        const val MAX_TRACKED_NOTIFICATIONS = 100
-        const val EVENT_POSTED = "posted"
-        const val EVENT_REMOVED = "removed"
+    companion object {
+        private const val TAG = "ZevClipNotifyMirror"
+        private const val DUPLICATE_WINDOW_MS = 30_000L
+        private const val UPDATE_THROTTLE_MS = 2_000L
+        private const val MAX_TRACKED_NOTIFICATIONS = 100
+        private const val EVENT_POSTED = "posted"
+        private const val EVENT_REMOVED = "removed"
+
+        @Volatile
+        private var activeService: AndroidNotificationMirrorService? = null
+
+        fun cancelMirroredNotification(notificationKey: String): Boolean {
+            val service = activeService ?: return false
+            return try {
+                service.cancelNotification(notificationKey)
+                true
+            } catch (error: SecurityException) {
+                Log.w(TAG, "Android denied notification cancellation", error)
+                false
+            } catch (error: RuntimeException) {
+                Log.w(TAG, "Could not cancel Android notification", error)
+                false
+            }
+        }
     }
 }

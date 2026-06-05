@@ -43,6 +43,11 @@ final class ZevClipRuntime {
         receiver.onAndroidNotification = { notification in
             MacNotificationPresenter.shared.show(notification)
         }
+        MacNotificationPresenter.shared.onDismiss = { [weak self] notificationKey in
+            Task { @MainActor in
+                self?.androidClipboardSender.dismissAndroidNotification(notificationKey: notificationKey)
+            }
+        }
         macClipboardWatcher.onTextChanged = { [weak self] change in
             self?.androidClipboardSender.send(change)
         }
