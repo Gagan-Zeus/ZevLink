@@ -24,7 +24,7 @@ object ClipboardSender {
         var connection: HttpURLConnection? = null
 
         return try {
-            val activeConnection = URL("http://$ipAddress:$port/clipboard")
+            val activeConnection = URL("http://${ipAddress.toUrlHost()}:$port/clipboard")
                 .openConnection() as HttpURLConnection
             connection = activeConnection
 
@@ -55,7 +55,7 @@ object ClipboardSender {
             }
         } catch (_: SocketTimeoutException) {
             SendResult.Failure(
-                "Connection timed out. Check the Mac IP, port, and Wi-Fi network.",
+                "Connection timed out. Check the Mac IP, port, and local network or hotspot.",
                 retryableWithDiscovery = true
             )
         } catch (_: ConnectException) {
@@ -65,7 +65,7 @@ object ClipboardSender {
             )
         } catch (_: NoRouteToHostException) {
             SendResult.Failure(
-                "Mac is unreachable. Confirm both devices are on the same local network.",
+                "Mac is unreachable. Confirm both devices are on the same local network or phone hotspot.",
                 retryableWithDiscovery = true
             )
         } catch (error: IOException) {
@@ -93,5 +93,10 @@ object ClipboardSender {
         return stream.bufferedReader(Charsets.UTF_8).use { reader ->
             reader.readText().trim().take(MAX_RESPONSE_PREVIEW)
         }
+    }
+
+    private fun String.toUrlHost(): String {
+        val host = NetworkInputValidator.normalizeHost(this)
+        return if (host.contains(':')) "[$host]" else host
     }
 }

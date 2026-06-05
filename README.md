@@ -45,8 +45,9 @@ Launch at Login is managed with the native macOS `SMAppService` API and the
 preference is persisted in app defaults. The pairing token remains persisted in
 Keychain.
 
-Both devices must be connected to the same Wi-Fi/LAN and normally need to be
-on the same subnet for Bonjour discovery.
+Both devices must be connected to the same Wi-Fi/LAN, or the Mac can be
+connected to the phone's hotspot. They normally need to be on the same subnet
+for Bonjour discovery.
 
 ## Discover from Android
 

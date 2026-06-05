@@ -2,19 +2,18 @@ package com.zevclip.sender
 
 import android.content.Context
 import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import java.net.Inet4Address
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
+import kotlin.concurrent.thread
 
 object MacAddressRediscoverer {
     private const val TAG = "ZevClip"
@@ -38,8 +37,8 @@ object MacAddressRediscoverer {
 
         val appContext = context.applicationContext
         val connectivityManager = appContext.getSystemService(ConnectivityManager::class.java)
-        if (!isWifiConnected(connectivityManager)) {
-            Log.i(TAG, "Skipping paired Mac rediscovery because Wi-Fi is not connected")
+        if (!LocalNetworkAccess.canReachLocalPeers(connectivityManager)) {
+            Log.i(TAG, "Skipping paired Mac rediscovery because no local network is available")
             return null
         }
 
@@ -92,17 +91,32 @@ object MacAddressRediscoverer {
                     handler.post {
                         val resolvedDeviceId = serviceInfo.txtString("deviceId")
                         if (resolvedDeviceId == normalizedTargetDeviceId) {
-                            val host = resolvedHost(serviceInfo)
                             val port = serviceInfo.port
-                            if (host != null && NetworkInputValidator.parsePort(port.toString()) != null) {
-                                val endpoint = Endpoint(host, port)
-                                result.set(endpoint)
-                                Log.i(
-                                    TAG,
-                                    "Rediscovered paired Mac ${serviceInfo.serviceName} at $host:$port"
-                                )
-                                stopDiscovery()
-                                latch.countDown()
+                            val hosts = EndpointSelector.serviceHosts(serviceInfo)
+                            if (NetworkInputValidator.parsePort(port.toString()) != null && hosts.isNotEmpty()) {
+                                thread(name = "ZevClipRediscoveryProbe") {
+                                    val host = EndpointSelector.selectReachableHost(hosts, port)
+                                    handler.post {
+                                        if (host != null) {
+                                            val endpoint = Endpoint(host, port)
+                                            result.set(endpoint)
+                                            Log.i(
+                                                TAG,
+                                                "Rediscovered paired Mac ${serviceInfo.serviceName} at $host:$port from $hosts"
+                                            )
+                                            stopDiscovery()
+                                            latch.countDown()
+                                            return@post
+                                        }
+
+                                        Log.w(
+                                            TAG,
+                                            "Paired Mac rediscovery matched deviceId but endpoints were unreachable: $hosts"
+                                        )
+                                        resolving.set(false)
+                                        maybeResolveNext()
+                                    }
+                                }
                                 return@post
                             }
 
@@ -202,25 +216,6 @@ object MacAddressRediscoverer {
             ?.toString(Charsets.UTF_8)
             ?.trim()
             ?.takeIf { it.isNotEmpty() }
-    }
-
-    private fun resolvedHost(serviceInfo: NsdServiceInfo): String? {
-        val addresses = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            serviceInfo.hostAddresses
-        } else {
-            @Suppress("DEPRECATION")
-            listOfNotNull(serviceInfo.host)
-        }
-
-        return addresses.firstOrNull { it is Inet4Address }
-            ?.hostAddress
-            ?.takeIf { it.isNotBlank() }
-    }
-
-    private fun isWifiConnected(connectivityManager: ConnectivityManager): Boolean {
-        val activeNetwork = connectivityManager.activeNetwork ?: return false
-        return connectivityManager.getNetworkCapabilities(activeNetwork)
-            ?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
     }
 
     private fun normalizeServiceType(serviceType: String): String {

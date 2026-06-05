@@ -369,7 +369,7 @@ class MainActivity : Activity() {
         statusText.setTextColor(Color.DKGRAY)
         statusText.text = getString(
             R.string.sending_to_endpoint,
-            "http://$ipAddress:$port/clipboard"
+            "http://${ipAddress.formatEndpointHost()}:$port/clipboard"
         )
 
         thread(name = "ZevClipSender") {
@@ -421,18 +421,40 @@ class MainActivity : Activity() {
     private fun savePairingQrPayload(rawValue: String) {
         PairingQrPayload.parse(rawValue)
             .onSuccess { payload ->
-                ipAddressInput.setText(payload.host)
-                portInput.setText(String.format(Locale.US, "%d", payload.port))
-                pairingTokenInput.setText(payload.token)
-                ZevClipPreferences.saveEndpoint(this, payload.host, payload.port.toString())
-                ZevClipPreferences.savePairingToken(this, payload.token)
-                ZevClipPreferences.saveDeviceId(this, payload.deviceId)
-                ZevClipPreferences.setDiscoveryStatus(
-                    this,
-                    getString(R.string.qr_pairing_saved_discovery_status, payload.name, payload.host, payload.port)
-                )
-                refreshSyncStatuses()
-                showSuccess(getString(R.string.qr_pairing_saved, payload.name, payload.host, payload.port))
+                scanPairingQrButton.isEnabled = false
+                statusText.setTextColor(Color.DKGRAY)
+                statusText.text = getString(R.string.qr_pairing_checking)
+
+                thread(name = "ZevClipQrEndpointProbe") {
+                    val reachableHost = EndpointSelector.selectReachableHost(payload.hosts, payload.port)
+                    runOnUiThread {
+                        scanPairingQrButton.isEnabled = true
+                        if (isDestroyed) return@runOnUiThread
+
+                        val selectedHost = reachableHost ?: payload.host
+                        ipAddressInput.setText(selectedHost)
+                        portInput.setText(String.format(Locale.US, "%d", payload.port))
+                        pairingTokenInput.setText(payload.token)
+                        ZevClipPreferences.saveEndpoint(this, selectedHost, payload.port.toString())
+                        ZevClipPreferences.savePairingToken(this, payload.token)
+                        ZevClipPreferences.saveDeviceId(this, payload.deviceId)
+                        ZevClipPreferences.setDiscoveryStatus(
+                            this,
+                            getString(
+                                R.string.qr_pairing_saved_discovery_status,
+                                payload.name,
+                                selectedHost.formatEndpointHost(),
+                                payload.port
+                            )
+                        )
+                        refreshSyncStatuses()
+                        if (reachableHost == null) {
+                            showFailure(getString(R.string.qr_pairing_saved_unverified, payload.name, selectedHost.formatEndpointHost(), payload.port))
+                        } else {
+                            showSuccess(getString(R.string.qr_pairing_saved, payload.name, selectedHost.formatEndpointHost(), payload.port))
+                        }
+                    }
+                }
             }
             .onFailure { error ->
                 showFailure(error.message ?: getString(R.string.qr_scan_invalid))
@@ -668,6 +690,10 @@ class MainActivity : Activity() {
 
     private fun yesNo(value: Boolean): String {
         return getString(if (value) R.string.yes else R.string.no)
+    }
+
+    private fun String.formatEndpointHost(): String {
+        return if (contains(':')) "[$this]" else this
     }
 
     private fun formatTimestamp(timestampMillis: Long): String {

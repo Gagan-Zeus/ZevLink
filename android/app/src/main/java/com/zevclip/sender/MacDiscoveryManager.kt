@@ -2,14 +2,13 @@ package com.zevclip.sender
 
 import android.content.Context
 import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import java.net.Inet4Address
+import kotlin.concurrent.thread
 
 class MacDiscoveryManager(
     context: Context,
@@ -39,8 +38,8 @@ class MacDiscoveryManager(
     fun discover() {
         stop()
 
-        if (!isWifiConnected()) {
-            updateStatus("Wi-Fi is not connected. Connect both devices to the same Wi-Fi/LAN.", false)
+        if (!LocalNetworkAccess.canReachLocalPeers(connectivityManager)) {
+            updateStatus(LocalNetworkAccess.unavailableMessage(), false)
             return
         }
 
@@ -181,23 +180,39 @@ class MacDiscoveryManager(
     }
 
     private fun handleResolvedService(serviceInfo: NsdServiceInfo, serviceCount: Int) {
-        resolving = false
-        val host = resolvedHost(serviceInfo)
         val port = serviceInfo.port
+        val hosts = EndpointSelector.serviceHosts(serviceInfo)
 
-        if (host == null || NetworkInputValidator.parsePort(port.toString()) == null) {
+        if (hosts.isEmpty() || NetworkInputValidator.parsePort(port.toString()) == null) {
+            resolving = false
             updateStatus("Found ${serviceInfo.serviceName}, but it has no usable host or port.", false)
             Log.w(TAG, "NSD resolved without a usable endpoint: $serviceInfo")
             return
         }
 
-        val multipleNote = if (serviceCount > 1) " Chose 1 of $serviceCount receivers." else ""
-        updateStatus(
-            "Discovered ${serviceInfo.serviceName} at $host:$port.$multipleNote",
-            false
-        )
-        onEndpointResolved(host, port)
-        Log.i(TAG, "NSD resolved ${serviceInfo.serviceName} to $host:$port")
+        updateStatus("Checking ${serviceInfo.serviceName} reachability…", true)
+        thread(name = "ZevClipDiscoveryProbe") {
+            val host = EndpointSelector.selectReachableHost(hosts, port)
+            handler.post {
+                resolving = false
+                if (host == null) {
+                    updateStatus(
+                        "Found ${serviceInfo.serviceName}, but none of its addresses are reachable from this network.",
+                        false
+                    )
+                    Log.w(TAG, "NSD resolved unreachable endpoints for ${serviceInfo.serviceName}: $hosts")
+                    return@post
+                }
+
+                val multipleNote = if (serviceCount > 1) " Chose 1 of $serviceCount receivers." else ""
+                updateStatus(
+                    "Discovered ${serviceInfo.serviceName} at ${host.formatEndpointHost()}:$port.$multipleNote",
+                    false
+                )
+                onEndpointResolved(host, port)
+                Log.i(TAG, "NSD resolved ${serviceInfo.serviceName} to $host:$port from $hosts")
+            }
+        }
     }
 
     private fun preferredService(): NsdServiceInfo {
@@ -206,25 +221,6 @@ class MacDiscoveryManager(
                 if (it.serviceName == PREFERRED_SERVICE_NAME) 0 else 1
             }.thenBy { it.serviceName }
         ).first()
-    }
-
-    private fun resolvedHost(serviceInfo: NsdServiceInfo): String? {
-        val addresses = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            serviceInfo.hostAddresses
-        } else {
-            @Suppress("DEPRECATION")
-            listOfNotNull(serviceInfo.host)
-        }
-
-        return addresses.firstOrNull { it is Inet4Address }
-            ?.hostAddress
-            ?.takeIf { it.isNotBlank() }
-    }
-
-    private fun isWifiConnected(): Boolean {
-        val activeNetwork = connectivityManager.activeNetwork ?: return false
-        return connectivityManager.getNetworkCapabilities(activeNetwork)
-            ?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
     }
 
     private fun stopDiscovery() {
@@ -247,6 +243,10 @@ class MacDiscoveryManager(
 
     private fun normalizeServiceType(serviceType: String): String {
         return serviceType.trimEnd('.')
+    }
+
+    private fun String.formatEndpointHost(): String {
+        return if (contains(':')) "[$this]" else this
     }
 
     private companion object {

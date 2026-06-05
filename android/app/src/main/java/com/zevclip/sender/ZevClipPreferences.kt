@@ -33,14 +33,16 @@ object ZevClipPreferences {
 
     fun saveEndpoint(context: Context, ipAddress: String, port: String) {
         preferences(context).edit()
-            .putString(KEY_IP_ADDRESS, ipAddress.trim())
+            .putString(KEY_IP_ADDRESS, NetworkInputValidator.normalizeHost(ipAddress))
             .putString(KEY_PORT, port.trim())
             .apply()
     }
 
     fun endpoint(context: Context): Endpoint? {
         val preferences = preferences(context)
-        val ipAddress = preferences.getString(KEY_IP_ADDRESS, "").orEmpty().trim()
+        val ipAddress = NetworkInputValidator.normalizeHost(
+            preferences.getString(KEY_IP_ADDRESS, "").orEmpty()
+        )
         val port = NetworkInputValidator.parsePort(
             preferences.getString(KEY_PORT, DEFAULT_PORT).orEmpty().trim()
         )

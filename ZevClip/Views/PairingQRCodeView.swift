@@ -1,12 +1,14 @@
 import CoreImage
 import CoreImage.CIFilterBuiltins
+import Foundation
 import SwiftUI
 
 struct PairingQRCodeView: View {
     let token: String
     let deviceId: String
 
-    @State private var host = LocalNetworkHost.currentPairingHost()
+    @State private var hosts = LocalNetworkHost.currentPairingHosts()
+    private let hostRefreshTimer = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -53,10 +55,14 @@ struct PairingQRCodeView: View {
                     }
 
                     Button("Refresh Host") {
-                        host = LocalNetworkHost.currentPairingHost()
+                        refreshHost()
                     }
                 }
             }
+        }
+        .onAppear(perform: refreshHost)
+        .onReceive(hostRefreshTimer) { _ in
+            refreshHost()
         }
     }
 
@@ -77,10 +83,12 @@ struct PairingQRCodeView: View {
     }
 
     private var pairingPayloadData: Data? {
+        let currentHost = host
         let payload: [String: Any] = [
             "name": ClipboardReceiver.serviceName,
             "deviceId": deviceId,
-            "host": host,
+            "host": currentHost,
+            "hosts": hosts,
             "port": Int(ClipboardReceiver.port),
             "token": token
         ]
@@ -93,5 +101,13 @@ struct PairingQRCodeView: View {
         filter.message = data
         filter.correctionLevel = "M"
         return filter.outputImage
+    }
+
+    private func refreshHost() {
+        hosts = LocalNetworkHost.currentPairingHosts()
+    }
+
+    private var host: String {
+        hosts.first ?? LocalNetworkHost.currentPairingHost()
     }
 }

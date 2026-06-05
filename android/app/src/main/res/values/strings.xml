@@ -2,9 +2,9 @@
 <resources>
     <string name="app_name">ZevClip</string>
     <string name="screen_title">Sync clipboard with Mac</string>
-    <string name="screen_description">Both devices must be on the same local network.</string>
+    <string name="screen_description">Both devices must be on the same local network, including a phone hotspot.</string>
     <string name="discovery_title">Local Mac discovery</string>
-    <string name="discovery_instructions">Start the Mac receiver, then discover it automatically on the same Wi-Fi/LAN. Manual IP entry remains available below.</string>
+    <string name="discovery_instructions">Start the Mac receiver, then discover it automatically on the same Wi-Fi/LAN or phone hotspot. Manual IP entry remains available below.</string>
     <string name="discover_mac">Discover Mac</string>
     <string name="discovery_status">Discovery: %1$s</string>
     <string name="qr_pairing_title">QR pairing</string>
@@ -15,7 +15,9 @@
     <string name="qr_scan_cancelled">QR scan cancelled.</string>
     <string name="qr_scan_failed">QR scan failed: %1$s</string>
     <string name="qr_scan_invalid">QR code is not valid ZevClip pairing data.</string>
+    <string name="qr_pairing_checking">Checking Mac reachability…</string>
     <string name="qr_pairing_saved">Saved %1$s at %2$s:%3$d.</string>
+    <string name="qr_pairing_saved_unverified">Saved %1$s at %2$s:%3$d, but the phone could not verify that address is reachable.</string>
     <string name="qr_pairing_saved_discovery_status">Paired from QR: %1$s at %2$s:%3$d.</string>
     <string name="pairing_title">Pairing</string>
     <string name="pairing_instructions">Enter the pairing token shown on the Mac. ZevClip stores it in private app preferences for this MVP and sends it with every request.</string>
