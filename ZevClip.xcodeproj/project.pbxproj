@@ -10,32 +10,40 @@
 		003C797EAA8C8B95F5BC210B /* LocalNetworkHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB39B975B9C136C551CFBBC4 /* LocalNetworkHost.swift */; };
 		3F129658B18A045EB75D744E /* PairingTokenKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = D349EA03D0A76DC6B676F25E /* PairingTokenKeychain.swift */; };
 		5B2A64EEB803EC30746CA86F /* ClipboardReceiver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08BB497EA327D472BA901879 /* ClipboardReceiver.swift */; };
-		7E51A40E6B2E4C8498F9A101 /* AppRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E51A40D6B2E4C8498F9A101 /* AppRuntime.swift */; };
+		86592C60E6753F38F8F1A5CA /* MacClipboardWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1077912024FDF76610651B40 /* MacClipboardWatcher.swift */; };
+		8E5EB06FD1408D1DF63D9441 /* AndroidReceiverIdentityStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6C21E49D36796072EBAFC17 /* AndroidReceiverIdentityStore.swift */; };
 		A4082A7C2B57560785213E49 /* MenuBarContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DDD7A2F7CB9F1C7199F16D5 /* MenuBarContentView.swift */; };
+		A5FCBC4CEE48B27E7EA1A6DA /* AndroidReceiverDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BEBD56CA3E8F68B7C8F8931 /* AndroidReceiverDiscovery.swift */; };
 		A801C940E295D9F6D3AE997A /* PairingQRCodeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF4453CC0495AA8E55154E88 /* PairingQRCodeView.swift */; };
+		AD2AEC233BB7B73037AAB071 /* AppRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC212D4E76DE1F008110B141 /* AppRuntime.swift */; };
 		AEE8CDAB4F0D66EBEDD57F6F /* DeviceIdentityStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F80D315D93BC2EBAB672C9A /* DeviceIdentityStore.swift */; };
 		B5AAD53CA643D32F7FCA3E02 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F2EFD3F683F74CF002CD50F /* AppSettings.swift */; };
 		B8CA797C763F040EDE0356DE /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 320BFAD0195F6C551F287AC0 /* ContentView.swift */; };
 		C405F78AD025A73FDB6198B8 /* ZevClipApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7AA610A696A5F3C375689D0B /* ZevClipApp.swift */; };
-		D182329AA5F7CA783E6C62A1 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = D182329AA5F7CA783E6C62A0 /* Assets.xcassets */; };
+		EA1F0F348E2F6935D2662676 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C1243D8396B04479B723679A /* Assets.xcassets */; };
+		F35C75705FE3D682B27E4964 /* AndroidClipboardSender.swift in Sources */ = {isa = PBXBuildFile; fileRef = 216D04B84726F014340F6DE2 /* AndroidClipboardSender.swift */; };
 		F720DDC4973512A61918258B /* ClipboardHTTPServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BAF94C62FB5C5E506492DFD /* ClipboardHTTPServer.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		08BB497EA327D472BA901879 /* ClipboardReceiver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardReceiver.swift; sourceTree = "<group>"; };
+		1077912024FDF76610651B40 /* MacClipboardWatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacClipboardWatcher.swift; sourceTree = "<group>"; };
 		1DDD7A2F7CB9F1C7199F16D5 /* MenuBarContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarContentView.swift; sourceTree = "<group>"; };
+		216D04B84726F014340F6DE2 /* AndroidClipboardSender.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AndroidClipboardSender.swift; sourceTree = "<group>"; };
 		21B01AEF6AD3FEB44682B65B /* ZevClip.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ZevClip.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		320BFAD0195F6C551F287AC0 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		4AFF2250F5F626D53C0BE6CF /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		4F2EFD3F683F74CF002CD50F /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
-		7E51A40D6B2E4C8498F9A101 /* AppRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRuntime.swift; sourceTree = "<group>"; };
 		5BAF94C62FB5C5E506492DFD /* ClipboardHTTPServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardHTTPServer.swift; sourceTree = "<group>"; };
 		7AA610A696A5F3C375689D0B /* ZevClipApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZevClipApp.swift; sourceTree = "<group>"; };
+		9BEBD56CA3E8F68B7C8F8931 /* AndroidReceiverDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AndroidReceiverDiscovery.swift; sourceTree = "<group>"; };
 		9F80D315D93BC2EBAB672C9A /* DeviceIdentityStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceIdentityStore.swift; sourceTree = "<group>"; };
 		BB39B975B9C136C551CFBBC4 /* LocalNetworkHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalNetworkHost.swift; sourceTree = "<group>"; };
 		BF4453CC0495AA8E55154E88 /* PairingQRCodeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingQRCodeView.swift; sourceTree = "<group>"; };
+		C1243D8396B04479B723679A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		C6C21E49D36796072EBAFC17 /* AndroidReceiverIdentityStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AndroidReceiverIdentityStore.swift; sourceTree = "<group>"; };
 		D349EA03D0A76DC6B676F25E /* PairingTokenKeychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingTokenKeychain.swift; sourceTree = "<group>"; };
-		D182329AA5F7CA783E6C62A0 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		DC212D4E76DE1F008110B141 /* AppRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRuntime.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -52,8 +60,8 @@
 		5A0371B9E8F1A7DF113C8B94 /* App */ = {
 			isa = PBXGroup;
 			children = (
+				DC212D4E76DE1F008110B141 /* AppRuntime.swift */,
 				7AA610A696A5F3C375689D0B /* ZevClipApp.swift */,
-				7E51A40D6B2E4C8498F9A101 /* AppRuntime.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -61,8 +69,8 @@
 		60F95B60D89E3DD2BE6A13EA /* ZevClip */ = {
 			isa = PBXGroup;
 			children = (
+				C1243D8396B04479B723679A /* Assets.xcassets */,
 				4AFF2250F5F626D53C0BE6CF /* Info.plist */,
-				D182329AA5F7CA783E6C62A0 /* Assets.xcassets */,
 				5A0371B9E8F1A7DF113C8B94 /* App */,
 				F02D8D283B2206D4FCADBA05 /* Services */,
 				66DE4E9CF14E575465868B29 /* Stores */,
@@ -75,6 +83,7 @@
 		66DE4E9CF14E575465868B29 /* Stores */ = {
 			isa = PBXGroup;
 			children = (
+				C6C21E49D36796072EBAFC17 /* AndroidReceiverIdentityStore.swift */,
 				4F2EFD3F683F74CF002CD50F /* AppSettings.swift */,
 				08BB497EA327D472BA901879 /* ClipboardReceiver.swift */,
 				9F80D315D93BC2EBAB672C9A /* DeviceIdentityStore.swift */,
@@ -109,7 +118,10 @@
 		F02D8D283B2206D4FCADBA05 /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				216D04B84726F014340F6DE2 /* AndroidClipboardSender.swift */,
+				9BEBD56CA3E8F68B7C8F8931 /* AndroidReceiverDiscovery.swift */,
 				5BAF94C62FB5C5E506492DFD /* ClipboardHTTPServer.swift */,
+				1077912024FDF76610651B40 /* MacClipboardWatcher.swift */,
 				D349EA03D0A76DC6B676F25E /* PairingTokenKeychain.swift */,
 			);
 			path = Services;
@@ -123,7 +135,7 @@
 			buildConfigurationList = 13C51D7459FB004BED71B5CE /* Build configuration list for PBXNativeTarget "ZevClip" */;
 			buildPhases = (
 				DFC8DC62D61BABF6AAC1F5F7 /* Sources */,
-				D182329AA5F7CA783E6C62A2 /* Resources */,
+				897ABC5226557E44B9A68973 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -167,11 +179,11 @@
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		D182329AA5F7CA783E6C62A2 /* Resources */ = {
+		897ABC5226557E44B9A68973 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				D182329AA5F7CA783E6C62A1 /* Assets.xcassets in Resources */,
+				EA1F0F348E2F6935D2662676 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -182,14 +194,18 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F35C75705FE3D682B27E4964 /* AndroidClipboardSender.swift in Sources */,
+				A5FCBC4CEE48B27E7EA1A6DA /* AndroidReceiverDiscovery.swift in Sources */,
+				8E5EB06FD1408D1DF63D9441 /* AndroidReceiverIdentityStore.swift in Sources */,
+				AD2AEC233BB7B73037AAB071 /* AppRuntime.swift in Sources */,
 				B5AAD53CA643D32F7FCA3E02 /* AppSettings.swift in Sources */,
 				F720DDC4973512A61918258B /* ClipboardHTTPServer.swift in Sources */,
 				5B2A64EEB803EC30746CA86F /* ClipboardReceiver.swift in Sources */,
 				B8CA797C763F040EDE0356DE /* ContentView.swift in Sources */,
 				AEE8CDAB4F0D66EBEDD57F6F /* DeviceIdentityStore.swift in Sources */,
 				003C797EAA8C8B95F5BC210B /* LocalNetworkHost.swift in Sources */,
+				86592C60E6753F38F8F1A5CA /* MacClipboardWatcher.swift in Sources */,
 				A4082A7C2B57560785213E49 /* MenuBarContentView.swift in Sources */,
-				7E51A40E6B2E4C8498F9A101 /* AppRuntime.swift in Sources */,
 				A801C940E295D9F6D3AE997A /* PairingQRCodeView.swift in Sources */,
 				3F129658B18A045EB75D744E /* PairingTokenKeychain.swift in Sources */,
 				C405F78AD025A73FDB6198B8 /* ZevClipApp.swift in Sources */,
@@ -262,8 +278,8 @@
 				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
-				ENABLE_DEBUG_DYLIB = NO;
 				ENABLE_APP_SANDBOX = NO;
+				ENABLE_DEBUG_DYLIB = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				INFOPLIST_FILE = ZevClip/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -283,9 +299,11 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_APP_SANDBOX = NO;
+				ENABLE_DEBUG_DYLIB = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				INFOPLIST_FILE = ZevClip/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -293,6 +311,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
+				OTHER_CODE_SIGN_FLAGS = "--options runtime";
 				PRODUCT_BUNDLE_IDENTIFIER = com.zevclip.receiver;
 				PRODUCT_NAME = ZevClip;
 				SDKROOT = macosx;

@@ -36,6 +36,8 @@ final class ClipboardReceiver: ObservableObject {
     @Published private(set) var lastReceivedText: String?
     @Published private(set) var lastReceivedAt: Date?
 
+    var onPasteboardWrite: ((String, Int) -> Void)?
+
     private let server = ClipboardHTTPServer()
     private let tokenProvider = PairingTokenProvider(token: "")
 
@@ -145,6 +147,8 @@ final class ClipboardReceiver: ObservableObject {
             detailMessage = "Received text, but macOS rejected the pasteboard update."
             return
         }
+
+        onPasteboardWrite?(text, pasteboard.changeCount)
 
         lastReceivedText = text
         lastReceivedAt = Date()

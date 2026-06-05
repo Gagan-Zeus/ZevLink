@@ -27,6 +27,16 @@
     <string name="pairing_token_saved">Pairing token saved.</string>
     <string name="pairing_token_not_saved">Pairing token not saved.</string>
     <string name="pairing_token_empty">Enter the pairing token shown on the Mac.</string>
+    <string name="android_receiver_title">Mac to Android receiver</string>
+    <string name="android_receiver_instructions">Start this receiver so the Mac can send clipboard text back to Android on the local network.</string>
+    <string name="start_android_receiver">Start Android Receiver</string>
+    <string name="stop_android_receiver">Stop Android Receiver</string>
+    <string name="android_receiver_status">Receiver: %1$s\nDiscovery: %2$s\nPort: %3$d\nDevice ID: %4$s\nStatus: %5$s</string>
+    <string name="android_receiver_last_received">Last received: %1$s\n%2$s</string>
+    <string name="running">Running</string>
+    <string name="stopped">Stopped</string>
+    <string name="advertising">Advertising</string>
+    <string name="not_advertising">Not advertising</string>
     <string name="auto_send_title">Accessibility auto-send</string>
     <string name="accessibility_enabled">Accessibility status: Enabled</string>
     <string name="accessibility_not_enabled">Accessibility status: Not enabled</string>

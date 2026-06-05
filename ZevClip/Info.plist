@@ -27,6 +27,7 @@
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_zevclip._tcp</string>
+		<string>_zevclip-android._tcp</string>
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>ZevClip receives clipboard text from devices on your local network.</string>

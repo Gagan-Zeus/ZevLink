@@ -91,6 +91,13 @@ class ClipboardSyncActivity : Activity() {
                     )
                     complete("Sent", "Already sent.")
                 }
+                ClipboardSyncResult.RemoteEcho -> {
+                    Log.i(
+                        ClipboardTileService.TAG,
+                        "Quick Settings clipboard sync skipped: clipboard came from Mac"
+                    )
+                    complete("Ignored", "Clipboard came from Mac.")
+                }
                 is ClipboardSyncResult.Failure -> {
                     Log.w(
                         ClipboardTileService.TAG,

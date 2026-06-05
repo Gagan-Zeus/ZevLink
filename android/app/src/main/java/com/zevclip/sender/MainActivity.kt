@@ -45,6 +45,10 @@ class MainActivity : Activity() {
     private lateinit var discoverButton: Button
     private lateinit var discoveryStatusText: TextView
     private lateinit var pairingStatusText: TextView
+    private lateinit var androidReceiverStatusText: TextView
+    private lateinit var androidReceiverLastReceivedText: TextView
+    private lateinit var startAndroidReceiverButton: Button
+    private lateinit var stopAndroidReceiverButton: Button
     private lateinit var accessibilityStatusText: TextView
     private lateinit var backgroundHealthStatusText: TextView
     private lateinit var recheckAccessibilityButton: Button
@@ -62,7 +66,12 @@ class MainActivity : Activity() {
             key == ZevClipPreferences.KEY_ACCESSIBILITY_SERVICE_BOUND ||
             key == ZevClipPreferences.KEY_LAST_ACCESSIBILITY_SERVICE_EVENT ||
             key == ZevClipPreferences.KEY_LAST_SERVICE_CONNECTED_AT ||
-            key == ZevClipPreferences.KEY_LAST_AUTO_SEND_AT
+            key == ZevClipPreferences.KEY_LAST_AUTO_SEND_AT ||
+            key == ZevClipPreferences.KEY_ANDROID_RECEIVER_RUNNING ||
+            key == ZevClipPreferences.KEY_ANDROID_RECEIVER_STATUS ||
+            key == ZevClipPreferences.KEY_ANDROID_RECEIVER_ADVERTISING ||
+            key == ZevClipPreferences.KEY_ANDROID_RECEIVER_LAST_RECEIVED_AT ||
+            key == ZevClipPreferences.KEY_ANDROID_RECEIVER_LAST_RECEIVED_STATUS
         ) {
             runOnUiThread { refreshSyncStatuses() }
         }
@@ -197,6 +206,42 @@ class MainActivity : Activity() {
             setPadding(0, dp(12), 0, dp(8))
         }
         content.addView(pairingStatusText, matchWidth())
+        content.addView(divider(), dividerLayoutParams(topMargin = 12))
+
+        content.addView(sectionTitle(R.string.android_receiver_title))
+        content.addView(
+            textView(getString(R.string.android_receiver_instructions), 14f, Color.DKGRAY),
+            matchWidth()
+        )
+        androidReceiverStatusText = textView("", 14f, Color.DKGRAY).apply {
+            setPadding(0, dp(12), 0, dp(8))
+        }
+        content.addView(androidReceiverStatusText, matchWidth())
+
+        androidReceiverLastReceivedText = textView("", 14f, Color.DKGRAY).apply {
+            setPadding(0, 0, 0, dp(8))
+        }
+        content.addView(androidReceiverLastReceivedText, matchWidth())
+
+        startAndroidReceiverButton = Button(this).apply {
+            text = getString(R.string.start_android_receiver)
+            isAllCaps = false
+            setOnClickListener {
+                AndroidClipboardReceiverService.start(this@MainActivity)
+                refreshSyncStatuses()
+            }
+        }
+        content.addView(startAndroidReceiverButton, matchWidth(topMargin = 8))
+
+        stopAndroidReceiverButton = Button(this).apply {
+            text = getString(R.string.stop_android_receiver)
+            isAllCaps = false
+            setOnClickListener {
+                AndroidClipboardReceiverService.stop(this@MainActivity)
+                refreshSyncStatuses()
+            }
+        }
+        content.addView(stopAndroidReceiverButton, matchWidth(topMargin = 8))
         content.addView(divider(), dividerLayoutParams(topMargin = 12))
 
         content.addView(sectionTitle(R.string.auto_send_title))
@@ -440,6 +485,7 @@ class MainActivity : Activity() {
                         ZevClipPreferences.saveEndpoint(this, selectedHost, payload.port.toString())
                         ZevClipPreferences.savePairingToken(this, payload.token)
                         ZevClipPreferences.saveDeviceId(this, payload.deviceId)
+                        AndroidClipboardReceiverService.start(this)
                         ZevClipPreferences.setDiscoveryStatus(
                             this,
                             getString(
@@ -536,6 +582,37 @@ class MainActivity : Activity() {
                 R.string.pairing_token_not_saved
             }
         )
+
+        refreshAndroidReceiverStatus()
+    }
+
+    private fun refreshAndroidReceiverStatus() {
+        val isRunning = ZevClipPreferences.isAndroidReceiverRunning(this)
+        androidReceiverStatusText.setTextColor(
+            if (isRunning) Color.rgb(24, 120, 54) else Color.DKGRAY
+        )
+        androidReceiverStatusText.text = getString(
+            R.string.android_receiver_status,
+            if (isRunning) getString(R.string.running) else getString(R.string.stopped),
+            if (ZevClipPreferences.isAndroidReceiverAdvertising(this)) {
+                getString(R.string.advertising)
+            } else {
+                getString(R.string.not_advertising)
+            },
+            AndroidClipboardHttpReceiver.DEFAULT_PORT,
+            ZevClipPreferences.androidDeviceId(this),
+            ZevClipPreferences.androidReceiverStatus(this)
+        )
+
+        val lastReceivedAt = ZevClipPreferences.androidReceiverLastReceivedAt(this)
+        androidReceiverLastReceivedText.text = getString(
+            R.string.android_receiver_last_received,
+            if (lastReceivedAt > 0L) formatTimestamp(lastReceivedAt) else getString(R.string.never),
+            ZevClipPreferences.androidReceiverLastReceivedStatus(this)
+        )
+
+        startAndroidReceiverButton.isEnabled = !isRunning
+        stopAndroidReceiverButton.isEnabled = isRunning
     }
 
     private fun scheduleAccessibilityRechecks() {

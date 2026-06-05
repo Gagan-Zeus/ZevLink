@@ -57,6 +57,14 @@ object AccessibilityClipboardAutoSender {
                 ClipboardSyncResult.Duplicate -> {
                     Log.d(TAG, "Ignoring clipboard text already sent or in flight; uiVisible=$uiVisible")
                 }
+                ClipboardSyncResult.RemoteEcho -> {
+                    updateStatus(
+                        appContext,
+                        "Skipped: clipboard text came from Mac.",
+                        uiVisible
+                    )
+                    Log.d(TAG, "Ignoring clipboard text received from Mac; uiVisible=$uiVisible")
+                }
             }
         }
     }

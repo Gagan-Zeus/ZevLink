@@ -7,23 +7,44 @@ final class ZevClipRuntime {
     static let shared = ZevClipRuntime()
 
     let receiver = ClipboardReceiver()
+    let macClipboardWatcher = MacClipboardWatcher()
+    lazy var androidClipboardSender = AndroidClipboardSender(
+        tokenProvider: { [weak self] in
+            self?.receiver.pairingToken ?? ""
+        }
+    )
     let appSettings = AppSettings()
 
     private lazy var settingsWindowController = SettingsWindowController(
         receiver: receiver,
+        macClipboardWatcher: macClipboardWatcher,
+        androidClipboardSender: androidClipboardSender,
         appSettings: appSettings
     )
     private lazy var statusItemController = StatusItemController(
         receiver: receiver,
+        macClipboardWatcher: macClipboardWatcher,
+        androidClipboardSender: androidClipboardSender,
         appSettings: appSettings,
         openSettings: { [weak self] in
             self?.showSettingsWindow()
         }
     )
 
-    private init() {}
+    private init() {
+        receiver.onPasteboardWrite = { [weak macClipboardWatcher] text, changeCount in
+            macClipboardWatcher?.markProgrammaticPasteboardWrite(
+                text: text,
+                changeCount: changeCount
+            )
+        }
+        macClipboardWatcher.onTextChanged = { [weak self] change in
+            self?.androidClipboardSender.send(change)
+        }
+    }
 
     func start() {
+        macClipboardWatcher.start()
         statusItemController.start()
 
         if !appSettings.showMenuBarIcon {
@@ -39,11 +60,20 @@ final class ZevClipRuntime {
 @MainActor
 private final class SettingsWindowController {
     private let receiver: ClipboardReceiver
+    private let macClipboardWatcher: MacClipboardWatcher
+    private let androidClipboardSender: AndroidClipboardSender
     private let appSettings: AppSettings
     private var window: NSWindow?
 
-    init(receiver: ClipboardReceiver, appSettings: AppSettings) {
+    init(
+        receiver: ClipboardReceiver,
+        macClipboardWatcher: MacClipboardWatcher,
+        androidClipboardSender: AndroidClipboardSender,
+        appSettings: AppSettings
+    ) {
         self.receiver = receiver
+        self.macClipboardWatcher = macClipboardWatcher
+        self.androidClipboardSender = androidClipboardSender
         self.appSettings = appSettings
     }
 
@@ -56,7 +86,12 @@ private final class SettingsWindowController {
 
     private func makeWindow() -> NSWindow {
         let hostingController = NSHostingController(
-            rootView: ContentView(receiver: receiver, appSettings: appSettings)
+            rootView: ContentView(
+                receiver: receiver,
+                macClipboardWatcher: macClipboardWatcher,
+                androidClipboardSender: androidClipboardSender,
+                appSettings: appSettings
+            )
         )
         let window = NSWindow(contentViewController: hostingController)
         window.title = "ZevClip Settings"
@@ -72,6 +107,8 @@ private final class SettingsWindowController {
 @MainActor
 private final class StatusItemController: NSObject {
     private let receiver: ClipboardReceiver
+    private let macClipboardWatcher: MacClipboardWatcher
+    private let androidClipboardSender: AndroidClipboardSender
     private let appSettings: AppSettings
     private let openSettings: () -> Void
 
@@ -80,10 +117,14 @@ private final class StatusItemController: NSObject {
 
     init(
         receiver: ClipboardReceiver,
+        macClipboardWatcher: MacClipboardWatcher,
+        androidClipboardSender: AndroidClipboardSender,
         appSettings: AppSettings,
         openSettings: @escaping () -> Void
     ) {
         self.receiver = receiver
+        self.macClipboardWatcher = macClipboardWatcher
+        self.androidClipboardSender = androidClipboardSender
         self.appSettings = appSettings
         self.openSettings = openSettings
         super.init()
@@ -98,6 +139,22 @@ private final class StatusItemController: NSObject {
             .store(in: &cancellables)
 
         receiver.objectWillChange
+            .sink { [weak self] _ in
+                DispatchQueue.main.async {
+                    self?.updateMenu()
+                }
+            }
+            .store(in: &cancellables)
+
+        macClipboardWatcher.objectWillChange
+            .sink { [weak self] _ in
+                DispatchQueue.main.async {
+                    self?.updateMenu()
+                }
+            }
+            .store(in: &cancellables)
+
+        androidClipboardSender.objectWillChange
             .sink { [weak self] _ in
                 DispatchQueue.main.async {
                     self?.updateMenu()
@@ -178,6 +235,27 @@ private final class StatusItemController: NSObject {
         }
 
         menu.addItem(.separator())
+        addDisabledItem(
+            macClipboardWatcher.isRunning ? "Mac Clipboard: Watching" : "Mac Clipboard: Stopped",
+            to: menu
+        )
+        addDisabledItem(androidClipboardSender.status.truncatedForMenu(), to: menu)
+        if let endpoint = androidClipboardSender.resolvedEndpoint {
+            addDisabledItem("Android: \(endpoint.displayAddress.truncatedForMenu())", to: menu)
+        } else {
+            addDisabledItem("Android: Not discovered", to: menu)
+        }
+
+        if let lastSentAt = androidClipboardSender.lastSentAt {
+            addDisabledItem(
+                "Last sent: \(lastSentAt.formatted(date: .omitted, time: .shortened))",
+                to: menu
+            )
+        } else {
+            addDisabledItem("Last sent: None", to: menu)
+        }
+
+        menu.addItem(.separator())
         menu.addItem(actionItem(
             title: "Start Receiver",
             action: #selector(startReceiver),
@@ -187,6 +265,21 @@ private final class StatusItemController: NSObject {
             title: "Stop Receiver",
             action: #selector(stopReceiver),
             isEnabled: receiver.canStop
+        ))
+        menu.addItem(actionItem(
+            title: "Start Mac Clipboard Watcher",
+            action: #selector(startMacClipboardWatcher),
+            isEnabled: !macClipboardWatcher.isRunning
+        ))
+        menu.addItem(actionItem(
+            title: "Stop Mac Clipboard Watcher",
+            action: #selector(stopMacClipboardWatcher),
+            isEnabled: macClipboardWatcher.isRunning
+        ))
+        menu.addItem(actionItem(
+            title: "Rediscover Android Receiver",
+            action: #selector(rediscoverAndroidReceiver),
+            isEnabled: !androidClipboardSender.isDiscovering
         ))
 
         menu.addItem(.separator())
@@ -252,6 +345,18 @@ private final class StatusItemController: NSObject {
 
     @objc private func stopReceiver() {
         receiver.stopServer()
+    }
+
+    @objc private func startMacClipboardWatcher() {
+        macClipboardWatcher.start()
+    }
+
+    @objc private func stopMacClipboardWatcher() {
+        macClipboardWatcher.stop()
+    }
+
+    @objc private func rediscoverAndroidReceiver() {
+        androidClipboardSender.rediscoverAndroidReceiver()
     }
 
     @objc private func toggleMenuBarIcon() {

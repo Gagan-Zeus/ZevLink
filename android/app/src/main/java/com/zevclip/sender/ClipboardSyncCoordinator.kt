@@ -11,16 +11,20 @@ sealed interface ClipboardSyncResult {
     data object NoEndpoint : ClipboardSyncResult
     data object NoToken : ClipboardSyncResult
     data object Duplicate : ClipboardSyncResult
+    data object RemoteEcho : ClipboardSyncResult
     data class Failure(val message: String) : ClipboardSyncResult
 }
 
 object ClipboardSyncCoordinator {
     private const val RECENT_DUPLICATE_WINDOW_MS = 1_500L
+    private const val REMOTE_CLIPBOARD_ECHO_WINDOW_MS = 2_000L
 
     private val pendingHashes = mutableSetOf<String>()
     private val sendStateLock = Any()
     private var lastCompletedHash: String? = null
     private var lastCompletedAt = 0L
+    private var lastRemoteClipboardHash: String? = null
+    private var lastRemoteClipboardAt = 0L
 
     private val networkExecutor = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "ZevClipClipboardSender")
@@ -48,21 +52,34 @@ object ClipboardSyncCoordinator {
         }
 
         val textHash = sha256(text)
-        val shouldSend = synchronized(sendStateLock) {
+        val decision = synchronized(sendStateLock) {
+            val isRecentlyReceivedFromMac = textHash == lastRemoteClipboardHash &&
+                SystemClock.elapsedRealtime() - lastRemoteClipboardAt < REMOTE_CLIPBOARD_ECHO_WINDOW_MS
             val isRecentlyCompletedDuplicate = textHash == lastCompletedHash &&
                 SystemClock.elapsedRealtime() - lastCompletedAt < RECENT_DUPLICATE_WINDOW_MS
 
-            if (textHash in pendingHashes || isRecentlyCompletedDuplicate) {
-                false
-            } else {
-                pendingHashes += textHash
-                true
+            when {
+                isRecentlyReceivedFromMac ->
+                    SendDecision.RemoteEcho
+                textHash in pendingHashes || isRecentlyCompletedDuplicate ->
+                    SendDecision.Duplicate
+                else -> {
+                    pendingHashes += textHash
+                    SendDecision.Send
+                }
             }
         }
 
-        if (!shouldSend) {
-            onComplete(ClipboardSyncResult.Duplicate)
-            return
+        when (decision) {
+            SendDecision.RemoteEcho -> {
+                onComplete(ClipboardSyncResult.RemoteEcho)
+                return
+            }
+            SendDecision.Duplicate -> {
+                onComplete(ClipboardSyncResult.Duplicate)
+                return
+            }
+            SendDecision.Send -> Unit
         }
 
         networkExecutor.execute {
@@ -85,9 +102,22 @@ object ClipboardSyncCoordinator {
         }
     }
 
+    fun rememberRemoteClipboardWrite(text: String) {
+        synchronized(sendStateLock) {
+            lastRemoteClipboardHash = sha256(text)
+            lastRemoteClipboardAt = SystemClock.elapsedRealtime()
+        }
+    }
+
     private fun sha256(text: String): String {
         return MessageDigest.getInstance("SHA-256")
             .digest(text.toByteArray(Charsets.UTF_8))
             .joinToString(separator = "") { byte -> "%02x".format(byte.toInt() and 0xff) }
+    }
+
+    private enum class SendDecision {
+        Send,
+        Duplicate,
+        RemoteEcho
     }
 }
