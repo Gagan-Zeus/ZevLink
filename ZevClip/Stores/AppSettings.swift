@@ -6,10 +6,12 @@ final class AppSettings: ObservableObject {
     private enum DefaultsKey {
         static let launchAtLoginEnabled = "launchAtLoginEnabled"
         static let launchAtLoginRegisteredPath = "launchAtLoginRegisteredPath"
+        static let showMenuBarIcon = "showMenuBarIcon"
     }
 
     @Published private(set) var launchAtLoginEnabled: Bool
     @Published private(set) var launchAtLoginStatus: String
+    @Published private(set) var showMenuBarIcon: Bool
 
     init() {
         let status = SMAppService.mainApp.status
@@ -27,12 +29,20 @@ final class AppSettings: ObservableObject {
         launchAtLoginStatus = installedPathIsRegistered
             ? "Launch at Login is enabled."
             : Self.statusMessage(for: status)
+        showMenuBarIcon = UserDefaults.standard.object(
+            forKey: DefaultsKey.showMenuBarIcon
+        ) as? Bool ?? true
 
         if launchAtLoginEnabled && !installedPathIsRegistered {
             Task { @MainActor [weak self] in
                 self?.refreshInstalledAppRegistration()
             }
         }
+    }
+
+    func setShowMenuBarIcon(_ isVisible: Bool) {
+        UserDefaults.standard.set(isVisible, forKey: DefaultsKey.showMenuBarIcon)
+        showMenuBarIcon = isVisible
     }
 
     func setLaunchAtLoginEnabled(_ isEnabled: Bool) {

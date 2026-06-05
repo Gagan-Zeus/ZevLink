@@ -1,24 +1,38 @@
-import SwiftUI
+import AppKit
 
 @main
-struct ZevClipApp: App {
+final class ZevClipApp: NSObject, NSApplicationDelegate {
     static let settingsWindowID = "settings"
 
-    @StateObject private var receiver = ClipboardReceiver()
-    @StateObject private var appSettings = AppSettings()
+    static func main() {
+        let app = NSApplication.shared
+        let delegate = ZevClipApp()
+        app.delegate = delegate
+        app.setActivationPolicy(.accessory)
+        app.finishLaunching()
 
-    var body: some Scene {
-        MenuBarExtra {
-            MenuBarContentView(receiver: receiver, appSettings: appSettings)
-        } label: {
-            Image("MenuBarIcon")
+        DispatchQueue.main.async {
+            ZevClipRuntime.shared.start()
         }
-        .menuBarExtraStyle(.menu)
 
-        Window("ZevClip Settings", id: Self.settingsWindowID) {
-            ContentView(receiver: receiver, appSettings: appSettings)
+        withExtendedLifetime(delegate) {
+            app.run()
         }
-        .defaultSize(width: 560, height: 720)
     }
 
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.accessory)
+    }
+
+    func applicationShouldHandleReopen(
+        _ sender: NSApplication,
+        hasVisibleWindows flag: Bool
+    ) -> Bool {
+        ZevClipRuntime.shared.showSettingsWindow()
+        return false
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        false
+    }
 }

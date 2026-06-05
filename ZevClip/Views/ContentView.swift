@@ -57,6 +57,20 @@ struct ContentView: View {
                     .font(.headline)
 
                 Toggle(
+                    "Show in menu bar",
+                    isOn: Binding(
+                        get: { appSettings.showMenuBarIcon },
+                        set: { appSettings.setShowMenuBarIcon($0) }
+                    )
+                )
+
+                if !appSettings.showMenuBarIcon {
+                    Text("ZevClip will keep running. Reopen the app to show Settings again.")
+                        .foregroundStyle(.orange)
+                        .font(.caption)
+                }
+
+                Toggle(
                     "Launch at Login",
                     isOn: Binding(
                         get: { appSettings.launchAtLoginEnabled },
