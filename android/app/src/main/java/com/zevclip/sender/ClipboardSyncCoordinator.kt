@@ -1,6 +1,7 @@
 package com.zevclip.sender
 
 import android.content.Context
+import android.os.SystemClock
 import java.security.MessageDigest
 import java.util.concurrent.Executors
 
@@ -14,8 +15,13 @@ sealed interface ClipboardSyncResult {
 }
 
 object ClipboardSyncCoordinator {
+    private const val RECENT_DUPLICATE_WINDOW_MS = 1_500L
+
     private val pendingHashes = mutableSetOf<String>()
     private val sendStateLock = Any()
+    private var lastCompletedHash: String? = null
+    private var lastCompletedAt = 0L
+
     private val networkExecutor = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "ZevClipClipboardSender")
     }
@@ -43,8 +49,10 @@ object ClipboardSyncCoordinator {
 
         val textHash = sha256(text)
         val shouldSend = synchronized(sendStateLock) {
-            val lastSentHash = ZevClipPreferences.lastSentHash(context)
-            if (textHash == lastSentHash || textHash in pendingHashes) {
+            val isRecentlyCompletedDuplicate = textHash == lastCompletedHash &&
+                SystemClock.elapsedRealtime() - lastCompletedAt < RECENT_DUPLICATE_WINDOW_MS
+
+            if (textHash in pendingHashes || isRecentlyCompletedDuplicate) {
                 false
             } else {
                 pendingHashes += textHash
@@ -63,7 +71,8 @@ object ClipboardSyncCoordinator {
             synchronized(sendStateLock) {
                 pendingHashes -= textHash
                 if (result is SendResult.Success) {
-                    ZevClipPreferences.setLastSentHash(context, textHash)
+                    lastCompletedHash = textHash
+                    lastCompletedAt = SystemClock.elapsedRealtime()
                 }
             }
 

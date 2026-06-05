@@ -18,7 +18,6 @@ object ZevClipPreferences {
     const val KEY_LAST_SERVICE_CONNECTED_AT = "last_service_connected_at"
     const val KEY_LAST_AUTO_SEND_AT = "last_auto_send_at"
 
-    private const val KEY_LAST_SENT_HASH = "last_auto_sent_hash"
     private const val KEY_LAST_TILE_SUBTITLE = "last_tile_subtitle"
 
     private const val PREFERENCES_NAME = "zevclip_preferences"
@@ -168,16 +167,6 @@ object ZevClipPreferences {
     fun setDiscoveryStatus(context: Context, status: String) {
         preferences(context).edit()
             .putString(KEY_DISCOVERY_STATUS, status)
-            .apply()
-    }
-
-    fun lastSentHash(context: Context): String? {
-        return preferences(context).getString(KEY_LAST_SENT_HASH, null)
-    }
-
-    fun setLastSentHash(context: Context, hash: String) {
-        preferences(context).edit()
-            .putString(KEY_LAST_SENT_HASH, hash)
             .apply()
     }
 

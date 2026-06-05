@@ -17,6 +17,11 @@ class ClipboardAccessibilityService : AccessibilityService() {
         }
 
         lastClipboardSignalAt = now
+        if (now - lastOutboundSendRequestAt < PASSIVE_CLIPBOARD_ECHO_SUPPRESSION_MS) {
+            Log.d(TAG, "Ignoring passive clipboard change soon after ZevClip sent to Mac")
+            return@OnPrimaryClipChangedListener
+        }
+
         if (now - lastCandidateAt > CLIPBOARD_CHANGE_COPY_WINDOW_MS) {
             Log.d(TAG, "Ignoring clipboard change without a recent user copy action")
             return@OnPrimaryClipChangedListener
@@ -27,7 +32,7 @@ class ClipboardAccessibilityService : AccessibilityService() {
             "Primary clipboard changed; uiVisible=${ZevClipApplication.isUiVisible(application)}"
         )
         handler.postDelayed(
-            { readClipboardAndSend(recentSelectedText()) },
+            { readClipboardAndSend(selectionFallback = null) },
             CLIPBOARD_READ_DELAY_MS
         )
     }
@@ -35,6 +40,7 @@ class ClipboardAccessibilityService : AccessibilityService() {
     private var lastCandidateSignature = ""
     private var lastCandidateAt = 0L
     private var lastClipboardSignalAt = 0L
+    private var lastOutboundSendRequestAt = 0L
     private var selectedText: String? = null
     private var selectedTextAt = 0L
     private var clipboardListenerRegistered = false
@@ -204,10 +210,11 @@ class ClipboardAccessibilityService : AccessibilityService() {
         }
 
         when {
-            !text.isNullOrBlank() -> AccessibilityClipboardAutoSender.sendIfChanged(this, text)
+            !text.isNullOrBlank() -> sendAndRememberOutbound(text)
             !selectionFallback.isNullOrBlank() -> {
                 Log.i(TAG, "Using Accessibility selected-text fallback")
-                AccessibilityClipboardAutoSender.sendIfChanged(this, selectionFallback)
+                sendAndRememberOutbound(selectionFallback)
+                clearSelectedText()
             }
             else -> {
                 ZevClipPreferences.setLastAutoStatus(
@@ -219,11 +226,22 @@ class ClipboardAccessibilityService : AccessibilityService() {
         }
     }
 
+    private fun sendAndRememberOutbound(text: String) {
+        lastOutboundSendRequestAt = SystemClock.elapsedRealtime()
+        AccessibilityClipboardAutoSender.sendIfChanged(this, text)
+    }
+
+    private fun clearSelectedText() {
+        selectedText = null
+        selectedTextAt = 0L
+    }
+
     private companion object {
         const val TAG = "ZevClipAccessibility"
         const val DEBOUNCE_MS = 750L
         const val CLIPBOARD_READ_DELAY_MS = 180L
         const val CLIPBOARD_CHANGE_COPY_WINDOW_MS = 2_000L
+        const val PASSIVE_CLIPBOARD_ECHO_SUPPRESSION_MS = 6_000L
         const val SELECTION_MAX_AGE_MS = 15_000L
     }
 }
