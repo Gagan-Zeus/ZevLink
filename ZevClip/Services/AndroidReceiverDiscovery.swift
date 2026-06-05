@@ -4,12 +4,23 @@ import Foundation
 struct AndroidReceiverEndpoint: Equatable {
     let name: String
     let deviceId: String?
+    let batteryPercentage: Int?
     let host: String
     let port: Int
 
     var displayAddress: String {
         let displayHost = host.contains(":") ? "[\(host)]" : host
         return "\(displayHost):\(port)"
+    }
+
+    func updatingBatteryPercentage(_ batteryPercentage: Int?) -> AndroidReceiverEndpoint {
+        AndroidReceiverEndpoint(
+            name: name,
+            deviceId: deviceId,
+            batteryPercentage: batteryPercentage,
+            host: host,
+            port: port
+        )
     }
 }
 
@@ -169,6 +180,7 @@ final class AndroidReceiverDiscovery: NSObject {
         return AndroidReceiverEndpoint(
             name: service.name,
             deviceId: normalizedDeviceId(deviceId(from: service)),
+            batteryPercentage: batteryPercentage(from: service),
             host: host,
             port: service.port
         )
@@ -232,6 +244,21 @@ final class AndroidReceiverDiscovery: NSObject {
         return String(data: deviceData, encoding: .utf8)
     }
 
+    private func batteryPercentage(from service: NetService) -> Int? {
+        guard let data = service.txtRecordData() else { return nil }
+        let txtRecord = NetService.dictionary(fromTXTRecord: data)
+        guard
+            let batteryData = txtRecord[Self.batteryPercentageTXTKey],
+            let batteryText = String(data: batteryData, encoding: .utf8),
+            let percentage = Int(batteryText),
+            (0...100).contains(percentage)
+        else {
+            return nil
+        }
+
+        return percentage
+    }
+
     private func normalizedDeviceId(_ value: String?) -> String? {
         let normalizedValue = value?
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -265,6 +292,7 @@ final class AndroidReceiverDiscovery: NSObject {
     private static let serviceType = "_zevclip-android._tcp."
     private static let serviceDomain = "local."
     private static let deviceIdTXTKey = "deviceId"
+    private static let batteryPercentageTXTKey = "battery"
     private static let discoveryTimeout: TimeInterval = 8
     private static let resolveTimeout: TimeInterval = 5
     private static let selectionDelay: TimeInterval = 1.2

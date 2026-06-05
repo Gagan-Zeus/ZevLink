@@ -1,6 +1,7 @@
 package com.zevclip.sender
 
 import android.app.Service
+import android.os.BatteryManager
 import android.content.Context
 import android.content.Intent
 import android.net.nsd.NsdManager
@@ -126,6 +127,9 @@ class AndroidClipboardReceiverService : Service() {
             serviceType = SERVICE_TYPE
             this.port = port
             setAttribute(TXT_DEVICE_ID, androidDeviceId)
+            currentBatteryPercentage()?.let { percentage ->
+                setAttribute(TXT_BATTERY_PERCENTAGE, percentage.toString())
+            }
         }
 
         val listener = object : NsdManager.RegistrationListener {
@@ -219,6 +223,12 @@ class AndroidClipboardReceiverService : Service() {
         return DateFormat.getTimeInstance(DateFormat.MEDIUM).format(Date(timestampMillis))
     }
 
+    private fun currentBatteryPercentage(): Int? {
+        val batteryManager = getSystemService(BatteryManager::class.java)
+        val percentage = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+        return percentage.takeIf { it in 0..100 }
+    }
+
     private fun String.utf8Size(): Int {
         return toByteArray(Charsets.UTF_8).size
     }
@@ -231,6 +241,7 @@ class AndroidClipboardReceiverService : Service() {
 
         private const val TAG = "ZevClipAndroidReceiver"
         private const val TXT_DEVICE_ID = "deviceId"
+        private const val TXT_BATTERY_PERCENTAGE = "battery"
 
         fun start(context: Context) {
             context.startService(Intent(context, AndroidClipboardReceiverService::class.java).apply {

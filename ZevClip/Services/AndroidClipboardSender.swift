@@ -14,6 +14,8 @@ final class AndroidClipboardSender: ObservableObject {
     private var discovery: AndroidReceiverDiscovery?
     private var pendingChange: MacClipboardTextChange?
     private var sendTask: Task<Void, Never>?
+    private var statusTask: Task<Void, Never>?
+    private var statusRefreshTimer: Timer?
     private var retriedChangeIDs: Set<UUID> = []
 
     init(tokenProvider: @escaping () -> String) {
@@ -34,6 +36,20 @@ final class AndroidClipboardSender: ObservableObject {
     func rediscoverAndroidReceiver() {
         resolvedEndpoint = nil
         discoverAndroidReceiver()
+    }
+
+    func startStatusMonitoring() {
+        guard statusRefreshTimer == nil else { return }
+
+        let timer = Timer(timeInterval: Self.statusRefreshInterval, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.refreshConnectionStatus()
+            }
+        }
+        timer.tolerance = Self.statusRefreshTolerance
+        RunLoop.main.add(timer, forMode: .common)
+        statusRefreshTimer = timer
+        refreshConnectionStatus()
     }
 
     private func sendPendingChangeIfPossible() {
@@ -77,6 +93,7 @@ final class AndroidClipboardSender: ObservableObject {
             onEndpointResolved: { [weak self] endpoint in
                 self?.resolvedEndpoint = endpoint
                 self?.isDiscovering = false
+                self?.refreshAndroidStatus()
                 self?.sendPendingChangeIfPossible()
             }
         )
@@ -132,6 +149,56 @@ final class AndroidClipboardSender: ObservableObject {
         sendPendingChangeIfPossible()
     }
 
+    private func refreshConnectionStatus() {
+        if resolvedEndpoint == nil {
+            discoverAndroidReceiver()
+        } else {
+            refreshAndroidStatus()
+        }
+    }
+
+    private func refreshAndroidStatus() {
+        guard statusTask == nil else { return }
+        guard let endpoint = resolvedEndpoint else { return }
+
+        let token = tokenProvider().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !token.isEmpty else { return }
+
+        statusTask = Task { [weak self] in
+            let result = await AndroidClipboardHTTPClient.fetchStatus(
+                from: endpoint,
+                token: token
+            )
+
+            await MainActor.run {
+                self?.handleStatusResult(result, endpoint: endpoint)
+            }
+        }
+    }
+
+    private func handleStatusResult(
+        _ result: AndroidClipboardHTTPClient.StatusResult,
+        endpoint: AndroidReceiverEndpoint
+    ) {
+        statusTask = nil
+
+        switch result {
+        case .success(let batteryPercentage, let confirmedDeviceId):
+            let updatedEndpoint = endpoint.updatingBatteryPercentage(
+                batteryPercentage ?? endpoint.batteryPercentage
+            )
+            resolvedEndpoint = updatedEndpoint
+            saveConfirmedAndroidIdentity(confirmedDeviceId ?? endpoint.deviceId)
+
+        case .failure(let message, let isRetryable):
+            status = message
+            if isRetryable {
+                resolvedEndpoint = nil
+                discoverAndroidReceiver()
+            }
+        }
+    }
+
     private func saveConfirmedAndroidIdentity(_ deviceId: String?) {
         guard let deviceId else { return }
         AndroidReceiverIdentityStore.savePairedDeviceId(deviceId)
@@ -139,11 +206,18 @@ final class AndroidClipboardSender: ObservableObject {
     }
 
     private static let maximumBodyLength = 1_048_576
+    private static let statusRefreshInterval: TimeInterval = 60
+    private static let statusRefreshTolerance: TimeInterval = 15
 }
 
 private enum AndroidClipboardHTTPClient {
     enum Result {
         case success(confirmedDeviceId: String?)
+        case failure(String, isRetryable: Bool)
+    }
+
+    enum StatusResult {
+        case success(batteryPercentage: Int?, confirmedDeviceId: String?)
         case failure(String, isRetryable: Bool)
     }
 
@@ -188,17 +262,86 @@ private enum AndroidClipboardHTTPClient {
         }
     }
 
+    static func fetchStatus(
+        from endpoint: AndroidReceiverEndpoint,
+        token: String
+    ) async -> StatusResult {
+        guard let url = statusURL(for: endpoint) else {
+            return .failure("Android receiver status URL is invalid.", isRetryable: false)
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 5
+        request.setValue(token, forHTTPHeaderField: "X-ZevClip-Token")
+
+        do {
+            let (body, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                return .failure("Android receiver returned an invalid status response.", isRetryable: true)
+            }
+
+            guard httpResponse.statusCode == 200 else {
+                return .failure(
+                    "Android receiver status failed (\(httpResponse.statusCode)).",
+                    isRetryable: isRetryableStatusCode(httpResponse.statusCode)
+                )
+            }
+
+            return .success(
+                batteryPercentage: batteryPercentage(from: httpResponse, body: body),
+                confirmedDeviceId: httpResponse.value(forHTTPHeaderField: Self.androidDeviceIDHeader)
+            )
+        } catch {
+            return .failure(
+                "Could not refresh Android status: \(error.localizedDescription)",
+                isRetryable: true
+            )
+        }
+    }
+
     private static func clipboardURL(for endpoint: AndroidReceiverEndpoint) -> URL? {
+        url(for: endpoint, path: "/clipboard")
+    }
+
+    private static func statusURL(for endpoint: AndroidReceiverEndpoint) -> URL? {
+        url(for: endpoint, path: "/status")
+    }
+
+    private static func url(for endpoint: AndroidReceiverEndpoint, path: String) -> URL? {
         if endpoint.host.contains(":") {
-            return URL(string: "http://[\(endpoint.host)]:\(endpoint.port)/clipboard")
+            return URL(string: "http://[\(endpoint.host)]:\(endpoint.port)\(path)")
         }
 
         var components = URLComponents()
         components.scheme = "http"
         components.host = endpoint.host
         components.port = endpoint.port
-        components.path = "/clipboard"
+        components.path = path
         return components.url
+    }
+
+    private static func batteryPercentage(
+        from response: HTTPURLResponse,
+        body: Data
+    ) -> Int? {
+        if
+            let headerValue = response.value(forHTTPHeaderField: Self.androidBatteryHeader),
+            let percentage = Int(headerValue),
+            (0...100).contains(percentage)
+        {
+            return percentage
+        }
+
+        guard
+            let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+            let percentage = json["batteryPercentage"] as? Int,
+            (0...100).contains(percentage)
+        else {
+            return nil
+        }
+
+        return percentage
     }
 
     private static func isRetryableStatusCode(_ statusCode: Int) -> Bool {
@@ -206,4 +349,5 @@ private enum AndroidClipboardHTTPClient {
     }
 
     private static let androidDeviceIDHeader = "X-ZevClip-Android-Device-ID"
+    private static let androidBatteryHeader = "X-ZevClip-Android-Battery"
 }

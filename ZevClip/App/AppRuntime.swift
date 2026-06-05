@@ -55,6 +55,7 @@ final class ZevClipRuntime {
     private func startClipboardSync() {
         receiver.startServer()
         macClipboardWatcher.start()
+        androidClipboardSender.startStatusMonitoring()
         androidClipboardSender.rediscoverAndroidReceiver()
     }
 
@@ -198,8 +199,7 @@ private final class StatusItemController: NSObject {
         }
 
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        item.button?.toolTip = "ZevClip"
-        item.button?.image = menuBarImage()
+        configureStatusButton(item.button)
         item.menu = makeMenu()
         statusItem = item
     }
@@ -214,7 +214,7 @@ private final class StatusItemController: NSObject {
     private func updateMenu() {
         guard let statusItem else { return }
 
-        statusItem.button?.image = menuBarImage()
+        configureStatusButton(statusItem.button)
         statusItem.menu = makeMenu()
     }
 
@@ -249,6 +249,7 @@ private final class StatusItemController: NSObject {
         menu.addItem(.separator())
         if let endpoint = androidClipboardSender.resolvedEndpoint {
             addDisabledItem("Android: \(endpoint.displayAddress.truncatedForMenu())", to: menu)
+            addDisabledItem("Battery: \(batteryMenuTitle(for: endpoint))", to: menu)
         } else {
             addDisabledItem("Android: Not discovered", to: menu)
         }
@@ -294,13 +295,49 @@ private final class StatusItemController: NSObject {
         return menu
     }
 
-    private func menuBarImage() -> NSImage? {
-        if let image = NSImage(named: "MenuBarIcon") {
+    private func configureStatusButton(_ button: NSStatusBarButton?) {
+        guard let button else { return }
+
+        if let endpoint = androidClipboardSender.resolvedEndpoint {
+            button.image = nil
+            button.attributedTitle = batteryMenuAttributedTitle(for: endpoint)
+            button.toolTip = "ZevClip Android battery: \(batteryMenuTitle(for: endpoint))"
+            return
+        }
+
+        button.attributedTitle = NSAttributedString()
+        button.title = ""
+        button.image = phoneStatusImage()
+        button.toolTip = "ZevClip: Android not connected"
+    }
+
+    private func batteryMenuTitle(for endpoint: AndroidReceiverEndpoint) -> String {
+        if let batteryPercentage = endpoint.batteryPercentage {
+            return "\(batteryPercentage)%"
+        }
+
+        return "--%"
+    }
+
+    private func batteryMenuAttributedTitle(for endpoint: AndroidReceiverEndpoint) -> NSAttributedString {
+        NSAttributedString(
+            string: batteryMenuTitle(for: endpoint),
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
+                .foregroundColor: NSColor.labelColor
+            ]
+        )
+    }
+
+    private func phoneStatusImage() -> NSImage? {
+        if let url = Bundle.main.url(forResource: "PhoneStatusIcon", withExtension: "png"),
+           let image = NSImage(contentsOf: url) {
+            image.size = NSSize(width: 18, height: 18)
             image.isTemplate = false
             return image
         }
 
-        let fallback = NSImage(systemSymbolName: "link.circle", accessibilityDescription: "ZevClip")
+        let fallback = NSImage(systemSymbolName: "iphone", accessibilityDescription: "Android not connected")
         fallback?.isTemplate = true
         return fallback
     }

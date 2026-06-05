@@ -3,6 +3,7 @@ package com.zevclip.sender
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.os.BatteryManager
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -116,6 +117,18 @@ class AndroidClipboardHttpReceiver(
                 return
             }
 
+            val headers = parseHeaders(lines.drop(1))
+            val expectedToken = tokenProvider().trim()
+            if (expectedToken.isEmpty() || headers[TOKEN_HEADER] != expectedToken) {
+                output.write(response("401 Unauthorized", "Missing or invalid ZevClip pairing token.").toByteArray(Charsets.UTF_8))
+                return
+            }
+
+            if (requestParts[0] == "GET" && requestParts[1] == STATUS_PATH) {
+                output.write(statusResponse().toByteArray(Charsets.UTF_8))
+                return
+            }
+
             if (requestParts[0] != "POST") {
                 output.write(response("405 Method Not Allowed", "Use POST.").toByteArray(Charsets.UTF_8))
                 return
@@ -123,13 +136,6 @@ class AndroidClipboardHttpReceiver(
 
             if (requestParts[1] != CLIPBOARD_PATH) {
                 output.write(response("404 Not Found", "Use $CLIPBOARD_PATH.").toByteArray(Charsets.UTF_8))
-                return
-            }
-
-            val headers = parseHeaders(lines.drop(1))
-            val expectedToken = tokenProvider().trim()
-            if (expectedToken.isEmpty() || headers[TOKEN_HEADER] != expectedToken) {
-                output.write(response("401 Unauthorized", "Missing or invalid ZevClip pairing token.").toByteArray(Charsets.UTF_8))
                 return
             }
 
@@ -168,7 +174,7 @@ class AndroidClipboardHttpReceiver(
                 response(
                     "200 OK",
                     "Clipboard updated.",
-                    mapOf(
+                    extraHeaders = mapOf(
                         ANDROID_DEVICE_ID_HEADER to ZevClipPreferences.androidDeviceId(appContext),
                         ANDROID_RECEIVER_NAME_HEADER to AndroidClipboardReceiverService.SERVICE_NAME
                     )
@@ -258,15 +264,42 @@ class AndroidClipboardHttpReceiver(
         return succeeded
     }
 
+    private fun statusResponse(): String {
+        val batteryPercentage = currentBatteryPercentage()
+        val body = """{"batteryPercentage":${batteryPercentage ?: "null"},"receiver":"running"}"""
+        val headers = mutableMapOf(
+            ANDROID_DEVICE_ID_HEADER to ZevClipPreferences.androidDeviceId(appContext),
+            ANDROID_RECEIVER_NAME_HEADER to AndroidClipboardReceiverService.SERVICE_NAME
+        )
+
+        if (batteryPercentage != null) {
+            headers[ANDROID_BATTERY_HEADER] = batteryPercentage.toString()
+        }
+
+        return response(
+            status = "200 OK",
+            body = body,
+            contentType = "application/json; charset=utf-8",
+            extraHeaders = headers
+        )
+    }
+
+    private fun currentBatteryPercentage(): Int? {
+        val batteryManager = appContext.getSystemService(BatteryManager::class.java)
+        val percentage = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+        return percentage.takeIf { it in 0..100 }
+    }
+
     private fun response(
         status: String,
         body: String,
+        contentType: String = "text/plain; charset=utf-8",
         extraHeaders: Map<String, String> = emptyMap()
     ): String {
         val bodyBytes = body.toByteArray(Charsets.UTF_8)
         val headers = mutableListOf(
             "HTTP/1.1 $status",
-            "Content-Type: text/plain; charset=utf-8",
+            "Content-Type: $contentType",
             "Content-Length: ${bodyBytes.size}",
             "Connection: close"
         )
@@ -285,11 +318,13 @@ class AndroidClipboardHttpReceiver(
     companion object {
         const val DEFAULT_PORT = 9877
         const val CLIPBOARD_PATH = "/clipboard"
+        const val STATUS_PATH = "/status"
 
         private const val TAG = "ZevClipAndroidReceiver"
         private const val TOKEN_HEADER = "x-zevclip-token"
         private const val ANDROID_DEVICE_ID_HEADER = "X-ZevClip-Android-Device-ID"
         private const val ANDROID_RECEIVER_NAME_HEADER = "X-ZevClip-Android-Receiver-Name"
+        private const val ANDROID_BATTERY_HEADER = "X-ZevClip-Android-Battery"
         private const val CLIPBOARD_LABEL = "ZevClip"
         private const val HEADER_END = "\r\n\r\n"
         private const val MAX_HEADER_LENGTH = 16_384
