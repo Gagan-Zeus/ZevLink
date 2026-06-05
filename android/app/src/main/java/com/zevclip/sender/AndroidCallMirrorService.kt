@@ -1,6 +1,7 @@
 package com.zevclip.sender
 
 import android.Manifest
+import android.app.NotificationManager
 import android.app.Service
 import android.content.Context
 import android.content.Intent
@@ -29,6 +30,8 @@ class AndroidCallMirrorService : Service() {
     private var currentCallDirection: String? = null
     private var callAnsweredAtMillis: Long = 0L
     private var didMuteRinger = false
+    private var previousRingerMode: Int? = null
+    private var previousInterruptionFilter: Int? = null
     private var isIgnoringOutgoingCall = false
     private var lastCallState = TelephonyManager.CALL_STATE_IDLE
 
@@ -166,6 +169,7 @@ class AndroidCallMirrorService : Service() {
                 val direction = currentCallDirection ?: DIRECTION_INCOMING
                 val callId = currentCallId ?: return
                 callAnsweredAtMillis = System.currentTimeMillis()
+                unmuteRingerIfNeeded()
                 sendCallEvent(
                     AndroidCallMirrorPayload(
                         event = EVENT_ANSWERED,
@@ -292,9 +296,7 @@ class AndroidCallMirrorService : Service() {
                     }
                 }
                 ACTION_SILENCE -> {
-                    telecomManager.silenceRinger()
-                    muteRingerFallback()
-                    AndroidCallActionResult(true, "Android call silenced.")
+                    silenceRingerAndVibration(telecomManager)
                 }
                 else -> AndroidCallActionResult(false, "Unsupported call action.")
             }
@@ -348,26 +350,99 @@ class AndroidCallMirrorService : Service() {
         }
     }
 
-    private fun muteRingerFallback() {
-        val audioManager = getSystemService(AudioManager::class.java) ?: return
+    private fun silenceRingerAndVibration(
+        telecomManager: TelecomManager
+    ): AndroidCallActionResult {
+        var telecomSilenced = false
+        try {
+            telecomManager.silenceRinger()
+            telecomSilenced = true
+        } catch (error: SecurityException) {
+            Log.w(TAG, "Android denied Telecom silenceRinger", error)
+        } catch (error: RuntimeException) {
+            Log.w(TAG, "Telecom silenceRinger failed", error)
+        }
+
+        val audioManager = getSystemService(AudioManager::class.java)
+            ?: return if (telecomSilenced) {
+                AndroidCallActionResult(true, "Android call ringer silenced.")
+            } else {
+                AndroidCallActionResult(false, "Android Audio service is unavailable.")
+            }
+
+        var streamMuted = false
         try {
             audioManager.adjustStreamVolume(AudioManager.STREAM_RING, AudioManager.ADJUST_MUTE, 0)
+            streamMuted = true
             didMuteRinger = true
         } catch (error: RuntimeException) {
-            Log.w(TAG, "Could not mute ringer fallback", error)
+            Log.w(TAG, "Could not mute ring stream", error)
+        }
+
+        val notificationManager = getSystemService(NotificationManager::class.java)
+        val canSetSilentMode = notificationManager?.isNotificationPolicyAccessGranted == true
+        if (!canSetSilentMode) {
+            return if (telecomSilenced || streamMuted) {
+                AndroidCallActionResult(
+                    false,
+                    "Sound muted, but vibration needs Do Not Disturb access for ZevClip."
+                )
+            } else {
+                AndroidCallActionResult(
+                    false,
+                    "Enable Do Not Disturb access for ZevClip to silence vibration."
+                )
+            }
+        }
+
+        return try {
+            if (previousRingerMode == null) {
+                previousRingerMode = audioManager.ringerMode
+            }
+            if (previousInterruptionFilter == null) {
+                previousInterruptionFilter = notificationManager.currentInterruptionFilter
+            }
+            notificationManager.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_NONE)
+            audioManager.ringerMode = AudioManager.RINGER_MODE_SILENT
+            didMuteRinger = true
+            AndroidCallActionResult(true, "Android call sound and vibration silenced.")
+        } catch (error: SecurityException) {
+            Log.w(TAG, "Android denied silent ringer mode", error)
+            AndroidCallActionResult(
+                false,
+                "Android denied silent mode. Enable Do Not Disturb access for ZevClip."
+            )
+        } catch (error: RuntimeException) {
+            Log.w(TAG, "Could not silence ringer and vibration", error)
+            AndroidCallActionResult(
+                false,
+                "Android could not silence vibration: ${error.message ?: "ringer mode failed"}"
+            )
         }
     }
 
     private fun unmuteRingerIfNeeded() {
-        if (!didMuteRinger) {
+        if (!didMuteRinger && previousRingerMode == null) {
             return
         }
         didMuteRinger = false
         val audioManager = getSystemService(AudioManager::class.java) ?: return
+        val notificationManager = getSystemService(NotificationManager::class.java)
         try {
             audioManager.adjustStreamVolume(AudioManager.STREAM_RING, AudioManager.ADJUST_UNMUTE, 0)
+            previousRingerMode?.let { savedMode ->
+                audioManager.ringerMode = savedMode
+            }
+            if (notificationManager?.isNotificationPolicyAccessGranted == true) {
+                previousInterruptionFilter?.let { savedFilter ->
+                    notificationManager.setInterruptionFilter(savedFilter)
+                }
+            }
         } catch (error: RuntimeException) {
-            Log.w(TAG, "Could not unmute ringer fallback", error)
+            Log.w(TAG, "Could not restore ringer mode", error)
+        } finally {
+            previousRingerMode = null
+            previousInterruptionFilter = null
         }
     }
 

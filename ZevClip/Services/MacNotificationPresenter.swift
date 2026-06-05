@@ -92,7 +92,7 @@ final class MacNotificationPresenter: NSObject, UNUserNotificationCenterDelegate
     static let shared = MacNotificationPresenter()
 
     var onDismiss: ((String) -> Void)?
-    var onCallAction: ((String, String) -> Void)?
+    var onCallAction: ((String, String, @escaping (Bool, String) -> Void) -> Void)?
 
     private let center = UNUserNotificationCenter.current()
     private var authorizationRequested = false
@@ -216,8 +216,8 @@ final class MacNotificationPresenter: NSObject, UNUserNotificationCenterDelegate
             return
         }
 
-        let panel = CallControlPanelController(call: call) { [weak self] action, callId in
-            self?.onCallAction?(action, callId)
+        let panel = CallControlPanelController(call: call) { [weak self] action, callId, completion in
+            self?.onCallAction?(action, callId, completion)
         }
         activeCallPanel = panel
         panel.show()
@@ -245,11 +245,11 @@ final class MacNotificationPresenter: NSObject, UNUserNotificationCenterDelegate
 
             switch response.actionIdentifier {
             case Self.callActionAccept:
-                onCallAction?("accept", callId)
+                onCallAction?("accept", callId, { _, _ in })
             case Self.callActionReject:
-                onCallAction?("reject", callId)
+                onCallAction?("reject", callId, { _, _ in })
             case Self.callActionSilence:
-                onCallAction?("silence", callId)
+                onCallAction?("silence", callId, { _, _ in })
             default:
                 break
             }
@@ -287,11 +287,14 @@ private final class CallControlPanelController: NSObject {
     private let acceptButton = NSButton(title: "Accept", target: nil, action: nil)
     private let rejectButton = NSButton(title: "Reject", target: nil, action: nil)
     private let silenceButton = NSButton(title: "Silence", target: nil, action: nil)
-    private let onAction: (String, String) -> Void
+    private let onAction: (String, String, @escaping (Bool, String) -> Void) -> Void
     private var activeSince: Date?
     private var timer: Timer?
 
-    init(call: AndroidMirroredCall, onAction: @escaping (String, String) -> Void) {
+    init(
+        call: AndroidMirroredCall,
+        onAction: @escaping (String, String, @escaping (Bool, String) -> Void) -> Void
+    ) {
         callId = call.callId
         self.onAction = onAction
 
@@ -441,16 +444,28 @@ private final class CallControlPanelController: NSObject {
 
     @objc private func accept() {
         statusLabel.stringValue = "Accepting on Android..."
-        onAction("accept", callId)
+        onAction("accept", callId) { [weak self] succeeded, message in
+            DispatchQueue.main.async {
+                self?.statusLabel.stringValue = succeeded ? "Accepted on Android" : message
+            }
+        }
     }
 
     @objc private func reject() {
         statusLabel.stringValue = "Ending on Android..."
-        onAction("reject", callId)
+        onAction("reject", callId) { [weak self] succeeded, message in
+            DispatchQueue.main.async {
+                self?.statusLabel.stringValue = succeeded ? "Ended on Android" : message
+            }
+        }
     }
 
     @objc private func silence() {
         statusLabel.stringValue = "Silencing Android..."
-        onAction("silence", callId)
+        onAction("silence", callId) { [weak self] succeeded, message in
+            DispatchQueue.main.async {
+                self?.statusLabel.stringValue = succeeded ? "Silenced on Android" : message
+            }
+        }
     }
 }

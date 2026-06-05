@@ -85,17 +85,28 @@ final class AndroidClipboardSender: ObservableObject {
         }
     }
 
-    func sendAndroidCallAction(action: String, callId: String) {
+    func sendAndroidCallAction(
+        action: String,
+        callId: String,
+        completion: ((Bool, String) -> Void)? = nil
+    ) {
         let trimmedAction = action.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedCallId = callId.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedAction.isEmpty, !trimmedCallId.isEmpty else { return }
+        guard !trimmedAction.isEmpty, !trimmedCallId.isEmpty else {
+            completion?(false, "Call action is missing.")
+            return
+        }
         guard let endpoint = resolvedEndpoint else {
             discoverAndroidReceiver()
+            completion?(false, "Rediscovering Android receiver...")
             return
         }
 
         let token = tokenProvider().trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !token.isEmpty else { return }
+        guard !token.isEmpty else {
+            completion?(false, "Pairing token is empty.")
+            return
+        }
 
         Task { [weak self] in
             let result = await AndroidClipboardHTTPClient.sendCallAction(
@@ -107,10 +118,12 @@ final class AndroidClipboardSender: ObservableObject {
 
             await MainActor.run {
                 switch result {
-                case .success:
-                    self?.status = "Sent Android call action: \(trimmedAction)."
+                case .success(let message):
+                    self?.status = message
+                    completion?(true, message)
                 case .failure(let message, let isRetryable):
                     self?.status = message
+                    completion?(false, message)
                     if isRetryable {
                         self?.resolvedEndpoint = nil
                         self?.discoverAndroidReceiver()
@@ -289,6 +302,11 @@ private enum AndroidClipboardHTTPClient {
         case failure(String, isRetryable: Bool)
     }
 
+    enum CallActionResult {
+        case success(String)
+        case failure(String, isRetryable: Bool)
+    }
+
     static func send(
         text: String,
         to endpoint: AndroidReceiverEndpoint,
@@ -423,7 +441,7 @@ private enum AndroidClipboardHTTPClient {
         callId: String,
         on endpoint: AndroidReceiverEndpoint,
         token: String
-    ) async -> Result {
+    ) async -> CallActionResult {
         guard let url = callActionURL(for: endpoint) else {
             return .failure("Android call action URL is invalid.", isRetryable: false)
         }
@@ -450,9 +468,9 @@ private enum AndroidClipboardHTTPClient {
                 return .failure("Android call action returned an invalid response.", isRetryable: true)
             }
 
+            let bodyText = String(data: responseBody, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
             guard httpResponse.statusCode == 200 else {
-                let bodyText = String(data: responseBody, encoding: .utf8)?
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
                 let detail = bodyText?.isEmpty == false ? " \(bodyText!)" : ""
                 return .failure(
                     "Android call action failed (\(httpResponse.statusCode)).\(detail)",
@@ -460,7 +478,7 @@ private enum AndroidClipboardHTTPClient {
                 )
             }
 
-            return .success(confirmedDeviceId: httpResponse.value(forHTTPHeaderField: Self.androidDeviceIDHeader))
+            return .success(bodyText?.isEmpty == false ? bodyText! : "Android call action sent.")
         } catch {
             return .failure(
                 "Could not send Android call action: \(error.localizedDescription)",
