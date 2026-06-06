@@ -28,7 +28,6 @@ final class ZevClipApp: NSObject, NSApplicationDelegate {
         _ sender: NSApplication,
         hasVisibleWindows flag: Bool
     ) -> Bool {
-        ZevClipRuntime.shared.showSettingsWindow()
         return false
     }
 
