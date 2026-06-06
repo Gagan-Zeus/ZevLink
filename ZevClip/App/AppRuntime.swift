@@ -128,7 +128,7 @@ private final class SettingsWindowController {
         let window = NSWindow(contentViewController: hostingController)
         window.title = "ZevClip Settings"
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
-        window.setContentSize(NSSize(width: 560, height: 720))
+        window.setContentSize(NSSize(width: 500, height: 560))
         window.setFrameAutosaveName("settings")
         window.isReleasedWhenClosed = false
         window.center()
@@ -250,49 +250,18 @@ private final class StatusItemController: NSObject {
             isClipboardSyncRunning ? "Clipboard Sync: On" : "Clipboard Sync: Off",
             to: menu
         )
-        addDisabledItem("Mac Receiver: \(receiver.status.title)", to: menu)
-        addDisabledItem(
-            macClipboardWatcher.isRunning ? "Mac Watcher: Watching" : "Mac Watcher: Stopped",
-            to: menu
-        )
-
-        if let lastReceivedAt = receiver.lastReceivedAt {
-            addDisabledItem(
-                "Last received: \(lastReceivedAt.formatted(date: .omitted, time: .shortened))",
-                to: menu
-            )
-        } else {
-            addDisabledItem("Last received: None", to: menu)
-        }
-
-        if let lastReceivedText = receiver.lastReceivedText, !lastReceivedText.isEmpty {
-            menu.addItem(.separator())
-            addDisabledItem("From Android", to: menu)
-            addDisabledItem(lastReceivedText.truncatedForMenu(), to: menu)
-        }
-
-        if let notification = receiver.lastMirroredNotification {
-            menu.addItem(.separator())
-            addDisabledItem("Last Notification", to: menu)
-            addDisabledItem(notification.displayTitle.truncatedForMenu(), to: menu)
-        }
-
-        menu.addItem(.separator())
+        addDisabledItem("Mac: \(macMenuStatus)", to: menu)
         if let endpoint = androidClipboardSender.resolvedEndpoint {
-            addDisabledItem("Android: \(endpoint.displayAddress.truncatedForMenu())", to: menu)
-            addDisabledItem("Battery: \(batteryMenuTitle(for: endpoint))", to: menu)
+            addDisabledItem("Android: \(batteryMenuTitle(for: endpoint))", to: menu)
         } else {
-            addDisabledItem("Android: Not discovered", to: menu)
+            addDisabledItem("Android: \(androidClipboardSender.isDiscovering ? "Searching" : "Not connected")", to: menu)
         }
-        addDisabledItem(androidClipboardSender.status.truncatedForMenu(), to: menu)
 
-        if let lastSentAt = androidClipboardSender.lastSentAt {
+        if let lastActivity = latestActivityDate {
             addDisabledItem(
-                "Last sent: \(lastSentAt.formatted(date: .omitted, time: .shortened))",
+                "Last activity: \(lastActivity.formatted(date: .omitted, time: .shortened))",
                 to: menu
             )
-        } else {
-            addDisabledItem("Last sent: None", to: menu)
         }
 
         menu.addItem(.separator())
@@ -305,6 +274,11 @@ private final class StatusItemController: NSObject {
             title: "Stop Clipboard Sync",
             action: #selector(stopClipboardSync),
             isEnabled: isClipboardSyncRunning
+        ))
+        menu.addItem(actionItem(
+            title: "Reconnect Android",
+            action: #selector(reconnectAndroid),
+            isEnabled: !androidClipboardSender.isDiscovering
         ))
 
         menu.addItem(.separator())
@@ -373,6 +347,25 @@ private final class StatusItemController: NSObject {
         return fallback
     }
 
+    private var macMenuStatus: String {
+        switch receiver.status {
+        case .running:
+            return "Ready"
+        case .starting:
+            return "Starting"
+        case .stopped:
+            return "Stopped"
+        case .failed:
+            return "Needs attention"
+        }
+    }
+
+    private var latestActivityDate: Date? {
+        [receiver.lastReceivedAt, androidClipboardSender.lastSentAt]
+            .compactMap { $0 }
+            .max()
+    }
+
     private func addDisabledItem(_ title: String, to menu: NSMenu) {
         let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
         item.isEnabled = false
@@ -409,6 +402,10 @@ private final class StatusItemController: NSObject {
     @objc private func stopClipboardSync() {
         receiver.stopServer()
         macClipboardWatcher.stop()
+    }
+
+    @objc private func reconnectAndroid() {
+        androidClipboardSender.rediscoverAndroidReceiver()
     }
 
     @objc private func toggleMenuBarIcon() {

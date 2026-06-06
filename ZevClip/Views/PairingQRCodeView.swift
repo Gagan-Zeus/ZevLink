@@ -6,56 +6,51 @@ import SwiftUI
 struct PairingQRCodeView: View {
     let token: String
     let deviceId: String
+    var showsDetails = true
 
     @State private var hosts = LocalNetworkHost.currentPairingHosts()
     private let hostRefreshTimer = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Pairing QR")
-                .font(.headline)
+            if showsDetails {
+                Text("Pairing QR")
+                    .font(.headline)
 
-            Text("Scan this from Android to save the Mac identity, host, port, and pairing token.")
-                .foregroundStyle(.secondary)
+                Text("Scan this from Android to save the Mac identity, host, port, and pairing token.")
+                    .foregroundStyle(.secondary)
+            }
 
             HStack(alignment: .top, spacing: 16) {
-                if let image = pairingQRCodeImage {
-                    Image(nsImage: image)
-                        .interpolation(.none)
-                        .resizable()
-                        .frame(width: 180, height: 180)
-                        .padding(12)
-                        .background(.white, in: RoundedRectangle(cornerRadius: 10))
-                } else {
-                    ContentUnavailableView("QR unavailable", systemImage: "qrcode")
-                        .frame(width: 204, height: 204)
-                }
+                qrCode
 
-                VStack(alignment: .leading, spacing: 8) {
-                    LabeledContent("Name") {
-                        Text(ClipboardReceiver.serviceName)
-                    }
+                if showsDetails {
+                    VStack(alignment: .leading, spacing: 8) {
+                        LabeledContent("Name") {
+                            Text(ClipboardReceiver.serviceName)
+                        }
 
-                    LabeledContent("Host") {
-                        Text(host)
-                            .font(.system(.body, design: .monospaced))
-                            .textSelection(.enabled)
-                    }
+                        LabeledContent("Host") {
+                            Text(host)
+                                .font(.system(.body, design: .monospaced))
+                                .textSelection(.enabled)
+                        }
 
-                    LabeledContent("Port") {
-                        Text("\(ClipboardReceiver.port)")
-                            .font(.system(.body, design: .monospaced))
-                    }
+                        LabeledContent("Port") {
+                            Text("\(ClipboardReceiver.port)")
+                                .font(.system(.body, design: .monospaced))
+                        }
 
-                    LabeledContent("Device ID") {
-                        Text(deviceId)
-                            .font(.system(.caption, design: .monospaced))
-                            .textSelection(.enabled)
-                            .lineLimit(2)
-                    }
+                        LabeledContent("Device ID") {
+                            Text(deviceId)
+                                .font(.system(.caption, design: .monospaced))
+                                .textSelection(.enabled)
+                                .lineLimit(2)
+                        }
 
-                    Button("Refresh Host") {
-                        refreshHost()
+                        Button("Refresh Host") {
+                            refreshHost()
+                        }
                     }
                 }
             }
@@ -80,6 +75,21 @@ struct PairingQRCodeView: View {
         let image = NSImage(size: representation.size)
         image.addRepresentation(representation)
         return image
+    }
+
+    @ViewBuilder
+    private var qrCode: some View {
+        if let image = pairingQRCodeImage {
+            Image(nsImage: image)
+                .interpolation(.none)
+                .resizable()
+                .frame(width: showsDetails ? 180 : 220, height: showsDetails ? 180 : 220)
+                .padding(12)
+                .background(.white, in: RoundedRectangle(cornerRadius: 10))
+        } else {
+            ContentUnavailableView("QR unavailable", systemImage: "qrcode")
+                .frame(width: showsDetails ? 204 : 244, height: showsDetails ? 204 : 244)
+        }
     }
 
     private var pairingPayloadData: Data? {
