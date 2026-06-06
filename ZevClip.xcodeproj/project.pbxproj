@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		003C797EAA8C8B95F5BC210B /* LocalNetworkHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB39B975B9C136C551CFBBC4 /* LocalNetworkHost.swift */; };
+		16E071D5A4C74C289EBC0051 /* MacBatteryStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E23B2F0B3A14745BA8C4311 /* MacBatteryStatus.swift */; };
 		3F129658B18A045EB75D744E /* PairingTokenKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = D349EA03D0A76DC6B676F25E /* PairingTokenKeychain.swift */; };
 		5B2A64EEB803EC30746CA86F /* ClipboardReceiver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08BB497EA327D472BA901879 /* ClipboardReceiver.swift */; };
 		86592C60E6753F38F8F1A5CA /* MacClipboardWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1077912024FDF76610651B40 /* MacClipboardWatcher.swift */; };
@@ -35,6 +36,7 @@
 		4AFF2250F5F626D53C0BE6CF /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		4F2EFD3F683F74CF002CD50F /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
 		5BAF94C62FB5C5E506492DFD /* ClipboardHTTPServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardHTTPServer.swift; sourceTree = "<group>"; };
+		7E23B2F0B3A14745BA8C4311 /* MacBatteryStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacBatteryStatus.swift; sourceTree = "<group>"; };
 		7AA610A696A5F3C375689D0B /* ZevClipApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZevClipApp.swift; sourceTree = "<group>"; };
 		9BEBD56CA3E8F68B7C8F8931 /* AndroidReceiverDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AndroidReceiverDiscovery.swift; sourceTree = "<group>"; };
 		9F80D315D93BC2EBAB672C9A /* DeviceIdentityStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceIdentityStore.swift; sourceTree = "<group>"; };
@@ -111,6 +113,7 @@
 			isa = PBXGroup;
 			children = (
 				BB39B975B9C136C551CFBBC4 /* LocalNetworkHost.swift */,
+				7E23B2F0B3A14745BA8C4311 /* MacBatteryStatus.swift */,
 			);
 			path = Support;
 			sourceTree = "<group>";
@@ -204,6 +207,7 @@
 				B8CA797C763F040EDE0356DE /* ContentView.swift in Sources */,
 				AEE8CDAB4F0D66EBEDD57F6F /* DeviceIdentityStore.swift in Sources */,
 				003C797EAA8C8B95F5BC210B /* LocalNetworkHost.swift in Sources */,
+				16E071D5A4C74C289EBC0051 /* MacBatteryStatus.swift in Sources */,
 				86592C60E6753F38F8F1A5CA /* MacClipboardWatcher.swift in Sources */,
 				A4082A7C2B57560785213E49 /* MenuBarContentView.swift in Sources */,
 				A801C940E295D9F6D3AE997A /* PairingQRCodeView.swift in Sources */,

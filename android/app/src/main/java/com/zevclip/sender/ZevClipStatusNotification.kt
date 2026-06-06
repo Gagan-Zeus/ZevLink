@@ -9,6 +9,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 
 object ZevClipStatusNotification {
     fun update(context: Context) {
@@ -20,12 +22,14 @@ object ZevClipStatusNotification {
         val manager = appContext.getSystemService(NotificationManager::class.java)
         manager.createStatusChannel()
         manager.notify(NOTIFICATION_ID, buildNotification(appContext))
+        scheduleConnectionExpiryRefresh(appContext)
     }
 
     fun cancel(context: Context) {
         context.applicationContext
             .getSystemService(NotificationManager::class.java)
             .cancel(NOTIFICATION_ID)
+        refreshHandler.removeCallbacksAndMessages(null)
     }
 
     fun canPostNotifications(context: Context): Boolean {
@@ -42,11 +46,7 @@ object ZevClipStatusNotification {
         } else {
             context.getString(R.string.notification_title_stopped)
         }
-        val text = if (syncEnabled && receiverRunning) {
-            context.getString(R.string.notification_text_running)
-        } else {
-            context.getString(R.string.notification_text_stopped)
-        }
+        val text = connectionNotificationText(context, syncEnabled && receiverRunning)
 
         val contentIntent = PendingIntent.getActivity(
             context,
@@ -61,11 +61,61 @@ object ZevClipStatusNotification {
             .setSmallIcon(R.drawable.ic_sync_clipboard)
             .setContentTitle(title)
             .setContentText(text)
+            .setStyle(Notification.BigTextStyle().bigText(text))
             .setContentIntent(contentIntent)
             .setOngoing(syncEnabled && receiverRunning)
             .setShowWhen(false)
             .setOnlyAlertOnce(true)
             .build()
+    }
+
+    private fun connectionNotificationText(context: Context, canConnect: Boolean): String {
+        if (!canConnect) {
+            return context.getString(R.string.notification_status_not_connected)
+        }
+
+        val status = ZevClipPreferences.macBatteryStatus(context)
+        if (status.lastSeenAtMillis <= 0L) {
+            return context.getString(R.string.notification_status_not_connected)
+        }
+
+        val ageMillis = System.currentTimeMillis() - status.lastSeenAtMillis
+        if (ageMillis > MAC_STATUS_STALE_MS) {
+            return context.getString(R.string.notification_status_not_connected)
+        }
+
+        val connectedText = context.getString(R.string.notification_status_connected)
+        if (!status.isAvailable) return connectedText
+
+        val percentage = status.percentage ?: return connectedText
+        val chargingSuffix = if (status.isCharging) " charging" else ""
+        return "$connectedText · Mac $percentage%$chargingSuffix"
+    }
+
+    private fun scheduleConnectionExpiryRefresh(context: Context) {
+        refreshHandler.removeCallbacksAndMessages(null)
+
+        if (!ZevClipPreferences.isClipboardSyncEnabled(context) ||
+            !ZevClipPreferences.isAndroidReceiverRunning(context)
+        ) {
+            return
+        }
+
+        val status = ZevClipPreferences.macBatteryStatus(context)
+        if (status.lastSeenAtMillis <= 0L) {
+            return
+        }
+
+        val ageMillis = System.currentTimeMillis() - status.lastSeenAtMillis
+        if (ageMillis >= MAC_STATUS_STALE_MS) {
+            return
+        }
+
+        val appContext = context.applicationContext
+        refreshHandler.postDelayed(
+            { update(appContext) },
+            MAC_STATUS_STALE_MS - ageMillis + EXPIRY_REFRESH_GRACE_MS
+        )
     }
 
     private fun NotificationManager.createStatusChannel() {
@@ -86,4 +136,7 @@ object ZevClipStatusNotification {
 
     private const val CHANNEL_ID = "zevclip_status"
     private const val NOTIFICATION_ID = 1042
+    private const val MAC_STATUS_STALE_MS = 90 * 1000L
+    private const val EXPIRY_REFRESH_GRACE_MS = 1_000L
+    private val refreshHandler = Handler(Looper.getMainLooper())
 }

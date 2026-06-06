@@ -129,6 +129,8 @@ class AndroidClipboardHttpReceiver(
                 return
             }
 
+            rememberMacBatteryStatus(headers)
+
             if (requestParts[0] == "GET" && requestParts[1] == STATUS_PATH) {
                 output.write(statusResponse().toByteArray(Charsets.UTF_8))
                 return
@@ -366,6 +368,24 @@ class AndroidClipboardHttpReceiver(
         return percentage.takeIf { it in 0..100 }
     }
 
+    private fun rememberMacBatteryStatus(headers: Map<String, String>) {
+        val availabilityHeader = headers[MAC_BATTERY_AVAILABLE_HEADER] ?: return
+        val isAvailable = availabilityHeader.equals("true", ignoreCase = true)
+        val percentage = headers[MAC_BATTERY_HEADER]
+            ?.toIntOrNull()
+            ?.takeIf { it in 0..100 }
+        val isCharging = headers[MAC_CHARGING_HEADER]
+            ?.let { it.equals("true", ignoreCase = true) }
+
+        ZevClipPreferences.setMacBatteryStatus(
+            context = appContext,
+            percentage = percentage,
+            isCharging = isCharging,
+            isAvailable = isAvailable
+        )
+        ZevClipStatusNotification.update(appContext)
+    }
+
     private fun response(
         status: String,
         body: String,
@@ -403,6 +423,9 @@ class AndroidClipboardHttpReceiver(
         private const val ANDROID_DEVICE_ID_HEADER = "X-ZevClip-Android-Device-ID"
         private const val ANDROID_RECEIVER_NAME_HEADER = "X-ZevClip-Android-Receiver-Name"
         private const val ANDROID_BATTERY_HEADER = "X-ZevClip-Android-Battery"
+        private const val MAC_BATTERY_AVAILABLE_HEADER = "x-zevclip-mac-battery-available"
+        private const val MAC_BATTERY_HEADER = "x-zevclip-mac-battery"
+        private const val MAC_CHARGING_HEADER = "x-zevclip-mac-charging"
         private const val CLIPBOARD_LABEL = "ZevClip"
         private const val HEADER_END = "\r\n\r\n"
         private const val MAX_HEADER_LENGTH = 16_384

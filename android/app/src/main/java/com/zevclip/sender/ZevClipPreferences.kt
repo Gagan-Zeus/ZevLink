@@ -27,6 +27,10 @@ object ZevClipPreferences {
     const val KEY_NOTIFICATION_MIRROR_CONNECTED = "notification_mirror_connected"
     const val KEY_NOTIFICATION_MIRROR_STATUS = "notification_mirror_status"
     const val KEY_CALL_MIRROR_STATUS = "call_mirror_status"
+    const val KEY_MAC_BATTERY_PERCENTAGE = "mac_battery_percentage"
+    const val KEY_MAC_BATTERY_CHARGING = "mac_battery_charging"
+    const val KEY_MAC_BATTERY_AVAILABLE = "mac_battery_available"
+    const val KEY_MAC_BATTERY_LAST_SEEN_AT = "mac_battery_last_seen_at"
 
     private const val KEY_ANDROID_DEVICE_ID = "android_device_id"
     private const val KEY_LAST_TILE_SUBTITLE = "last_tile_subtitle"
@@ -233,6 +237,43 @@ object ZevClipPreferences {
             .apply()
     }
 
+    fun macBatteryStatus(context: Context): MacBatteryStatus {
+        val preferences = preferences(context)
+        val percentage = preferences.getInt(KEY_MAC_BATTERY_PERCENTAGE, -1)
+            .takeIf { it in 0..100 }
+
+        return MacBatteryStatus(
+            percentage = percentage,
+            isCharging = preferences.getBoolean(KEY_MAC_BATTERY_CHARGING, false),
+            isAvailable = preferences.getBoolean(KEY_MAC_BATTERY_AVAILABLE, false),
+            lastSeenAtMillis = preferences.getLong(KEY_MAC_BATTERY_LAST_SEEN_AT, 0L)
+        )
+    }
+
+    fun setMacBatteryStatus(
+        context: Context,
+        percentage: Int?,
+        isCharging: Boolean?,
+        isAvailable: Boolean,
+        seenAtMillis: Long = System.currentTimeMillis()
+    ) {
+        val editor = preferences(context).edit()
+            .putBoolean(KEY_MAC_BATTERY_AVAILABLE, isAvailable)
+            .putLong(KEY_MAC_BATTERY_LAST_SEEN_AT, seenAtMillis)
+
+        if (percentage != null) {
+            editor.putInt(KEY_MAC_BATTERY_PERCENTAGE, percentage)
+        } else {
+            editor.remove(KEY_MAC_BATTERY_PERCENTAGE)
+        }
+
+        if (isCharging != null) {
+            editor.putBoolean(KEY_MAC_BATTERY_CHARGING, isCharging)
+        }
+
+        editor.apply()
+    }
+
     fun discoveryStatus(context: Context): String {
         return preferences(context).getString(
             KEY_DISCOVERY_STATUS,
@@ -343,4 +384,11 @@ object ZevClipPreferences {
 data class Endpoint(
     val ipAddress: String,
     val port: Int
+)
+
+data class MacBatteryStatus(
+    val percentage: Int?,
+    val isCharging: Boolean,
+    val isAvailable: Boolean,
+    val lastSeenAtMillis: Long
 )

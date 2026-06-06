@@ -321,6 +321,7 @@ private enum AndroidClipboardHTTPClient {
         request.timeoutInterval = 8
         request.setValue(token, forHTTPHeaderField: "X-ZevClip-Token")
         request.setValue("text/plain; charset=utf-8", forHTTPHeaderField: "Content-Type")
+        applyMacBatteryHeaders(to: &request)
         request.httpBody = Data(text.utf8)
 
         do {
@@ -360,6 +361,7 @@ private enum AndroidClipboardHTTPClient {
         request.httpMethod = "GET"
         request.timeoutInterval = 5
         request.setValue(token, forHTTPHeaderField: "X-ZevClip-Token")
+        applyMacBatteryHeaders(to: &request)
 
         do {
             let (body, response) = try await URLSession.shared.data(for: request)
@@ -409,6 +411,7 @@ private enum AndroidClipboardHTTPClient {
         request.timeoutInterval = 5
         request.setValue(token, forHTTPHeaderField: "X-ZevClip-Token")
         request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
+        applyMacBatteryHeaders(to: &request)
         request.httpBody = bodyData
 
         do {
@@ -460,6 +463,7 @@ private enum AndroidClipboardHTTPClient {
         request.timeoutInterval = 5
         request.setValue(token, forHTTPHeaderField: "X-ZevClip-Token")
         request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
+        applyMacBatteryHeaders(to: &request)
         request.httpBody = bodyData
 
         do {
@@ -544,6 +548,22 @@ private enum AndroidClipboardHTTPClient {
         statusCode == 408 || statusCode == 429 || (500...599).contains(statusCode)
     }
 
+    private static func applyMacBatteryHeaders(to request: inout URLRequest) {
+        let battery = MacBatteryStatus.current()
+        request.setValue(battery.isAvailable ? "true" : "false", forHTTPHeaderField: macBatteryAvailableHeader)
+
+        if let percentage = battery.percentage {
+            request.setValue(String(percentage), forHTTPHeaderField: macBatteryHeader)
+        }
+
+        if let isCharging = battery.isCharging {
+            request.setValue(isCharging ? "true" : "false", forHTTPHeaderField: macChargingHeader)
+        }
+    }
+
     private static let androidDeviceIDHeader = "X-ZevClip-Android-Device-ID"
     private static let androidBatteryHeader = "X-ZevClip-Android-Battery"
+    private static let macBatteryAvailableHeader = "X-ZevClip-Mac-Battery-Available"
+    private static let macBatteryHeader = "X-ZevClip-Mac-Battery"
+    private static let macChargingHeader = "X-ZevClip-Mac-Charging"
 }

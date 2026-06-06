@@ -11,7 +11,9 @@
     <string name="sync_started_accessibility_needed">Sync started. Enable ZevClip Accessibility for Android to Mac copies.</string>
     <string name="sync_stopped">Clipboard sync stopped.</string>
     <string name="notification_title_running">ZevClip running</string>
-    <string name="notification_text_running">Clipboard sync is on.</string>
+    <string name="notification_text_running">Clipboard sync is on</string>
+    <string name="notification_status_connected">Connected</string>
+    <string name="notification_status_not_connected">Not connected</string>
     <string name="notification_title_stopped">ZevClip stopped</string>
     <string name="notification_text_stopped">Clipboard sync is off.</string>
     <string name="notification_mirror_compact_status">Notification mirroring: %1$s\n%2$s</string>
