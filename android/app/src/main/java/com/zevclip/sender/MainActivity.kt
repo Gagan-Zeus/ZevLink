@@ -9,7 +9,10 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.Icon
+import android.util.TypedValue
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -40,8 +43,6 @@ class MainActivity : Activity() {
     private lateinit var ipAddressInput: EditText
     private lateinit var portInput: EditText
     private lateinit var pairingTokenInput: EditText
-    private lateinit var textInput: EditText
-    private lateinit var sendButton: Button
     private lateinit var scanPairingQrButton: Button
     private lateinit var statusText: TextView
     private lateinit var discoverButton: Button
@@ -56,6 +57,8 @@ class MainActivity : Activity() {
     private lateinit var callMirrorStatusText: TextView
     private lateinit var lastAutoStatusText: TextView
     private lateinit var discoveryManager: MacDiscoveryManager
+    private lateinit var colors: DynamicPalette
+    private var showingSettings = false
     private val mainHandler = Handler(Looper.getMainLooper())
 
     private val preferencesListener = SharedPreferences.OnSharedPreferenceChangeListener {
@@ -84,24 +87,35 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(createContentView())
-        requestNotificationPermissionIfNeeded()
+        colors = resolveDynamicPalette()
+        window.statusBarColor = colors.background
+        window.navigationBarColor = colors.background
         discoveryManager = MacDiscoveryManager(
             context = this,
             onStatusChanged = { status, isDiscovering ->
                 if (!isDestroyed) {
-                    discoverButton.isEnabled = !isDiscovering
-                    discoveryStatusText.text = getString(R.string.discovery_status, status)
+                    if (::discoverButton.isInitialized) {
+                        discoverButton.isEnabled = !isDiscovering
+                    }
+                    if (::discoveryStatusText.isInitialized) {
+                        discoveryStatusText.text = getString(R.string.discovery_status, status)
+                    }
                 }
             },
             onEndpointResolved = { host, port ->
                 if (!isDestroyed) {
-                    ipAddressInput.setText(host)
-                    portInput.setText(String.format(Locale.US, "%d", port))
+                    if (::ipAddressInput.isInitialized) {
+                        ipAddressInput.setText(host)
+                    }
+                    if (::portInput.isInitialized) {
+                        portInput.setText(String.format(Locale.US, "%d", port))
+                    }
                     ZevClipPreferences.saveEndpoint(this, host, port.toString())
                 }
             }
         )
+        showHomePage()
+        requestNotificationPermissionIfNeeded()
     }
 
     override fun onStart() {
@@ -140,13 +154,26 @@ class MainActivity : Activity() {
 
     override fun onPause() {
         mainHandler.removeCallbacksAndMessages(null)
-        ZevClipPreferences.saveEndpoint(
-            this,
-            ipAddressInput.text.toString(),
-            portInput.text.toString()
-        )
-        ZevClipPreferences.savePairingToken(this, pairingTokenInput.text.toString())
+        if (::ipAddressInput.isInitialized && ::portInput.isInitialized) {
+            ZevClipPreferences.saveEndpoint(
+                this,
+                ipAddressInput.text.toString(),
+                portInput.text.toString()
+            )
+        }
+        if (::pairingTokenInput.isInitialized) {
+            ZevClipPreferences.savePairingToken(this, pairingTokenInput.text.toString())
+        }
         super.onPause()
+    }
+
+    @Deprecated("Deprecated in Android framework, but still the compatibility path for this Activity.")
+    override fun onBackPressed() {
+        if (showingSettings) {
+            showHomePage()
+        } else {
+            super.onBackPressed()
+        }
     }
 
     override fun onStop() {
@@ -161,222 +188,146 @@ class MainActivity : Activity() {
         super.onDestroy()
     }
 
-    private fun createContentView(): View {
-        val preferences = ZevClipPreferences.preferences(this)
-        val content = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(24), dp(24), dp(24), dp(24))
-        }
-
-        content.addView(textView(getString(R.string.screen_title), 26f, Color.BLACK).apply {
-            setTypeface(typeface, android.graphics.Typeface.BOLD)
-        })
-        content.addView(textView(getString(R.string.screen_description), 15f, Color.DKGRAY).apply {
-            setPadding(0, dp(6), 0, dp(20))
-        })
-
-        content.addView(sectionTitle(R.string.clipboard_sync_title))
-
-        statusText = textView(getString(R.string.ready), 15f, Color.DKGRAY).apply {
-            setPadding(0, dp(6), 0, dp(8))
-        }
-        content.addView(statusText, matchWidth())
-
-        androidReceiverStatusText = textView("", 14f, Color.DKGRAY).apply {
-            setPadding(0, dp(6), 0, dp(8))
-        }
-        content.addView(androidReceiverStatusText, matchWidth())
-
-        lastAutoStatusText = textView("", 14f, Color.DKGRAY).apply {
-            setPadding(0, 0, 0, dp(8))
-        }
-        content.addView(lastAutoStatusText, matchWidth())
-
-        androidReceiverLastReceivedText = textView("", 14f, Color.DKGRAY).apply {
-            setPadding(0, 0, 0, dp(8))
-        }
-        content.addView(androidReceiverLastReceivedText, matchWidth())
-
-        startClipboardSyncButton = Button(this).apply {
-            text = getString(R.string.start_clipboard_sync)
-            isAllCaps = false
-            setOnClickListener { startClipboardSync() }
-        }
-        content.addView(startClipboardSyncButton, matchWidth(topMargin = 8))
-
-        stopClipboardSyncButton = Button(this).apply {
-            text = getString(R.string.stop_clipboard_sync)
-            isAllCaps = false
-            setOnClickListener { stopClipboardSync() }
-        }
-        content.addView(stopClipboardSyncButton, matchWidth(topMargin = 8))
-
-        accessibilityStatusText = textView("", 14f, Color.DKGRAY).apply {
-            setPadding(0, dp(12), 0, 0)
-        }
-        content.addView(accessibilityStatusText, matchWidth())
-
-        content.addView(Button(this).apply {
-            text = getString(R.string.open_accessibility_settings)
-            isAllCaps = false
-            setOnClickListener {
-                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-            }
-        }, matchWidth(topMargin = 8))
-
-        notificationMirrorStatusText = textView("", 14f, Color.DKGRAY).apply {
-            setPadding(0, dp(12), 0, 0)
-        }
-        content.addView(notificationMirrorStatusText, matchWidth())
-
-        content.addView(Button(this).apply {
-            text = getString(R.string.open_notification_access_settings)
-            isAllCaps = false
-            setOnClickListener {
-                startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
-            }
-        }, matchWidth(topMargin = 8))
-
-        callMirrorStatusText = textView("", 14f, Color.DKGRAY).apply {
-            setPadding(0, dp(12), 0, 0)
-        }
-        content.addView(callMirrorStatusText, matchWidth())
-
-        content.addView(divider(), dividerLayoutParams(topMargin = 12))
-
-        content.addView(sectionTitle(R.string.pairing_title))
-        content.addView(
-            textView(getString(R.string.pairing_instructions), 14f, Color.DKGRAY),
-            matchWidth()
-        )
-
-        scanPairingQrButton = Button(this).apply {
-            text = getString(R.string.scan_pairing_qr)
-            isAllCaps = false
-            setOnClickListener { scanPairingQr() }
-        }
-        content.addView(scanPairingQrButton, matchWidth(topMargin = 8))
-
-        discoverButton = Button(this).apply {
-            text = getString(R.string.discover_mac)
-            isAllCaps = false
-            setOnClickListener { discoveryManager.discover() }
-        }
-        content.addView(discoverButton, matchWidth(topMargin = 8))
-
-        discoveryStatusText = textView("", 14f, Color.DKGRAY).apply {
-            setPadding(0, dp(12), 0, dp(8))
-        }
-        content.addView(discoveryStatusText, matchWidth())
-
-        content.addView(fieldLabel(R.string.pairing_token_label))
-        pairingTokenInput = EditText(this).apply {
-            hint = getString(R.string.pairing_token_hint)
-            inputType = InputType.TYPE_CLASS_TEXT or
-                InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD or
-                InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
-            isSingleLine = true
-            imeOptions = EditorInfo.IME_ACTION_DONE
-            setText(preferences.getString(ZevClipPreferences.KEY_PAIRING_TOKEN, ""))
-        }
-        content.addView(pairingTokenInput, matchWidth())
-
-        content.addView(Button(this).apply {
-            text = getString(R.string.save_pairing_token)
-            isAllCaps = false
-            setOnClickListener { savePairingTokenFromUi() }
-        }, matchWidth(topMargin = 8))
-
-        pairingStatusText = textView(getString(R.string.pairing_token_not_saved), 14f, Color.DKGRAY).apply {
-            setPadding(0, dp(12), 0, 0)
-        }
-        content.addView(pairingStatusText, matchWidth())
-
-        content.addView(fieldLabel(R.string.mac_ip_label))
-        ipAddressInput = EditText(this).apply {
-            hint = getString(R.string.mac_ip_hint)
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
-            isSingleLine = true
-            imeOptions = EditorInfo.IME_ACTION_NEXT
-            setText(preferences.getString(ZevClipPreferences.KEY_IP_ADDRESS, ""))
-        }
-        content.addView(ipAddressInput, matchWidth())
-
-        content.addView(fieldLabel(R.string.port_label))
-        portInput = EditText(this).apply {
-            inputType = InputType.TYPE_CLASS_NUMBER
-            isSingleLine = true
-            imeOptions = EditorInfo.IME_ACTION_NEXT
-            setText(
-                preferences.getString(
-                    ZevClipPreferences.KEY_PORT,
-                    ZevClipPreferences.DEFAULT_PORT
-                )
-            )
-        }
-        content.addView(portInput, matchWidth())
-
-        return ScrollView(this).apply {
-            isFillViewport = true
-            addView(content)
-            applySystemBarPadding(content)
-        }
+    private fun showHomePage() {
+        showingSettings = false
+        setContentView(createHomeView())
+        refreshSyncStatuses()
     }
 
-    private fun sendText() {
-        val ipAddress = ipAddressInput.text.toString().trim()
-        val portText = portInput.text.toString().trim()
-        val text = textInput.text.toString()
+    private fun showSettingsPage() {
+        showingSettings = true
+        setContentView(createSettingsView())
+        refreshSyncStatuses()
+    }
 
-        if (!NetworkInputValidator.validateHost(ipAddress)) {
-            showFailure("Enter a valid Mac IP or host, for example 192.168.1.10.")
-            ipAddressInput.requestFocus()
-            return
-        }
+    private fun createHomeView(): View {
+        val content = pageContent()
 
-        val port = NetworkInputValidator.parsePort(portText)
-        if (port == null) {
-            showFailure("Enter a port between 1 and 65535.")
-            portInput.requestFocus()
-            return
-        }
+        content.addView(headerRow(
+            title = getString(R.string.screen_title),
+            action = tonalButton(getString(R.string.settings_title)) { showSettingsPage() }
+        ))
+        content.addView(textView(getString(R.string.screen_description), 18f, colors.muted).apply {
+            setPadding(0, dp(6), 0, dp(18))
+            setLineSpacing(0f, 1.08f)
+        })
 
-        if (text.isEmpty()) {
-            showFailure("Enter text to send.")
-            textInput.requestFocus()
-            return
-        }
+        content.addView(syncCard(), matchWidth(topMargin = 2))
 
-        val pairingToken = pairingTokenInput.text.toString().trim()
-        if (pairingToken.isEmpty()) {
-            showFailure("Enter the pairing token shown on the Mac.")
-            pairingTokenInput.requestFocus()
-            return
-        }
+        return scrollPage(content)
+    }
 
-        ZevClipPreferences.saveEndpoint(this, ipAddress, port.toString())
-        ZevClipPreferences.savePairingToken(this, pairingToken)
+    private fun createSettingsView(): View {
+        val preferences = ZevClipPreferences.preferences(this)
+        val content = pageContent()
 
-        sendButton.isEnabled = false
-        statusText.setTextColor(Color.DKGRAY)
-        statusText.text = getString(
-            R.string.sending_to_endpoint,
-            "http://${ipAddress.formatEndpointHost()}:$port/clipboard"
-        )
+        content.addView(headerRow(
+            title = getString(R.string.settings_title),
+            action = tonalButton(getString(R.string.done)) { showHomePage() }
+        ))
+        content.addView(textView(getString(R.string.settings_description), 17f, colors.muted).apply {
+            setPadding(0, dp(6), 0, dp(18))
+            setLineSpacing(0f, 1.06f)
+        })
 
-        thread(name = "ZevClipSender") {
-            val result = ResilientClipboardSender.sendSavedEndpoint(applicationContext, text)
-            runOnUiThread {
-                if (isDestroyed) return@runOnUiThread
+        content.addView(card(colors.surface).apply {
+            addView(cardTitle(getString(R.string.permissions_title)))
 
-                refreshEndpointInputsFromPreferencesIfUnfocused()
-                sendButton.isEnabled = true
-                when (result) {
-                    is SendResult.Success -> showSuccess(result.message)
-                    is SendResult.Failure -> showFailure(result.message)
+            accessibilityStatusText = textView("", 15f, colors.muted)
+            addView(accessibilityStatusText, matchWidth(topMargin = 8))
+
+            notificationMirrorStatusText = textView("", 15f, colors.muted)
+            addView(notificationMirrorStatusText, matchWidth(topMargin = 8))
+
+            callMirrorStatusText = textView("", 15f, colors.muted)
+            addView(callMirrorStatusText, matchWidth(topMargin = 8))
+
+            addView(horizontalButtons(
+                tonalButton(getString(R.string.open_accessibility_settings)) {
+                    startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                },
+                tonalButton(getString(R.string.open_notification_access_settings)) {
+                    startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
                 }
+            ), matchWidth(topMargin = 16))
+        }, matchWidth(topMargin = 2))
+
+        content.addView(card(colors.accentContainer).apply {
+            addView(cardTitle(getString(R.string.pair_mac_title)))
+            addView(textView(getString(R.string.pair_mac_description), 15f, colors.muted).apply {
+                setPadding(0, dp(6), 0, dp(14))
+            })
+
+            scanPairingQrButton = primaryButton(getString(R.string.scan_pairing_qr)) { scanPairingQr() }
+            addView(scanPairingQrButton, matchWidth())
+
+            discoverButton = quietButton(getString(R.string.discover_mac)) {
+                discoveryManager.discover()
             }
-        }
+            addView(discoverButton, matchWidth(topMargin = 10))
+
+            discoveryStatusText = textView("", 14f, colors.muted).apply {
+                setPadding(0, dp(12), 0, 0)
+            }
+            addView(discoveryStatusText, matchWidth())
+        }, matchWidth(topMargin = 16))
+
+        content.addView(card(colors.surface).apply {
+            addView(cardTitle(getString(R.string.manual_setup_title)))
+            addView(textView(getString(R.string.manual_setup_description), 14f, colors.muted).apply {
+                setPadding(0, dp(6), 0, dp(12))
+            })
+
+            addView(fieldLabel(R.string.pairing_token_label))
+            pairingTokenInput = styledEditText().apply {
+                hint = getString(R.string.pairing_token_hint)
+                inputType = InputType.TYPE_CLASS_TEXT or
+                    InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD or
+                    InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+                isSingleLine = false
+                maxLines = 2
+                minHeight = dp(78)
+                gravity = Gravity.CENTER_VERTICAL or Gravity.START
+                imeOptions = EditorInfo.IME_ACTION_DONE
+                setText(preferences.getString(ZevClipPreferences.KEY_PAIRING_TOKEN, ""))
+            }
+            addView(pairingTokenInput, matchWidth(topMargin = 6))
+
+            addView(tonalButton(getString(R.string.save_pairing_token)) {
+                savePairingTokenFromUi()
+            }, matchWidth(topMargin = 10))
+
+            pairingStatusText = textView(getString(R.string.pairing_token_not_saved), 14f, colors.muted).apply {
+                setPadding(0, dp(10), 0, dp(8))
+            }
+            addView(pairingStatusText, matchWidth())
+
+            addView(fieldLabel(R.string.mac_ip_label))
+            ipAddressInput = styledEditText().apply {
+                hint = getString(R.string.mac_ip_hint)
+                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+                isSingleLine = true
+                imeOptions = EditorInfo.IME_ACTION_NEXT
+                setText(preferences.getString(ZevClipPreferences.KEY_IP_ADDRESS, ""))
+            }
+            addView(ipAddressInput, matchWidth(topMargin = 6))
+
+            addView(fieldLabel(R.string.port_label))
+            portInput = styledEditText().apply {
+                inputType = InputType.TYPE_CLASS_NUMBER
+                isSingleLine = true
+                imeOptions = EditorInfo.IME_ACTION_NEXT
+                setText(
+                    preferences.getString(
+                        ZevClipPreferences.KEY_PORT,
+                        ZevClipPreferences.DEFAULT_PORT
+                    )
+                )
+            }
+            addView(portInput, matchWidth(topMargin = 6))
+        }, matchWidth(topMargin = 16))
+
+        return scrollPage(content)
     }
 
     private fun startClipboardSync() {
@@ -412,18 +363,21 @@ class MainActivity : Activity() {
     }
 
     private fun saveEndpointAndTokenFromUi() {
-        ZevClipPreferences.saveEndpoint(
-            this,
-            ipAddressInput.text.toString(),
-            portInput.text.toString()
-        )
-        ZevClipPreferences.savePairingToken(this, pairingTokenInput.text.toString())
+        if (::ipAddressInput.isInitialized && ::portInput.isInitialized) {
+            ZevClipPreferences.saveEndpoint(
+                this,
+                ipAddressInput.text.toString(),
+                portInput.text.toString()
+            )
+        }
+        if (::pairingTokenInput.isInitialized) {
+            ZevClipPreferences.savePairingToken(this, pairingTokenInput.text.toString())
+        }
     }
 
     private fun scanPairingQr() {
         scanPairingQrButton.isEnabled = false
-        statusText.setTextColor(Color.DKGRAY)
-        statusText.text = getString(R.string.qr_scan_starting)
+        showPageStatus(getString(R.string.qr_scan_starting), colors.muted)
 
         val options = GmsBarcodeScannerOptions.Builder()
             .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
@@ -455,8 +409,7 @@ class MainActivity : Activity() {
         PairingQrPayload.parse(rawValue)
             .onSuccess { payload ->
                 scanPairingQrButton.isEnabled = false
-                statusText.setTextColor(Color.DKGRAY)
-                statusText.text = getString(R.string.qr_pairing_checking)
+                showPageStatus(getString(R.string.qr_pairing_checking), colors.muted)
 
                 thread(name = "ZevClipQrEndpointProbe") {
                     val reachableHost = EndpointSelector.selectReachableHost(payload.hosts, payload.port)
@@ -499,25 +452,40 @@ class MainActivity : Activity() {
     private fun savePairingTokenFromUi() {
         val token = pairingTokenInput.text.toString().trim()
         if (token.isEmpty()) {
-            pairingStatusText.setTextColor(Color.rgb(180, 32, 32))
+            pairingStatusText.setTextColor(colors.error)
             pairingStatusText.text = getString(R.string.pairing_token_empty)
             pairingTokenInput.requestFocus()
             return
         }
 
         ZevClipPreferences.savePairingToken(this, token)
-        pairingStatusText.setTextColor(Color.rgb(24, 120, 54))
+        pairingStatusText.setTextColor(colors.success)
         pairingStatusText.text = getString(R.string.pairing_token_saved)
     }
 
     private fun showSuccess(message: String) {
-        statusText.setTextColor(Color.rgb(24, 120, 54))
-        statusText.text = message
+        showPageStatus(message, colors.success)
     }
 
     private fun showFailure(message: String) {
-        statusText.setTextColor(Color.rgb(180, 32, 32))
-        statusText.text = message
+        showPageStatus(message, colors.error)
+    }
+
+    private fun showPageStatus(message: String, color: Int) {
+        when {
+            showingSettings && ::discoveryStatusText.isInitialized -> {
+                discoveryStatusText.setTextColor(color)
+                discoveryStatusText.text = message
+            }
+            ::statusText.isInitialized -> {
+                statusText.setTextColor(color)
+                statusText.text = message
+            }
+            ::discoveryStatusText.isInitialized -> {
+                discoveryStatusText.setTextColor(color)
+                discoveryStatusText.text = message
+            }
+        }
     }
 
     private fun refreshSyncStatuses() {
@@ -529,81 +497,78 @@ class MainActivity : Activity() {
         val canSendToMac = syncEnabled && accessibilityState.enabled && endpoint != null && hasToken
         val canReceiveFromMac = syncEnabled && receiverRunning
 
-        statusText.setTextColor(
-            when {
-                canSendToMac && canReceiveFromMac -> Color.rgb(24, 120, 54)
-                syncEnabled -> Color.rgb(180, 92, 0)
-                else -> Color.DKGRAY
+        if (::statusText.isInitialized) {
+            statusText.setTextColor(
+                when {
+                    canSendToMac && canReceiveFromMac -> colors.success
+                    syncEnabled -> colors.warning
+                    else -> colors.muted
+                }
+            )
+            statusText.text = when {
+                canSendToMac && canReceiveFromMac -> getString(R.string.sync_ready_summary)
+                syncEnabled && endpoint == null -> getString(R.string.sync_waiting_for_mac)
+                syncEnabled && !accessibilityState.enabled -> getString(R.string.sync_needs_accessibility)
+                syncEnabled && !hasToken -> getString(R.string.sync_needs_pairing)
+                syncEnabled -> getString(R.string.sync_starting_summary)
+                else -> getString(R.string.sync_off_summary)
             }
-        )
-        statusText.text = getString(
-            R.string.sync_summary,
-            if (syncEnabled) getString(R.string.on) else getString(R.string.off),
-            if (canSendToMac) getString(R.string.ready) else getString(R.string.needs_setup),
-            if (canReceiveFromMac) getString(R.string.ready) else getString(R.string.stopped)
-        )
+        }
 
-        accessibilityStatusText.setTextColor(
-            if (accessibilityState.enabled) Color.rgb(24, 120, 54) else Color.rgb(180, 32, 32)
-        )
-        accessibilityStatusText.text = getString(
-            R.string.accessibility_compact_status,
-            if (accessibilityState.enabled) {
-                getString(R.string.accessibility_permission_enabled)
-            } else {
-                getString(R.string.accessibility_permission_disabled)
-            }
-        )
+        if (::accessibilityStatusText.isInitialized) {
+            accessibilityStatusText.setTextColor(if (accessibilityState.enabled) colors.success else colors.error)
+            accessibilityStatusText.text = getString(
+                if (accessibilityState.enabled) R.string.accessibility_ready else R.string.accessibility_needed
+            )
+        }
 
         val notificationAccessEnabled = NotificationAccessStatus.isEnabled(this)
         val notificationMirrorConnected = ZevClipPreferences.isNotificationMirrorConnected(this)
-        notificationMirrorStatusText.setTextColor(
-            if (notificationAccessEnabled && notificationMirrorConnected) {
-                Color.rgb(24, 120, 54)
-            } else {
-                Color.rgb(180, 92, 0)
+        if (::notificationMirrorStatusText.isInitialized) {
+            notificationMirrorStatusText.setTextColor(
+                if (notificationAccessEnabled && notificationMirrorConnected) colors.success else colors.warning
+            )
+            notificationMirrorStatusText.text = when {
+                notificationAccessEnabled && notificationMirrorConnected -> getString(R.string.notifications_ready)
+                notificationAccessEnabled -> getString(R.string.notifications_waiting)
+                else -> getString(R.string.notifications_needed)
             }
-        )
-        notificationMirrorStatusText.text = getString(
-            R.string.notification_mirror_compact_status,
-            if (notificationAccessEnabled) getString(R.string.accessibility_permission_enabled)
-            else getString(R.string.accessibility_permission_disabled),
-            ZevClipPreferences.notificationMirrorStatus(this)
-        )
-
-        val callPermissionsGranted = hasPhoneCallPermissions()
-        callMirrorStatusText.setTextColor(
-            if (callPermissionsGranted) Color.rgb(24, 120, 54) else Color.rgb(180, 92, 0)
-        )
-        callMirrorStatusText.text = getString(
-            R.string.call_mirror_compact_status,
-            if (callPermissionsGranted) getString(R.string.accessibility_permission_enabled)
-            else getString(R.string.accessibility_permission_disabled),
-            ZevClipPreferences.callMirrorStatus(this)
-        )
-
-        val lastAutoStatus = if (endpoint == null) {
-            getString(R.string.auto_send_waiting_for_endpoint)
-        } else {
-            ZevClipPreferences.lastAutoStatus(this)
         }
 
-        lastAutoStatusText.text = getString(R.string.last_auto_send_status, lastAutoStatus)
-        discoveryStatusText.text = getString(
-            R.string.discovery_status,
-            ZevClipPreferences.discoveryStatus(this)
-        )
+        val callPermissionsGranted = hasPhoneCallPermissions()
+        if (::callMirrorStatusText.isInitialized) {
+            callMirrorStatusText.setTextColor(if (callPermissionsGranted) colors.success else colors.warning)
+            callMirrorStatusText.text = getString(
+                if (callPermissionsGranted) R.string.calls_ready else R.string.calls_needed
+            )
+        }
 
-        pairingStatusText.setTextColor(
-            if (hasToken) Color.rgb(24, 120, 54) else Color.DKGRAY
-        )
-        pairingStatusText.text = getString(
-            if (hasToken) {
-                R.string.pairing_token_saved
-            } else {
-                R.string.pairing_token_not_saved
+        if (::lastAutoStatusText.isInitialized) {
+            lastAutoStatusText.text = when {
+                endpoint == null -> getString(R.string.android_copy_waiting_for_pairing)
+                canSendToMac -> getString(R.string.android_copy_ready)
+                accessibilityState.enabled -> getString(R.string.android_copy_waiting_for_connection)
+                else -> getString(R.string.android_copy_needs_accessibility)
             }
-        )
+        }
+        if (::discoveryStatusText.isInitialized) {
+            discoveryStatusText.setTextColor(colors.muted)
+            discoveryStatusText.text = getString(
+                R.string.discovery_status,
+                ZevClipPreferences.discoveryStatus(this)
+            )
+        }
+
+        if (::pairingStatusText.isInitialized) {
+            pairingStatusText.setTextColor(if (hasToken) colors.success else colors.muted)
+            pairingStatusText.text = getString(
+                if (hasToken) {
+                    R.string.mac_pairing_saved
+                } else {
+                    R.string.pairing_token_not_saved
+                }
+            )
+        }
 
         refreshAndroidReceiverStatus()
         ZevClipStatusNotification.update(this)
@@ -648,24 +613,31 @@ class MainActivity : Activity() {
 
     private fun refreshAndroidReceiverStatus() {
         val isRunning = ZevClipPreferences.isAndroidReceiverRunning(this)
-        androidReceiverStatusText.setTextColor(
-            if (isRunning) Color.rgb(24, 120, 54) else Color.DKGRAY
-        )
-        androidReceiverStatusText.text = getString(
-            R.string.android_receiver_compact_status,
-            if (isRunning) getString(R.string.running) else getString(R.string.stopped),
-            AndroidClipboardHttpReceiver.DEFAULT_PORT
-        )
+        val syncEnabled = ZevClipPreferences.isClipboardSyncEnabled(this)
+        if (::androidReceiverStatusText.isInitialized) {
+            androidReceiverStatusText.setTextColor(if (isRunning) colors.success else colors.muted)
+            androidReceiverStatusText.text = getString(
+                if (isRunning) R.string.mac_copy_ready else R.string.mac_copy_stopped
+            )
+        }
 
         val lastReceivedAt = ZevClipPreferences.androidReceiverLastReceivedAt(this)
-        androidReceiverLastReceivedText.text = getString(
-            R.string.android_receiver_last_received,
-            if (lastReceivedAt > 0L) formatTimestamp(lastReceivedAt) else getString(R.string.never),
-            ZevClipPreferences.androidReceiverLastReceivedStatus(this)
-        )
+        if (::androidReceiverLastReceivedText.isInitialized) {
+            androidReceiverLastReceivedText.text = if (lastReceivedAt > 0L) {
+                getString(R.string.last_mac_copy, formatTimestamp(lastReceivedAt))
+            } else {
+                getString(R.string.last_mac_copy_none)
+            }
+        }
 
-        startClipboardSyncButton.isEnabled = !ZevClipPreferences.isClipboardSyncEnabled(this) || !isRunning
-        stopClipboardSyncButton.isEnabled = ZevClipPreferences.isClipboardSyncEnabled(this) || isRunning
+        if (::startClipboardSyncButton.isInitialized) {
+            startClipboardSyncButton.visibility = if (syncEnabled && isRunning) View.GONE else View.VISIBLE
+            startClipboardSyncButton.isEnabled = !syncEnabled || !isRunning
+        }
+        if (::stopClipboardSyncButton.isInitialized) {
+            stopClipboardSyncButton.visibility = if (syncEnabled || isRunning) View.VISIBLE else View.GONE
+            stopClipboardSyncButton.isEnabled = syncEnabled || isRunning
+        }
     }
 
     private fun scheduleAccessibilityRechecks() {
@@ -856,31 +828,82 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun sectionTitle(textResource: Int): TextView {
-        return textView(getString(textResource), 18f, Color.BLACK).apply {
-            setTypeface(typeface, android.graphics.Typeface.BOLD)
-            setPadding(0, dp(12), 0, dp(8))
+    private fun syncCard(): LinearLayout {
+        return card(colors.primaryContainer).apply {
+            addView(cardTitle(getString(R.string.clipboard_sync_title)).apply {
+                textSize = 24f
+            })
+            statusText = textView(getString(R.string.ready), 22f, colors.primary).apply {
+                setTypeface(typeface, Typeface.BOLD)
+                setPadding(0, dp(10), 0, dp(14))
+            }
+            addView(statusText, matchWidth())
+
+            androidReceiverStatusText = textView("", 17f, colors.primary)
+            addView(androidReceiverStatusText, matchWidth())
+
+            androidReceiverLastReceivedText = textView("", 16f, colors.muted).apply {
+                setPadding(0, dp(6), 0, 0)
+            }
+            addView(androidReceiverLastReceivedText, matchWidth())
+
+            lastAutoStatusText = textView("", 17f, colors.muted).apply {
+                setPadding(0, dp(6), 0, dp(20))
+            }
+            addView(lastAutoStatusText, matchWidth())
+
+            val actionRow = horizontalButtons(
+                primaryButton(getString(R.string.start_clipboard_sync)) { startClipboardSync() },
+                quietButton(getString(R.string.stop_clipboard_sync)) { stopClipboardSync() }
+            )
+            addView(actionRow)
+            startClipboardSyncButton = actionRow.getChildAt(0) as Button
+            stopClipboardSyncButton = actionRow.getChildAt(1) as Button
+        }
+    }
+
+    private fun pageContent(): LinearLayout {
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(20), dp(20), dp(24))
+            setBackgroundColor(colors.background)
+        }
+    }
+
+    private fun headerRow(title: String, action: Button): LinearLayout {
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(textView(title, 34f, colors.text).apply {
+                setTypeface(typeface, Typeface.BOLD)
+            }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            addView(action, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                leftMargin = dp(12)
+            })
         }
     }
 
     private fun fieldLabel(textResource: Int): TextView {
-        return textView(getString(textResource), 14f, Color.DKGRAY).apply {
-            setPadding(0, dp(14), 0, 0)
+        return textView(getString(textResource), 13f, colors.muted).apply {
+            setTypeface(typeface, Typeface.BOLD)
+            setPadding(0, dp(12), 0, 0)
         }
     }
 
-    private fun divider(): View {
-        return View(this).apply {
-            setBackgroundColor(Color.LTGRAY)
+    private fun card(backgroundColor: Int): LinearLayout {
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(18), dp(20), dp(20))
+            background = roundedDrawable(backgroundColor, 28)
         }
     }
 
-    private fun dividerLayoutParams(topMargin: Int): LinearLayout.LayoutParams {
-        return LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT,
-            dp(1)
-        ).apply {
-            this.topMargin = dp(topMargin)
+    private fun cardTitle(value: String): TextView {
+        return textView(value, 20f, colors.text).apply {
+            setTypeface(typeface, Typeface.BOLD)
         }
     }
 
@@ -889,11 +912,94 @@ class MainActivity : Activity() {
             text = value
             textSize = size
             setTextColor(color)
+            includeFontPadding = true
+        }
+    }
+
+    private fun styledEditText(): EditText {
+        return EditText(this).apply {
+            textSize = 15f
+            setTextColor(colors.text)
+            setHintTextColor(colors.muted)
+            minHeight = dp(58)
+            setPadding(dp(18), dp(4), dp(18), dp(4))
+            gravity = Gravity.CENTER_VERTICAL or Gravity.START
+            background = roundedDrawable(colors.inputSurface, 20)
+        }
+    }
+
+    private fun primaryButton(label: String, onClick: () -> Unit): Button {
+        return styledButton(label, colors.primary, colors.onPrimary, onClick)
+    }
+
+    private fun tonalButton(label: String, onClick: () -> Unit): Button {
+        return styledButton(label, colors.tonal, colors.text, onClick)
+    }
+
+    private fun quietButton(label: String, onClick: () -> Unit): Button {
+        return styledButton(label, colors.quiet, colors.text, onClick)
+    }
+
+    private fun styledButton(
+        label: String,
+        backgroundColor: Int,
+        textColor: Int,
+        onClick: () -> Unit
+    ): Button {
+        return Button(this).apply {
+            text = label
+            textSize = 15f
+            setTypeface(typeface, Typeface.BOLD)
+            setTextColor(textColor)
+            isAllCaps = false
+            stateListAnimator = null
+            elevation = 0f
+            translationZ = 0f
+            minHeight = dp(54)
+            minWidth = 0
+            setPadding(dp(12), 0, dp(12), 0)
+            gravity = Gravity.CENTER
+            background = roundedDrawable(backgroundColor, 18)
+            setOnClickListener { onClick() }
+        }
+    }
+
+    private fun horizontalButtons(first: Button, second: Button): LinearLayout {
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            addView(first, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            addView(second, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                leftMargin = dp(10)
+            })
+        }
+    }
+
+    private fun roundedDrawable(
+        color: Int,
+        radiusDp: Int,
+        strokeColor: Int? = null,
+        strokeWidthDp: Int = 0
+    ): GradientDrawable {
+        return GradientDrawable().apply {
+            setColor(color)
+            cornerRadius = dp(radiusDp).toFloat()
+            if (strokeColor != null && strokeWidthDp > 0) {
+                setStroke(dp(strokeWidthDp), strokeColor)
+            }
+        }
+    }
+
+    private fun scrollPage(content: LinearLayout): ScrollView {
+        return ScrollView(this).apply {
+            isFillViewport = true
+            setBackgroundColor(colors.background)
+            addView(content)
+            applySystemBarPadding(content)
         }
     }
 
     private fun View.applySystemBarPadding(content: View) {
-        val basePadding = dp(24)
+        val basePadding = dp(20)
 
         setOnApplyWindowInsetsListener { _, insets ->
             val bars = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -921,6 +1027,68 @@ class MainActivity : Activity() {
         requestApplyInsets()
     }
 
+    private fun resolveDynamicPalette(): DynamicPalette {
+        val fallbackPrimary = resolveThemeColor(android.R.attr.colorAccent, FALLBACK_PRIMARY)
+        val primary = systemColor("system_accent1_600", fallbackPrimary)
+        val primaryContainer = systemColor("system_accent1_50", blend(FALLBACK_BACKGROUND, primary, 0.10f))
+        val accentContainer = systemColor("system_accent2_50", blend(FALLBACK_BACKGROUND, primary, 0.08f))
+        val tonal = systemColor("system_accent1_100", blend(FALLBACK_BACKGROUND, primary, 0.16f))
+        val background = systemColor("system_neutral1_10", FALLBACK_BACKGROUND)
+        val surface = systemColor("system_neutral1_0", Color.WHITE)
+        val quiet = systemColor("system_neutral2_100", FALLBACK_QUIET)
+        val outline = systemColor("system_neutral2_200", FALLBACK_OUTLINE)
+        val inputSurface = systemColor("system_neutral2_50", blend(surface, primary, 0.05f))
+
+        return DynamicPalette(
+            background = background,
+            surface = surface,
+            inputSurface = inputSurface,
+            text = systemColor("system_neutral1_900", FALLBACK_TEXT),
+            muted = systemColor("system_neutral2_700", FALLBACK_MUTED),
+            outline = outline,
+            primary = primary,
+            onPrimary = Color.WHITE,
+            primaryContainer = primaryContainer,
+            accentContainer = accentContainer,
+            tonal = tonal,
+            quiet = quiet,
+            success = systemColor("system_accent1_700", FALLBACK_SUCCESS),
+            warning = FALLBACK_WARNING,
+            error = FALLBACK_ERROR
+        )
+    }
+
+    private fun resolveThemeColor(attribute: Int, fallback: Int): Int {
+        val typedValue = TypedValue()
+        return if (theme.resolveAttribute(attribute, typedValue, true)) {
+            typedValue.data
+        } else {
+            fallback
+        }
+    }
+
+    private fun systemColor(name: String, fallback: Int): Int {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+            return fallback
+        }
+
+        val resourceId = resources.getIdentifier(name, "color", "android")
+        return if (resourceId != 0) {
+            getColor(resourceId)
+        } else {
+            fallback
+        }
+    }
+
+    private fun blend(base: Int, overlay: Int, amount: Float): Int {
+        val inverse = 1f - amount
+        return Color.rgb(
+            (Color.red(base) * inverse + Color.red(overlay) * amount).toInt(),
+            (Color.green(base) * inverse + Color.green(overlay) * amount).toInt(),
+            (Color.blue(base) * inverse + Color.blue(overlay) * amount).toInt()
+        )
+    }
+
     private fun matchWidth(topMargin: Int = 0): LinearLayout.LayoutParams {
         return LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
@@ -934,9 +1102,36 @@ class MainActivity : Activity() {
         return (value * resources.displayMetrics.density).toInt()
     }
 
+    private data class DynamicPalette(
+        val background: Int,
+        val surface: Int,
+        val inputSurface: Int,
+        val text: Int,
+        val muted: Int,
+        val outline: Int,
+        val primary: Int,
+        val onPrimary: Int,
+        val primaryContainer: Int,
+        val accentContainer: Int,
+        val tonal: Int,
+        val quiet: Int,
+        val success: Int,
+        val warning: Int,
+        val error: Int
+    )
+
     private companion object {
         const val REQUEST_POST_NOTIFICATIONS = 2001
         const val REQUEST_PHONE_CALLS = 2002
+        val FALLBACK_BACKGROUND: Int = Color.rgb(247, 248, 250)
+        val FALLBACK_TEXT: Int = Color.rgb(26, 28, 32)
+        val FALLBACK_MUTED: Int = Color.rgb(91, 95, 103)
+        val FALLBACK_OUTLINE: Int = Color.rgb(219, 223, 230)
+        val FALLBACK_PRIMARY: Int = Color.rgb(23, 104, 201)
+        val FALLBACK_QUIET: Int = Color.rgb(236, 239, 244)
+        val FALLBACK_SUCCESS: Int = Color.rgb(24, 120, 54)
+        val FALLBACK_WARNING: Int = Color.rgb(166, 94, 0)
+        val FALLBACK_ERROR: Int = Color.rgb(180, 32, 32)
     }
 
 }
