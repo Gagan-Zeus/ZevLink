@@ -20,8 +20,16 @@ clipboard or notification data through a cloud server.
 It works on the same Wi-Fi/LAN, including a phone hotspot. Pair once with a QR
 code, turn sync on, and copy normally.
 
-![ZevClip demo](docs/assets/mac.img)
+<table>
+  <tr>
+    <td><img src="docs/assets/android1.jpg" width="250"></td>
+    <td><img src="docs/assets/android2.jpg" width="250"></td>
+    <td><img src="docs/assets/android3.jpg" width="250"></td>
+    <td><img src="docs/assets/mac.png" width="250"></td>
+  </tr>
+</table>
 
+[![ZevClip demo](https://img.youtube.com/vi/ZQB1X4zhDOA/maxresdefault.jpg)](https://www.youtube.com/watch?v=ZQB1X4zhDOA)
 
 ## What It Does
 
