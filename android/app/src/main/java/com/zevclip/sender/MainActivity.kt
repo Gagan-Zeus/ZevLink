@@ -34,6 +34,7 @@ import android.widget.Toast
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
+import com.zevclip.sender.airplay.AirPlayFeatureGate
 import java.text.DateFormat
 import java.util.Date
 import java.util.Locale
@@ -79,7 +80,8 @@ class MainActivity : Activity() {
             key == ZevClipPreferences.KEY_CLIPBOARD_SYNC_ENABLED ||
             key == ZevClipPreferences.KEY_NOTIFICATION_MIRROR_CONNECTED ||
             key == ZevClipPreferences.KEY_NOTIFICATION_MIRROR_STATUS ||
-            key == ZevClipPreferences.KEY_CALL_MIRROR_STATUS
+            key == ZevClipPreferences.KEY_CALL_MIRROR_STATUS ||
+            key == ZevClipPreferences.KEY_EXPERIMENTAL_AIRPLAY_ENABLED
         ) {
             runOnUiThread { refreshSyncStatuses() }
         }
@@ -271,6 +273,8 @@ class MainActivity : Activity() {
             }
             addView(discoveryStatusText, matchWidth())
         }, matchWidth(topMargin = 16))
+
+        content.addView(experimentalAirPlayCard(), matchWidth(topMargin = 16))
 
         content.addView(card(colors.surface).apply {
             addView(cardTitle(getString(R.string.manual_setup_title)))
@@ -609,6 +613,41 @@ class MainActivity : Activity() {
             Manifest.permission.READ_CALL_LOG,
             Manifest.permission.READ_CONTACTS
         )
+    }
+
+    private fun experimentalAirPlayCard(): LinearLayout {
+        val airPlayEnabled = AirPlayFeatureGate.isEnabled(this)
+        return card(colors.surface).apply {
+            addView(cardTitle(getString(R.string.experimental_airplay_title)))
+            addView(textView(getString(R.string.experimental_airplay_description), 15f, colors.muted).apply {
+                setPadding(0, dp(6), 0, dp(12))
+            })
+
+            addView(textView(
+                getString(
+                    if (airPlayEnabled) {
+                        R.string.experimental_airplay_status_enabled
+                    } else {
+                        R.string.experimental_airplay_status_disabled
+                    }
+                ),
+                16f,
+                if (airPlayEnabled) colors.success else colors.muted
+            ), matchWidth())
+
+            addView(tonalButton(
+                getString(
+                    if (airPlayEnabled) {
+                        R.string.disable_experimental_airplay
+                    } else {
+                        R.string.enable_experimental_airplay
+                    }
+                )
+            ) {
+                AirPlayFeatureGate.setEnabled(this@MainActivity, !airPlayEnabled)
+                showSettingsPage()
+            }, matchWidth(topMargin = 12))
+        }
     }
 
     private fun refreshAndroidReceiverStatus() {

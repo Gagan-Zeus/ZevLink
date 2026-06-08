@@ -32,4 +32,6 @@ android {
 
 dependencies {
     implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
+    implementation("org.bouncycastle:bcprov-jdk18on:1.81")
+    testImplementation("junit:junit:4.13.2")
 }
