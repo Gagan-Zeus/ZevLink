@@ -34,7 +34,7 @@ data class AirPlayIdentity(
         fun generate(): AirPlayIdentity {
             val keyPair = CryptoPrimitives.generateEd25519KeyPair()
             return AirPlayIdentity(
-                pairingId = "ZevClip-${UUID.randomUUID().toString().lowercase(Locale.US)}",
+                pairingId = UUID.randomUUID().toString().lowercase(Locale.US),
                 privateKey = keyPair.privateKey,
                 publicKey = keyPair.publicKey
             )

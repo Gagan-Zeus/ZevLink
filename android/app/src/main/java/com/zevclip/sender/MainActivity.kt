@@ -35,6 +35,7 @@ import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import com.zevclip.sender.airplay.AirPlayFeatureGate
+import com.zevclip.sender.airplay.AirPlayToneTester
 import java.text.DateFormat
 import java.util.Date
 import java.util.Locale
@@ -56,6 +57,8 @@ class MainActivity : Activity() {
     private lateinit var accessibilityStatusText: TextView
     private lateinit var notificationMirrorStatusText: TextView
     private lateinit var callMirrorStatusText: TextView
+    private lateinit var airPlayTestStatusText: TextView
+    private lateinit var airPlayPasscodeInput: EditText
     private lateinit var lastAutoStatusText: TextView
     private lateinit var discoveryManager: MacDiscoveryManager
     private lateinit var colors: DynamicPalette
@@ -81,7 +84,9 @@ class MainActivity : Activity() {
             key == ZevClipPreferences.KEY_NOTIFICATION_MIRROR_CONNECTED ||
             key == ZevClipPreferences.KEY_NOTIFICATION_MIRROR_STATUS ||
             key == ZevClipPreferences.KEY_CALL_MIRROR_STATUS ||
-            key == ZevClipPreferences.KEY_EXPERIMENTAL_AIRPLAY_ENABLED
+            key == ZevClipPreferences.KEY_EXPERIMENTAL_AIRPLAY_ENABLED ||
+            key == ZevClipPreferences.KEY_AIRPLAY_TEST_STATUS ||
+            key == ZevClipPreferences.KEY_AIRPLAY_PASSCODE
         ) {
             runOnUiThread { refreshSyncStatuses() }
         }
@@ -547,6 +552,10 @@ class MainActivity : Activity() {
             )
         }
 
+        if (::airPlayTestStatusText.isInitialized) {
+            airPlayTestStatusText.text = ZevClipPreferences.airPlayTestStatus(this)
+        }
+
         if (::lastAutoStatusText.isInitialized) {
             lastAutoStatusText.text = when {
                 endpoint == null -> getString(R.string.android_copy_waiting_for_pairing)
@@ -647,6 +656,63 @@ class MainActivity : Activity() {
                 AirPlayFeatureGate.setEnabled(this@MainActivity, !airPlayEnabled)
                 showSettingsPage()
             }, matchWidth(topMargin = 12))
+
+            if (airPlayEnabled) {
+                addView(fieldLabel(R.string.airplay_passcode_label))
+                airPlayPasscodeInput = styledEditText().apply {
+                    hint = getString(R.string.airplay_passcode_hint)
+                    inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
+                    imeOptions = EditorInfo.IME_ACTION_DONE
+                    setText(ZevClipPreferences.airPlayPasscode(this@MainActivity))
+                    setOnEditorActionListener { _, actionId, _ ->
+                        if (actionId == EditorInfo.IME_ACTION_DONE) {
+                            ZevClipPreferences.setAirPlayPasscode(this@MainActivity, text.toString())
+                            clearFocus()
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                }
+                addView(airPlayPasscodeInput, matchWidth(topMargin = 4))
+
+                airPlayTestStatusText = textView(
+                    ZevClipPreferences.airPlayTestStatus(this@MainActivity),
+                    14f,
+                    colors.muted
+                ).apply {
+                    setPadding(0, dp(14), 0, 0)
+                }
+                addView(airPlayTestStatusText, matchWidth())
+                addView(primaryButton(getString(R.string.test_airplay_tone)) {
+                    startAirPlayToneTest()
+                }, matchWidth(topMargin = 12))
+            }
+        }
+    }
+
+    private fun startAirPlayToneTest() {
+        val appContext = applicationContext
+        if (::airPlayPasscodeInput.isInitialized) {
+            ZevClipPreferences.setAirPlayPasscode(appContext, airPlayPasscodeInput.text.toString())
+        }
+        fun updateStatus(message: String) {
+            ZevClipPreferences.setAirPlayTestStatus(appContext, message)
+            runOnUiThread {
+                if (::airPlayTestStatusText.isInitialized) {
+                    airPlayTestStatusText.text = message
+                }
+            }
+        }
+
+        updateStatus("Preparing AirPlay test tone...")
+        thread(name = "zevclip-airplay-tone-test", isDaemon = true) {
+            val result = AirPlayToneTester.run(appContext, ::updateStatus)
+            val finalStatus = when (result) {
+                is AirPlayToneTester.Result.Success -> result.message
+                is AirPlayToneTester.Result.Failure -> result.message
+            }
+            updateStatus(finalStatus)
         }
     }
 

@@ -25,6 +25,10 @@ class AirPlayAudioSessionControllerTest {
                             )
                         )
                     ),
+                    response(200, ByteArray(0)),
+                    response(200, ByteArray(0)),
+                    response(200, ByteArray(0)),
+                    response(200, ByteArray(0)),
                     response(200, ByteArray(0))
                 )
             )
@@ -60,6 +64,10 @@ class AirPlayAudioSessionControllerTest {
 
         val record = controller.record(ids)
         assertEquals(200, record.statusCode)
+        controller.flush(ids, sequenceNumber = 42, rtpTimestamp = 100)
+        controller.setVolume(ids, volume = -12.5)
+        controller.sendProgress(ids, startTimestamp = 1, currentTimestamp = 2, endTimestamp = 3)
+        controller.feedback(ids)
 
         assertEquals("SETUP", transport.requests[0].method)
         assertEquals("1", transport.requests[0].headers["CSeq"])
@@ -77,6 +85,14 @@ class AirPlayAudioSessionControllerTest {
         assertEquals("RECORD", transport.requests[2].method)
         assertEquals("3", transport.requests[2].headers["CSeq"])
         assertEquals(0, transport.requests[2].body.size)
+        assertEquals("FLUSH", transport.requests[3].method)
+        assertEquals("seq=42;rtptime=100", transport.requests[3].headers["RTP-Info"])
+        assertEquals("SET_PARAMETER", transport.requests[4].method)
+        assertEquals("volume: -12.5\r\n", transport.requests[4].body.toString(Charsets.US_ASCII))
+        assertEquals("SET_PARAMETER", transport.requests[5].method)
+        assertEquals("progress: 1/2/3\r\n", transport.requests[5].body.toString(Charsets.US_ASCII))
+        assertEquals("POST", transport.requests[6].method)
+        assertEquals("/feedback", transport.requests[6].uri)
     }
 
     private data class CapturedRequest(

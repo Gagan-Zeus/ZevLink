@@ -32,6 +32,8 @@ object ZevClipPreferences {
     const val KEY_MAC_BATTERY_AVAILABLE = "mac_battery_available"
     const val KEY_MAC_BATTERY_LAST_SEEN_AT = "mac_battery_last_seen_at"
     const val KEY_EXPERIMENTAL_AIRPLAY_ENABLED = "experimental_airplay_enabled"
+    const val KEY_AIRPLAY_TEST_STATUS = "airplay_test_status"
+    const val KEY_AIRPLAY_PASSCODE = "airplay_passcode"
 
     private const val KEY_ANDROID_DEVICE_ID = "android_device_id"
     private const val KEY_LAST_TILE_SUBTITLE = "last_tile_subtitle"
@@ -204,6 +206,29 @@ object ZevClipPreferences {
     fun setExperimentalAirPlayEnabled(context: Context, isEnabled: Boolean) {
         preferences(context).edit()
             .putBoolean(KEY_EXPERIMENTAL_AIRPLAY_ENABLED, isEnabled)
+            .apply()
+    }
+
+    fun airPlayTestStatus(context: Context): String {
+        return preferences(context).getString(
+            KEY_AIRPLAY_TEST_STATUS,
+            "No AirPlay tone test yet."
+        ).orEmpty()
+    }
+
+    fun setAirPlayTestStatus(context: Context, status: String) {
+        preferences(context).edit()
+            .putString(KEY_AIRPLAY_TEST_STATUS, status)
+            .apply()
+    }
+
+    fun airPlayPasscode(context: Context): String {
+        return preferences(context).getString(KEY_AIRPLAY_PASSCODE, "").orEmpty().trim()
+    }
+
+    fun setAirPlayPasscode(context: Context, passcode: String) {
+        preferences(context).edit()
+            .putString(KEY_AIRPLAY_PASSCODE, passcode.trim())
             .apply()
     }
 

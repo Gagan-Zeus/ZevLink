@@ -40,6 +40,19 @@ class AirPlayRtspClient(
         socket = nextSocket
     }
 
+    fun localAddressHost(): String {
+        return socket?.localAddress?.hostAddress ?: target.host
+    }
+
+    fun encryptedTransport(sharedSecret: ByteArray): AirPlayEncryptedChannel {
+        val activeSocket = socket ?: error("RTSP socket is not connected.")
+        return AirPlayEncryptedChannel(
+            input = activeSocket.getInputStream(),
+            output = activeSocket.getOutputStream(),
+            keys = AirPlayEncryptedChannel.controllerKeys(sharedSecret)
+        )
+    }
+
     fun getInfo(): Response {
         return request(
             method = "GET",

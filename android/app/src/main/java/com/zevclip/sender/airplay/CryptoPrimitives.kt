@@ -1,6 +1,8 @@
 package com.zevclip.sender.airplay
 
 import java.security.SecureRandom
+import java.math.BigInteger
+import java.security.MessageDigest
 import org.bouncycastle.crypto.digests.SHA512Digest
 import org.bouncycastle.crypto.generators.HKDFBytesGenerator
 import org.bouncycastle.crypto.modes.ChaCha20Poly1305
@@ -126,6 +128,76 @@ object CryptoPrimitives {
         }
     }
 
+    class Srp6Client(
+        private val username: ByteArray = "Pair-Setup".toByteArray(Charsets.US_ASCII),
+        private val password: ByteArray
+    ) {
+        private val privateA: BigInteger = BigInteger(512, secureRandom).mod(SRP_N)
+        private val publicAInteger: BigInteger = SRP_G.modPow(privateA, SRP_N)
+        private lateinit var clientProof: ByteArray
+
+        lateinit var sessionKey: ByteArray
+            private set
+
+        val publicA: ByteArray
+            get() = publicAInteger.toMinimalUnsignedBytes()
+
+        fun process(saltBytes: ByteArray, serverPublicBytes: ByteArray): ByteArray {
+            val salt = BigInteger(1, saltBytes)
+            val serverPublic = BigInteger(1, serverPublicBytes)
+            require(serverPublic.mod(SRP_N) != BigInteger.ZERO) { "SRP server public key is invalid." }
+
+            val multiplier = hashInt(padToSrpSize(SRP_N), padToSrpSize(SRP_G))
+            val scramblingParameter = hashInt(padToSrpSize(publicAInteger), padToSrpSize(serverPublic))
+            val passwordHash = sha512(concat(username, byteArrayOf(':'.code.toByte()), password))
+            val privateKey = hashInt(salt.toMinimalUnsignedBytes(), passwordHash)
+
+            val generatorPower = SRP_G.modPow(privateKey, SRP_N)
+            val base = serverPublic.subtract(multiplier.multiply(generatorPower)).mod(SRP_N)
+            val exponent = privateA.add(scramblingParameter.multiply(privateKey))
+            val sharedSecret = base.modPow(exponent, SRP_N)
+            sessionKey = sha512(sharedSecret.toMinimalUnsignedBytes())
+
+            val hashedN = BigInteger(1, sha512(SRP_N.toMinimalUnsignedBytes()))
+            val hashedG = BigInteger(1, sha512(SRP_G.toMinimalUnsignedBytes()))
+            val hashedXor = hashedN.xor(hashedG).toMinimalUnsignedBytes()
+            clientProof = sha512(
+                concat(
+                    hashedXor,
+                    sha512(username),
+                    salt.toMinimalUnsignedBytes(),
+                    publicAInteger.toMinimalUnsignedBytes(),
+                    serverPublic.toMinimalUnsignedBytes(),
+                    sessionKey
+                )
+            )
+            return clientProof
+        }
+
+        fun verifyServerProof(serverProof: ByteArray): Boolean {
+            check(::sessionKey.isInitialized) { "SRP session key is not ready." }
+            check(::clientProof.isInitialized) { "SRP client proof is not ready." }
+            val expected = sha512(concat(publicAInteger.toMinimalUnsignedBytes(), clientProof, sessionKey))
+            return MessageDigest.isEqual(expected, serverProof)
+        }
+
+        private fun hashInt(vararg chunks: ByteArray): BigInteger {
+            return BigInteger(1, sha512(concat(*chunks)))
+        }
+
+        private fun padToSrpSize(value: BigInteger): ByteArray {
+            val raw = value.toMinimalUnsignedBytes()
+            if (raw.size == SRP_PAD_SIZE) return raw
+            return ByteArray(SRP_PAD_SIZE).also { output ->
+                raw.copyInto(output, destinationOffset = SRP_PAD_SIZE - raw.size)
+            }
+        }
+    }
+
+    fun sha512(input: ByteArray): ByteArray {
+        return MessageDigest.getInstance("SHA-512").digest(input)
+    }
+
     fun chacha20Poly1305Encrypt(
         key: ByteArray,
         nonce: ByteArray,
@@ -170,6 +242,16 @@ object CryptoPrimitives {
         return ByteArray(ED25519_PUBLIC_KEY_SIZE).also { encode(it, 0) }
     }
 
+    private fun BigInteger.toMinimalUnsignedBytes(): ByteArray {
+        if (signum() == 0) return ByteArray(0)
+        val bytes = toByteArray()
+        return if (bytes.size > 1 && bytes[0] == 0.toByte()) {
+            bytes.copyOfRange(1, bytes.size)
+        } else {
+            bytes
+        }
+    }
+
     private const val X25519_PRIVATE_KEY_SIZE = 32
     private const val X25519_PUBLIC_KEY_SIZE = 32
     private const val X25519_SECRET_SIZE = 32
@@ -179,4 +261,25 @@ object CryptoPrimitives {
     private const val CHACHA20_POLY1305_KEY_SIZE = 32
     private const val CHACHA20_POLY1305_NONCE_SIZE = 12
     private const val CHACHA20_POLY1305_MAC_SIZE_BITS = 128
+    private val SRP_N: BigInteger = BigInteger(
+        (
+            "FFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E08" +
+                "8A67CC74020BBEA63B139B22514A08798E3404DDEF9519B3CD3A431B" +
+                "302B0A6DF25F14374FE1356D6D51C245E485B576625E7EC6F44C42E9" +
+                "A637ED6B0BFF5CB6F406B7EDEE386BFB5A899FA5AE9F24117C4B1FE6" +
+                "49286651ECE45B3DC2007CB8A163BF0598DA48361C55D39A69163FA8" +
+                "FD24CF5F83655D23DCA3AD961C62F356208552BB9ED529077096966D" +
+                "670C354E4ABC9804F1746C08CA18217C32905E462E36CE3BE39E772C" +
+                "180E86039B2783A2EC07A28FB5C55DF06F4C52C9DE2BCBF695581718" +
+                "3995497CEA956AE515D2261898FA051015728E5A8AAAC42DAD33170D" +
+                "04507A33A85521ABDF1CBA64ECFB850458DBEF0A8AEA71575D060C7D" +
+                "B3970F85A6E1E4C7ABF5AE8CDB0933D71E8C94E04A25619DCEE3D226" +
+                "1AD2EE6BF12FFA06D98A0864D87602733EC86A64521F2B18177B200C" +
+                "BBE117577A615D6C770988C0BAD946E208E24FA074E5AB3143DB5BFC" +
+                "E0FD108E4B82D120A93AD2CAFFFFFFFFFFFFFFFF"
+            ),
+        16
+    )
+    private val SRP_G: BigInteger = BigInteger.valueOf(5)
+    private val SRP_PAD_SIZE: Int = SRP_N.bitLength() / 8
 }

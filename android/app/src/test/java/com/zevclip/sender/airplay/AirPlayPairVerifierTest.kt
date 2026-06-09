@@ -34,6 +34,32 @@ class AirPlayPairVerifierTest {
         }
     }
 
+    @Test
+    fun keepsVerifiedConnectionAvailableForEncryptedControl() {
+        val controllerIdentity = AirPlayIdentity.generate()
+        val accessoryIdentity = CryptoPrimitives.generateEd25519KeyPair()
+
+        PairVerifyServer(
+            controllerIdentity = controllerIdentity,
+            accessoryPrivateKey = accessoryIdentity.privateKey,
+            accessoryPublicKey = accessoryIdentity.publicKey,
+            accessoryId = "Mac-AirPlay"
+        ).use { server ->
+            val target = AirPlayTarget("127.0.0.1", server.port, name = "Fake Mac")
+            val result = AirPlayPairVerifier(target, controllerIdentity)
+                .verifyConnected(expectedAccessoryPublicKey = accessoryIdentity.publicKey)
+
+            assertTrue(result is AirPlayPairVerifier.ConnectedResult.Success)
+            val connected = (result as AirPlayPairVerifier.ConnectedResult.Success).connectedSession
+            connected.use {
+                assertEquals("Mac-AirPlay", it.session.accessoryId)
+                assertEquals("127.0.0.1", it.localRtspHost)
+                assertEquals(32, it.session.sharedSecret.size)
+                assertEquals(2, server.awaitRequestCount())
+            }
+        }
+    }
+
     private class PairVerifyServer(
         private val controllerIdentity: AirPlayIdentity,
         private val accessoryPrivateKey: ByteArray,

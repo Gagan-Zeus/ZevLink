@@ -30,11 +30,14 @@
     <string name="calls_ready">Calls: Controls ready</string>
     <string name="calls_needed">Calls: Permission needed</string>
     <string name="experimental_airplay_title">Experimental AirPlay</string>
-    <string name="experimental_airplay_description">Android audio casting to the Mac AirPlay Receiver will be built here.</string>
-    <string name="experimental_airplay_status_enabled">AirPlay audio: Enabled for testing</string>
+    <string name="experimental_airplay_description">Experimental Android audio casting pieces are installed locally for testing.</string>
+    <string name="experimental_airplay_status_enabled">AirPlay audio pipeline: Ready for tests</string>
     <string name="experimental_airplay_status_disabled">AirPlay audio: Off</string>
     <string name="enable_experimental_airplay">Enable AirPlay</string>
     <string name="disable_experimental_airplay">Disable AirPlay</string>
+    <string name="airplay_passcode_label">AirPlay passcode or password</string>
+    <string name="airplay_passcode_hint">Only needed when Mac asks</string>
+    <string name="test_airplay_tone">Test AirPlay Tone</string>
     <string name="pair_mac_title">Pair Mac</string>
     <string name="pair_mac_description">Scan the QR from the Mac app once. Use Discover if the network changes.</string>
     <string name="manual_setup_title">Manual setup</string>
