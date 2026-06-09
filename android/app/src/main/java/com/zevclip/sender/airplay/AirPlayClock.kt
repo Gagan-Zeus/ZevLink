@@ -1,9 +1,9 @@
 package com.zevclip.sender.airplay
 
 class AirPlayClock(
-    val sampleRate: Int = 44_100
+    val sampleRate: Int = 44_100,
+    val latencyFrames: Long = DEFAULT_LATENCY_FRAMES
 ) {
-    val latencyFrames: Long = 22_050L + sampleRate
 
     @Volatile
     var startTimestamp: Long = 0L
@@ -38,6 +38,7 @@ class AirPlayClock(
     }
 
     companion object {
+        const val DEFAULT_LATENCY_FRAMES = 66_150L
         const val NTP_EPOCH_OFFSET = 2_208_988_800L
 
         fun ntpNow(): Long {

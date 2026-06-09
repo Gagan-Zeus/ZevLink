@@ -9,7 +9,7 @@ import java.net.InetSocketAddress
 import java.net.Socket
 import java.security.MessageDigest
 import java.util.Locale
-import kotlin.math.ceil
+import kotlin.concurrent.thread
 
 class RaopTestToneClient(
     private val target: AirPlayTarget,
@@ -45,6 +45,9 @@ class RaopTestToneClient(
     private var socket: Socket? = null
     private var cseq = 1
     private var digestChallenge: DigestChallenge? = null
+    @Volatile
+    private var keepAliveRunning = false
+    private var keepAliveThread: Thread? = null
     private lateinit var sessionUri: String
 
     fun playTestTone(status: (String) -> Unit = {}): Result {
@@ -87,7 +90,10 @@ class RaopTestToneClient(
             val remoteControlPort = remotePorts["control_port"]?.toIntOrNull() ?: 0
             val rtspSession = setup.header("session")?.substringBefore(';')?.trim().orEmpty()
 
-            val clock = AirPlayClock(AirPlayTestTone.DEFAULT_SAMPLE_RATE)
+            val clock = AirPlayClock(
+                sampleRate = AirPlayTestTone.DEFAULT_SAMPLE_RATE,
+                latencyFrames = LOW_LATENCY_FRAMES
+            )
             clock.reset()
             if (remoteControlPort > 0) {
                 syncSender = AirPlaySyncSender(
@@ -103,6 +109,7 @@ class RaopTestToneClient(
             record()
             flush(rtspSession, initialSequence, clock.rtpTime32)
             setVolume()
+            startKeepAlive()
 
             audioSender = AirPlayUdpPacketSender(target.host, serverPort)
             status("Streaming AirPlay audio...")
@@ -217,6 +224,29 @@ class RaopTestToneClient(
         )
     }
 
+    private fun startKeepAlive() {
+        keepAliveRunning = true
+        keepAliveThread = thread(name = "zevclip-raop-keepalive", isDaemon = true) {
+            while (keepAliveRunning) {
+                try {
+                    Thread.sleep(KEEP_ALIVE_INTERVAL_MS)
+                    if (!keepAliveRunning) break
+                    request(
+                        method = "OPTIONS",
+                        uri = "*",
+                        headers = emptyMap(),
+                        body = ByteArray(0),
+                        useDigest = digestChallenge != null
+                    )
+                } catch (_: InterruptedException) {
+                    break
+                } catch (_: Throwable) {
+                    break
+                }
+            }
+        }
+    }
+
     private fun streamPcmPackets(
         source: PcmPacketSource,
         sink: AirPlayPacketSink,
@@ -249,6 +279,7 @@ class RaopTestToneClient(
         return packetCount
     }
 
+    @Synchronized
     private fun request(
         method: String,
         uri: String,
@@ -342,6 +373,9 @@ class RaopTestToneClient(
     }
 
     override fun close() {
+        keepAliveRunning = false
+        keepAliveThread?.interrupt()
+        keepAliveThread = null
         runCatching { socket?.close() }
         socket = null
     }
@@ -450,6 +484,8 @@ class RaopTestToneClient(
     private companion object {
         const val FRAMES_PER_PACKET = 352
         const val DEFAULT_TIMEOUT_MS = 5_000
+        const val KEEP_ALIVE_INTERVAL_MS = 20_000L
+        const val LOW_LATENCY_FRAMES = 11_025L
         const val USER_AGENT = "AirTunes/366.0"
         const val DIGEST_USERNAME = "pyatv"
         val HEADER_END = byteArrayOf('\r'.code.toByte(), '\n'.code.toByte(), '\r'.code.toByte(), '\n'.code.toByte())

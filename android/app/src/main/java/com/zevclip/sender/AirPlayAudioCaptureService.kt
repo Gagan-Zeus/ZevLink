@@ -11,6 +11,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.AudioAttributes
 import android.media.AudioFormat
+import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
@@ -26,6 +27,7 @@ class AirPlayAudioCaptureService : Service() {
     private var worker: Thread? = null
     private var mediaProjection: MediaProjection? = null
     private var audioRecord: AudioRecord? = null
+    private var mediaVolumeRestorer: MediaVolumeRestorer? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -94,6 +96,8 @@ class AirPlayAudioCaptureService : Service() {
                 val record = createPlaybackAudioRecord(projection)
                 audioRecord = record
                 record.startRecording()
+                mediaVolumeRestorer = MediaVolumeRestorer(getSystemService(AudioManager::class.java))
+                    .also { it.muteMusicStream() }
                 updateStatus(getString(R.string.airplay_streaming_live))
 
                 val target = AirPlayTarget(
@@ -133,7 +137,7 @@ class AirPlayAudioCaptureService : Service() {
             AudioFormat.CHANNEL_IN_STEREO,
             AudioFormat.ENCODING_PCM_16BIT
         )
-        val bufferSize = maxOf(minBuffer, PACKET_BYTES * 12)
+        val bufferSize = maxOf(minBuffer, PACKET_BYTES * 4)
         return AudioRecord.Builder()
             .setAudioPlaybackCaptureConfig(captureConfig)
             .setAudioFormat(format)
@@ -149,6 +153,8 @@ class AirPlayAudioCaptureService : Service() {
         runCatching { audioRecord?.stop() }
         runCatching { audioRecord?.release() }
         audioRecord = null
+        runCatching { mediaVolumeRestorer?.restore() }
+        mediaVolumeRestorer = null
         runCatching { mediaProjection?.stop() }
         mediaProjection = null
         ZevClipPreferences.setAirPlayStreaming(this, false)
@@ -227,6 +233,23 @@ class AirPlayAudioCaptureService : Service() {
         }
 
         override fun close() = Unit
+    }
+
+    private class MediaVolumeRestorer(
+        private val audioManager: AudioManager
+    ) {
+        private val originalVolume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+        private var restored = false
+
+        fun muteMusicStream() {
+            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, 0, 0)
+        }
+
+        fun restore() {
+            if (restored) return
+            restored = true
+            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, originalVolume, 0)
+        }
     }
 
     companion object {
