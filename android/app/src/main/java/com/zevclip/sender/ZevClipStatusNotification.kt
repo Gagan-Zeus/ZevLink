@@ -130,9 +130,8 @@ object ZevClipStatusNotification {
             PendingIntent.getActivity(
                 context,
                 AIRPLAY_ACTION_REQUEST_CODE,
-                Intent(context, MainActivity::class.java).apply {
-                    action = MainActivity.ACTION_START_AIRPLAY_CAPTURE
-                    flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                Intent(context, AirPlayCaptureActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
                 },
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
             )
