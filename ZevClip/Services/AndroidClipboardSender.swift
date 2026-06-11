@@ -147,6 +147,43 @@ final class AndroidClipboardSender: ObservableObject {
         }
     }
 
+    func sendAndroidMediaCommand(action: String) {
+        let trimmedAction = action.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedAction.isEmpty else { return }
+        guard let endpoint = resolvedEndpoint else {
+            discoverAndroidReceiver()
+            status = "Rediscovering Android receiver for media control..."
+            return
+        }
+
+        let token = tokenProvider().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !token.isEmpty else {
+            status = "Pairing token is empty; cannot control Android media."
+            return
+        }
+
+        Task { [weak self] in
+            let result = await AndroidClipboardHTTPClient.sendMediaCommand(
+                action: trimmedAction,
+                on: endpoint,
+                token: token
+            )
+
+            await MainActor.run {
+                switch result {
+                case .success(let message):
+                    self?.status = message
+                case .failure(let message, let isRetryable):
+                    self?.status = message
+                    if isRetryable {
+                        self?.resolvedEndpoint = nil
+                        self?.discoverAndroidReceiver()
+                    }
+                }
+            }
+        }
+    }
+
     private func sendPendingChangeIfPossible() {
         guard sendTask == nil else { return }
         guard let change = pendingChange else { return }
@@ -505,6 +542,54 @@ private enum AndroidClipboardHTTPClient {
         }
     }
 
+    static func sendMediaCommand(
+        action: String,
+        on endpoint: AndroidReceiverEndpoint,
+        token: String
+    ) async -> CallActionResult {
+        guard let url = mediaControlURL(for: endpoint) else {
+            return .failure("Android media control URL is invalid.", isRetryable: false)
+        }
+
+        let body = ["action": action]
+
+        guard let bodyData = try? JSONSerialization.data(withJSONObject: body) else {
+            return .failure("Could not encode Android media command.", isRetryable: false)
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 5
+        request.setValue(token, forHTTPHeaderField: "X-ZevClip-Token")
+        request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
+        applyMacBatteryHeaders(to: &request)
+        request.httpBody = bodyData
+
+        do {
+            let (responseBody, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                return .failure("Android media control returned an invalid response.", isRetryable: true)
+            }
+
+            let bodyText = String(data: responseBody, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard httpResponse.statusCode == 200 else {
+                let detail = bodyText?.isEmpty == false ? " \(bodyText!)" : ""
+                return .failure(
+                    "Android media control failed (\(httpResponse.statusCode)).\(detail)",
+                    isRetryable: isRetryableStatusCode(httpResponse.statusCode)
+                )
+            }
+
+            return .success(bodyText?.isEmpty == false ? bodyText! : "Android media command sent.")
+        } catch {
+            return .failure(
+                "Could not control Android media: \(error.localizedDescription)",
+                isRetryable: true
+            )
+        }
+    }
+
 
     private static func clipboardURL(for endpoint: AndroidReceiverEndpoint) -> URL? {
         url(for: endpoint, path: "/clipboard")
@@ -520,6 +605,10 @@ private enum AndroidClipboardHTTPClient {
 
     private static func callActionURL(for endpoint: AndroidReceiverEndpoint) -> URL? {
         url(for: endpoint, path: "/call-action")
+    }
+
+    private static func mediaControlURL(for endpoint: AndroidReceiverEndpoint) -> URL? {
+        url(for: endpoint, path: "/media-control")
     }
 
     private static func url(for endpoint: AndroidReceiverEndpoint, path: String) -> URL? {

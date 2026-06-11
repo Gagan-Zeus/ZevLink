@@ -1,5 +1,6 @@
 package com.zevclip.sender.airplay
 
+import com.zevclip.sender.AirPlayDacpSession
 import java.io.ByteArrayOutputStream
 import java.io.Closeable
 import java.io.InputStream
@@ -16,7 +17,8 @@ class RaopTestToneClient(
     private val password: String,
     private val connectTimeoutMs: Int = DEFAULT_TIMEOUT_MS,
     private val readTimeoutMs: Int = DEFAULT_TIMEOUT_MS,
-    private val socketFactory: () -> Socket = { Socket() }
+    private val socketFactory: () -> Socket = { Socket() },
+    private val dacpSession: AirPlayDacpSession? = null
 ) : Closeable {
     interface PcmPacketSource : Closeable {
         fun readPacket(buffer: ByteArray): Int
@@ -372,6 +374,11 @@ class RaopTestToneClient(
         val requestHeaders = LinkedHashMap<String, String>().apply {
             put("CSeq", (cseq++).toString())
             put("User-Agent", USER_AGENT)
+            dacpSession?.let { session ->
+                put("DACP-ID", session.dacpId)
+                put("Active-Remote", session.activeRemote)
+                put("Client-Instance", session.dacpId)
+            }
             if (useDigest) {
                 put("Authorization", digestAuthorization(method, uri))
             }

@@ -30,7 +30,8 @@ class AndroidClipboardHttpReceiver(
     private val onNotificationAction: (String) -> Boolean = { false },
     private val onCallAction: (String, String?) -> AndroidCallActionResult = { _, _ ->
         AndroidCallActionResult(false, "Android call mirror is unavailable.")
-    }
+    },
+    private val onMediaControlAction: (String) -> Boolean = { false }
 ) {
     private val appContext = context.applicationContext
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -144,9 +145,10 @@ class AndroidClipboardHttpReceiver(
             if (
                 requestParts[1] != CLIPBOARD_PATH &&
                 requestParts[1] != NOTIFICATION_ACTION_PATH &&
-                requestParts[1] != CALL_ACTION_PATH
+                requestParts[1] != CALL_ACTION_PATH &&
+                requestParts[1] != MEDIA_CONTROL_PATH
             ) {
-                output.write(response("404 Not Found", "Use $CLIPBOARD_PATH, $NOTIFICATION_ACTION_PATH, or $CALL_ACTION_PATH.").toByteArray(Charsets.UTF_8))
+                output.write(response("404 Not Found", "Unknown path.").toByteArray(Charsets.UTF_8))
                 return
             }
 
@@ -175,6 +177,11 @@ class AndroidClipboardHttpReceiver(
 
             if (requestParts[1] == CALL_ACTION_PATH) {
                 output.write(handleCallAction(body).toByteArray(Charsets.UTF_8))
+                return
+            }
+
+            if (requestParts[1] == MEDIA_CONTROL_PATH) {
+                output.write(handleMediaControlAction(body).toByteArray(Charsets.UTF_8))
                 return
             }
 
@@ -362,6 +369,33 @@ class AndroidClipboardHttpReceiver(
         }
     }
 
+    private fun handleMediaControlAction(body: ByteArray): String {
+        val bodyText = try {
+            decodeUtf8(body)
+        } catch (_: Exception) {
+            return response("400 Bad Request", "Request body must be valid UTF-8 JSON.")
+        }
+
+        val action = try {
+            JSONObject(bodyText)
+                .optString("action")
+                .trim()
+                .lowercase(Locale.US)
+        } catch (_: Exception) {
+            return response("400 Bad Request", "Request body must be valid media control JSON.")
+        }
+
+        if (action.isEmpty()) {
+            return response("400 Bad Request", "action is required.")
+        }
+
+        return if (onMediaControlAction(action)) {
+            response("200 OK", "Android media action sent.")
+        } else {
+            response("409 Conflict", "Android media action could not be sent.")
+        }
+    }
+
     private fun currentBatteryPercentage(): Int? {
         val batteryManager = appContext.getSystemService(BatteryManager::class.java)
         val percentage = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
@@ -417,6 +451,7 @@ class AndroidClipboardHttpReceiver(
         const val STATUS_PATH = "/status"
         const val NOTIFICATION_ACTION_PATH = "/notification-action"
         const val CALL_ACTION_PATH = "/call-action"
+        const val MEDIA_CONTROL_PATH = "/media-control"
 
         private const val TAG = "ZevClipAndroidReceiver"
         private const val TOKEN_HEADER = "x-zevclip-token"

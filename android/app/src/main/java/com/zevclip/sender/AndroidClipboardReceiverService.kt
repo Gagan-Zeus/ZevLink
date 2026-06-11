@@ -152,6 +152,9 @@ class AndroidClipboardReceiverService : Service() {
             },
             onCallAction = { action, callId ->
                 AndroidCallMirrorService.performCallAction(action, callId)
+            },
+            onMediaControlAction = { action ->
+                AirPlayMediaControlDispatcher.dispatch(this, action.toAirPlayDacpCommand())
             }
         )
 
@@ -435,5 +438,15 @@ class AndroidClipboardReceiverService : Service() {
                 action = ACTION_STOP
             })
         }
+    }
+}
+
+private fun String.toAirPlayDacpCommand(): AirPlayDacpCommand {
+    return when (lowercase()) {
+        "play" -> AirPlayDacpCommand.Play
+        "pause" -> AirPlayDacpCommand.Pause
+        "next", "nextitem", "skip_next" -> AirPlayDacpCommand.Next
+        "previous", "prev", "previtem", "skip_previous" -> AirPlayDacpCommand.Previous
+        else -> AirPlayDacpCommand.PlayPause
     }
 }

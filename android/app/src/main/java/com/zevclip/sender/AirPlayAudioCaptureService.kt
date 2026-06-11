@@ -25,6 +25,8 @@ class AirPlayAudioCaptureService : Service() {
     private var mediaProjection: MediaProjection? = null
     private var audioRecord: AudioRecord? = null
     private var mediaVolumeRestorer: MediaVolumeRestorer? = null
+    private var dacpControlServer: AirPlayDacpControlServer? = null
+    private var nowPlayingSender: AndroidNowPlayingSender? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -97,6 +99,8 @@ class AirPlayAudioCaptureService : Service() {
                 val record = createPlaybackAudioRecord(projection)
                 audioRecord = record
                 record.startRecording()
+                val metadataSender = AndroidNowPlayingSender(this)
+                nowPlayingSender = metadataSender
                 mediaVolumeRestorer = MediaVolumeRestorer(getSystemService(AudioManager::class.java))
                     .also { it.muteMusicStream() }
                 updateStatus(getString(R.string.airplay_streaming_live))
@@ -106,11 +110,24 @@ class AirPlayAudioCaptureService : Service() {
                     port = AirPlayTarget.DEFAULT_RTSP_PORT,
                     name = "Paired Mac AirPlay"
                 )
-                RaopTestToneClient(target, passcode).use { client ->
+                val dacpSession = AirPlayDacpSession()
+                dacpControlServer = AirPlayDacpControlServer(this, dacpSession) { command ->
+                    AirPlayMediaControlDispatcher.dispatch(this, command)
+                }.also { it.start() }
+
+                RaopTestToneClient(
+                    target = target,
+                    password = passcode,
+                    dacpSession = dacpSession
+                ).use { client ->
                     client.playPcmPackets(
                         source = AudioRecordPacketSource(record, running),
                         status = { status -> updateStatus(status) },
-                        metadataProvider = { AndroidNowPlayingReader.current(this) }
+                        metadataProvider = {
+                            AndroidNowPlayingReader.current(this).also { metadata ->
+                                metadataSender.sendIfChanged(metadata)
+                            }
+                        }
                     )
                 }
             }.onSuccess {
@@ -150,6 +167,10 @@ class AirPlayAudioCaptureService : Service() {
 
     private fun stopCapture() {
         if (!running.getAndSet(false)) {
+            runCatching { nowPlayingSender?.stop() }
+            nowPlayingSender = null
+            runCatching { dacpControlServer?.close() }
+            dacpControlServer = null
             ZevClipPreferences.setAirPlayStreaming(this, false)
             return
         }
@@ -158,6 +179,10 @@ class AirPlayAudioCaptureService : Service() {
         audioRecord = null
         runCatching { mediaVolumeRestorer?.restore() }
         mediaVolumeRestorer = null
+        runCatching { nowPlayingSender?.stop() }
+        nowPlayingSender = null
+        runCatching { dacpControlServer?.close() }
+        dacpControlServer = null
         runCatching { mediaProjection?.stop() }
         mediaProjection = null
         ZevClipPreferences.setAirPlayStreaming(this, false)
