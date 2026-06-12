@@ -32,6 +32,8 @@ It works over the same Wi-Fi/LAN, including a phone hotspot. Pair once with the 
 
 ## Downloads
 
+Latest release: **2.0.0**.
+
 Download builds from GitHub Releases.
 
 Expected release files:
@@ -125,7 +127,7 @@ Security limitations:
 - Text clipboard sync is supported. Image clipboard sync is planned for a later version.
 - macOS public distribution needs Developer ID signing and notarization.
 - Some Android brands may block boot autostart unless Auto-start or unrestricted battery is enabled manually.
-- Bonjour discovery may fail on networks with client isolation enabled. Manual IP entry remains available.
+- Bonjour discovery may fail on networks with client isolation enabled. Reconnect from Android Settings after moving between Wi-Fi, LAN, or hotspot networks.
 
 ## Build From Source
 

@@ -10,8 +10,8 @@ android {
         applicationId = "com.zevclip.sender"
         minSdk = 26
         targetSdk = 36
-        versionCode = 15
-        versionName = "1.5.0"
+        versionCode = 20
+        versionName = "2.0.0"
     }
 
     buildTypes {

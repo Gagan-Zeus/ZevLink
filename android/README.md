@@ -2,6 +2,8 @@
 
 This native Kotlin Android app connects an Android phone to the ZevLink macOS app over the local network.
 
+Current release version: **2.0.0**.
+
 It includes:
 
 - Two-way clipboard text sync with the Mac.
@@ -70,7 +72,7 @@ Confirm the Mac app is running and showing the ZevLink settings/menu-bar UI. If 
 
 QR pairing is intended to be one-time. If the saved Mac IP becomes stale, Android first tries the saved endpoint, then runs Bonjour discovery for `_zevclip._tcp`, selects the receiver whose TXT `deviceId` matches the paired Mac, saves the new host/port, and retries once.
 
-Manual discovery remains available in Android settings if Bonjour is blocked by the network.
+Use **Reconnect Mac** in Android settings if the saved Mac address becomes stale after a network change.
 
 ### 4. Enable Clipboard Sync Permissions
 
