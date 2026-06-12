@@ -36,11 +36,6 @@ Latest release: **2.0.0**.
 
 Download builds from GitHub Releases.
 
-Expected release files:
-
-- `ZevLink-macOS-<version>.zip`
-- `ZevLink-Android-<version>.apk`
-
 ## Requirements
 
 ### Mac
