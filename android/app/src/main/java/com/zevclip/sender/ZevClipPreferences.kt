@@ -35,9 +35,12 @@ object ZevClipPreferences {
     const val KEY_AIRPLAY_TEST_STATUS = "airplay_test_status"
     const val KEY_AIRPLAY_PASSCODE = "airplay_passcode"
     const val KEY_AIRPLAY_STREAMING = "airplay_streaming"
+    const val KEY_AIRPLAY_BROADCAST_STATUS = "airplay_broadcast_status"
+    const val KEY_AIRPLAY_BROADCAST_STREAMING = "airplay_broadcast_streaming"
 
     private const val KEY_ANDROID_DEVICE_ID = "android_device_id"
     private const val KEY_LAST_TILE_SUBTITLE = "last_tile_subtitle"
+    private const val KEY_AIRPLAY_BROADCAST_PASSWORD_PREFIX = "airplay_broadcast_password_"
 
     private const val PREFERENCES_NAME = "zevclip_preferences"
     private const val LEGACY_ACTIVITY_PREFERENCES_NAME = "MainActivity"
@@ -240,6 +243,42 @@ object ZevClipPreferences {
     fun setAirPlayStreaming(context: Context, isStreaming: Boolean) {
         preferences(context).edit()
             .putBoolean(KEY_AIRPLAY_STREAMING, isStreaming)
+            .apply()
+    }
+
+    fun airPlayBroadcastStatus(context: Context): String {
+        return preferences(context).getString(
+            KEY_AIRPLAY_BROADCAST_STATUS,
+            "No AirPlay broadcast yet."
+        ).orEmpty()
+    }
+
+    fun setAirPlayBroadcastStatus(context: Context, status: String) {
+        preferences(context).edit()
+            .putString(KEY_AIRPLAY_BROADCAST_STATUS, status)
+            .apply()
+    }
+
+    fun isAirPlayBroadcastStreaming(context: Context): Boolean {
+        return preferences(context).getBoolean(KEY_AIRPLAY_BROADCAST_STREAMING, false)
+    }
+
+    fun setAirPlayBroadcastStreaming(context: Context, isStreaming: Boolean) {
+        preferences(context).edit()
+            .putBoolean(KEY_AIRPLAY_BROADCAST_STREAMING, isStreaming)
+            .apply()
+    }
+
+    fun airPlayBroadcastPassword(context: Context, receiverKey: String): String {
+        return preferences(context)
+            .getString(KEY_AIRPLAY_BROADCAST_PASSWORD_PREFIX + receiverKey, "")
+            .orEmpty()
+            .trim()
+    }
+
+    fun setAirPlayBroadcastPassword(context: Context, receiverKey: String, password: String) {
+        preferences(context).edit()
+            .putString(KEY_AIRPLAY_BROADCAST_PASSWORD_PREFIX + receiverKey, password.trim())
             .apply()
     }
 

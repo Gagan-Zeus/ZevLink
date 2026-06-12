@@ -110,6 +110,11 @@
             android:exported="false"
             android:foregroundServiceType="mediaProjection" />
 
+        <service
+            android:name=".AirPlayBroadcastAudioService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
+
         <receiver
             android:name=".ZevClipBootReceiver"
             android:enabled="true"

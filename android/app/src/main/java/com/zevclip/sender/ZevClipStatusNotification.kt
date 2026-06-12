@@ -54,6 +54,7 @@ object ZevClipStatusNotification {
         val syncEnabled = ZevClipPreferences.isClipboardSyncEnabled(context)
         val receiverRunning = ZevClipPreferences.isAndroidReceiverRunning(context)
         val airPlayStreaming = ZevClipPreferences.isAirPlayStreaming(context)
+        val airPlayBroadcastStreaming = ZevClipPreferences.isAirPlayBroadcastStreaming(context)
         val title = if (syncEnabled && receiverRunning) {
             context.getString(R.string.notification_title_running)
         } else {
@@ -76,12 +77,12 @@ object ZevClipStatusNotification {
             .setContentText(text)
             .setStyle(Notification.BigTextStyle().bigText(text))
             .setContentIntent(contentIntent)
-            .setOngoing((syncEnabled && receiverRunning) || airPlayStreaming)
+            .setOngoing((syncEnabled && receiverRunning) || airPlayStreaming || airPlayBroadcastStreaming)
             .setShowWhen(false)
             .setOnlyAlertOnce(true)
 
         if (AirPlayFeatureGate.isEnabled(context)) {
-            notification.addAction(airPlayAction(context, airPlayStreaming))
+            notification.addAction(airPlayAction(context, airPlayStreaming, airPlayBroadcastStreaming))
         }
 
         return notification.build()
@@ -89,6 +90,13 @@ object ZevClipStatusNotification {
 
     private fun connectionNotificationText(context: Context, canConnect: Boolean): String {
         val connectionText = connectionStatusText(context, canConnect)
+        if (ZevClipPreferences.isAirPlayBroadcastStreaming(context)) {
+            val broadcastText = ZevClipPreferences.airPlayBroadcastStatus(context)
+                .takeIf { it.isNotBlank() }
+                ?: context.getString(R.string.airplay_broadcast_live, 1)
+            return "$connectionText\n$broadcastText"
+        }
+
         if (!ZevClipPreferences.isAirPlayStreaming(context)) return connectionText
 
         val airPlayText = ZevClipPreferences.airPlayTestStatus(context)
@@ -118,8 +126,19 @@ object ZevClipStatusNotification {
         return "$connectedText · Mac $percentage%$chargingSuffix"
     }
 
-    private fun airPlayAction(context: Context, isStreaming: Boolean): Notification.Action {
-        val intent = if (isStreaming) {
+    private fun airPlayAction(
+        context: Context,
+        isStreaming: Boolean,
+        isBroadcastStreaming: Boolean
+    ): Notification.Action {
+        val intent = if (isBroadcastStreaming) {
+            PendingIntent.getService(
+                context,
+                AIRPLAY_ACTION_REQUEST_CODE,
+                AirPlayBroadcastAudioService.stopIntent(context),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
+        } else if (isStreaming) {
             PendingIntent.getService(
                 context,
                 AIRPLAY_ACTION_REQUEST_CODE,
@@ -137,7 +156,11 @@ object ZevClipStatusNotification {
             )
         }
         val title = context.getString(
-            if (isStreaming) R.string.stop_airplay_audio else R.string.start_airplay_audio
+            when {
+                isBroadcastStreaming -> R.string.stop_airplay_broadcast
+                isStreaming -> R.string.stop_airplay_audio
+                else -> R.string.start_airplay_audio
+            }
         )
         return Notification.Action.Builder(0, title, intent).build()
     }
