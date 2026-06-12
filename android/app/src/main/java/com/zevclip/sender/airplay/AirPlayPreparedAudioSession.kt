@@ -4,6 +4,7 @@ class AirPlayPreparedAudioSession(
     private val target: AirPlayTarget,
     private val pairVerifySession: AirPlayPairVerifier.Session,
     private val transport: AirPlayRtspTransport,
+    private val identity: AirPlayIdentity,
     private val localRtspHost: String = target.host,
     private val timingServerFactory: () -> AirPlayTimingServer = { AirPlayTimingServer() },
     private val syncSenderFactory: (AirPlayClock, Int) -> AirPlaySyncSender = { clock, port ->
@@ -42,7 +43,9 @@ class AirPlayPreparedAudioSession(
                 target = target,
                 transport = transport,
                 pairVerifySession = pairVerifySession,
-                localRtspHost = localRtspHost
+                localRtspHost = localRtspHost,
+                deviceId = identity.deviceId,
+                senderName = identity.senderName
             )
             val setup = controller.setup(
                 timingPort = timingPort,

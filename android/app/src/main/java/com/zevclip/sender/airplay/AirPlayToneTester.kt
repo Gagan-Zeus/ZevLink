@@ -33,7 +33,7 @@ object AirPlayToneTester {
         status("Checking Mac AirPlay at ${target.host}:${target.port}...")
 
         if (passcode.isNotBlank()) {
-            val raopResult = runRaopTone(target, passcode, status)
+            val raopResult = runRaopTone(target, passcode, identity, status)
             if (raopResult is Result.Success) return raopResult
             return raopResult
         }
@@ -53,6 +53,7 @@ object AirPlayToneTester {
                 target = target,
                 pairVerifySession = session.pairSession,
                 transport = session.transport,
+                identity = identity,
                 localRtspHost = session.localRtspHost,
                 syncSenderFactory = { clock, port ->
                     AirPlaySyncSender(
@@ -100,10 +101,11 @@ object AirPlayToneTester {
     private fun runRaopTone(
         target: AirPlayTarget,
         passcode: String,
+        identity: AirPlayIdentity,
         status: (String) -> Unit
     ): Result {
         return runCatching {
-            RaopTestToneClient(target, passcode).use { client ->
+            RaopTestToneClient(target, passcode, identity = identity).use { client ->
                 val result = client.playTestTone(status)
                 Result.Success(result.message)
             }

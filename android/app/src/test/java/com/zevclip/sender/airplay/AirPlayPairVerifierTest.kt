@@ -12,7 +12,7 @@ import org.junit.Test
 class AirPlayPairVerifierTest {
     @Test
     fun completesPairVerifyAgainstLocalReceiver() {
-        val controllerIdentity = AirPlayIdentity.generate()
+        val controllerIdentity = testIdentity()
         val accessoryIdentity = CryptoPrimitives.generateEd25519KeyPair()
 
         PairVerifyServer(
@@ -36,7 +36,7 @@ class AirPlayPairVerifierTest {
 
     @Test
     fun keepsVerifiedConnectionAvailableForEncryptedControl() {
-        val controllerIdentity = AirPlayIdentity.generate()
+        val controllerIdentity = testIdentity()
         val accessoryIdentity = CryptoPrimitives.generateEd25519KeyPair()
 
         PairVerifyServer(
@@ -58,6 +58,13 @@ class AirPlayPairVerifierTest {
                 assertEquals(2, server.awaitRequestCount())
             }
         }
+    }
+
+    private fun testIdentity(): AirPlayIdentity {
+        return AirPlayIdentity.generate(
+            deviceId = "02:11:22:33:44:55",
+            senderName = "Pixel Test"
+        )
     }
 
     private class PairVerifyServer(

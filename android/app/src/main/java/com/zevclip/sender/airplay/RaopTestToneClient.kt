@@ -15,6 +15,7 @@ import kotlin.concurrent.thread
 class RaopTestToneClient(
     private val target: AirPlayTarget,
     private val password: String,
+    private val identity: AirPlayIdentity? = null,
     private val connectTimeoutMs: Int = DEFAULT_TIMEOUT_MS,
     private val readTimeoutMs: Int = DEFAULT_TIMEOUT_MS,
     private val socketFactory: () -> Socket = { Socket() },
@@ -393,6 +394,13 @@ class RaopTestToneClient(
         val requestHeaders = LinkedHashMap<String, String>().apply {
             put("CSeq", (cseq++).toString())
             put("User-Agent", USER_AGENT)
+            identity?.let { airPlayIdentity ->
+                put("X-Apple-Device-ID", airPlayIdentity.deviceId)
+                put("X-Apple-Client-Name", airPlayIdentity.senderName.asciiHeaderValue())
+                if (dacpSession == null) {
+                    put("Client-Instance", airPlayIdentity.clientInstanceId())
+                }
+            }
             dacpSession?.let { session ->
                 put("DACP-ID", session.dacpId)
                 put("Active-Remote", session.activeRemote)
@@ -491,7 +499,7 @@ class RaopTestToneClient(
         return buildString {
             append("v=0\r\n")
             append("o=iTunes $sessionId 0 IN $localFamily $localHost\r\n")
-            append("s=iTunes\r\n")
+            append("s=${identity?.senderName?.sdpLineValue() ?: "iTunes"}\r\n")
             append("c=IN $remoteFamily ${target.host}\r\n")
             append("t=0 0\r\n")
             append("m=audio 0 RTP/AVP 96\r\n")
@@ -595,6 +603,21 @@ class RaopTestToneClient(
         return MessageDigest.getInstance("MD5")
             .digest(value.toByteArray(Charsets.UTF_8))
             .joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+    }
+
+    private fun AirPlayIdentity.clientInstanceId(): String {
+        return deviceId.filter { it.isLetterOrDigit() }.take(16).uppercase(Locale.US)
+    }
+
+    private fun String.asciiHeaderValue(): String {
+        return map { char -> if (char.code in 0x20..0x7E) char else '?' }
+            .joinToString("")
+            .trim()
+            .ifBlank { "Android" }
+    }
+
+    private fun String.sdpLineValue(): String {
+        return asciiHeaderValue().replace('\r', ' ').replace('\n', ' ')
     }
 
     private fun randomUnsignedShort(): Int {

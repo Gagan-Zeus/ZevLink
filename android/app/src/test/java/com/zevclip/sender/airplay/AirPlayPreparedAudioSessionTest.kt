@@ -42,6 +42,10 @@ class AirPlayPreparedAudioSessionTest {
             target = pairSession.target,
             pairVerifySession = pairSession,
             transport = transport,
+            identity = AirPlayIdentity.generate(
+                deviceId = "02:11:22:33:44:55",
+                senderName = "Pixel Test"
+            ),
             packetSinkFactory = {
                 object : AirPlayPacketSink {
                     override fun send(packet: ByteArray) {

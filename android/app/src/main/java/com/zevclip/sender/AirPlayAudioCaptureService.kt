@@ -14,6 +14,7 @@ import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.IBinder
+import com.zevclip.sender.airplay.AirPlayIdentityStore
 import com.zevclip.sender.airplay.AirPlayTarget
 import com.zevclip.sender.airplay.RaopTestToneClient
 import java.util.concurrent.atomic.AtomicBoolean
@@ -110,7 +111,8 @@ class AirPlayAudioCaptureService : Service() {
                     port = AirPlayTarget.DEFAULT_RTSP_PORT,
                     name = "Paired Mac AirPlay"
                 )
-                val dacpSession = AirPlayDacpSession()
+                val identity = AirPlayIdentityStore.getOrCreate(this)
+                val dacpSession = AirPlayDacpSession.fromIdentity(identity)
                 dacpControlServer = AirPlayDacpControlServer(this, dacpSession) { command ->
                     AirPlayMediaControlDispatcher.dispatch(this, command)
                 }.also { it.start() }
@@ -118,6 +120,7 @@ class AirPlayAudioCaptureService : Service() {
                 RaopTestToneClient(
                     target = target,
                     password = passcode,
+                    identity = identity,
                     dacpSession = dacpSession
                 ).use { client ->
                     client.playPcmPackets(

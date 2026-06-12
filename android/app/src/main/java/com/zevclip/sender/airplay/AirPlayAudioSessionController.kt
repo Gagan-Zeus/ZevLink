@@ -5,7 +5,8 @@ class AirPlayAudioSessionController(
     private val transport: AirPlayRtspTransport,
     private val pairVerifySession: AirPlayPairVerifier.Session,
     private val localRtspHost: String = target.host,
-    private val deviceId: String = "AA:BB:CC:DD:EE:FF"
+    private val deviceId: String = "AA:BB:CC:DD:EE:FF",
+    private val senderName: String = "Android"
 ) {
     data class SetupResult(
         val ports: AirPlayAudioSetup.StreamPorts,
@@ -32,7 +33,8 @@ class AirPlayAudioSessionController(
             val setupOneBody = AirPlayAudioSetup.setupTimingPayload(
                 deviceId = deviceId,
                 timingPort = timingPort,
-                ids = ids
+                ids = ids,
+                senderName = senderName
             )
             val setupOne = rtsp(
                 method = "SETUP",
@@ -154,13 +156,17 @@ class AirPlayAudioSessionController(
             headers = linkedMapOf(
                 "CSeq" to (cseq++).toString(),
                 "User-Agent" to "AirPlay/950.7.1 ZevClip",
-                "DACP-ID" to "0000000000000001",
+                "DACP-ID" to clientInstanceId(),
                 "Active-Remote" to "1",
-                "Client-Instance" to "0000000000000001"
+                "Client-Instance" to clientInstanceId()
             ).apply { putAll(extraHeaders) },
             body = body,
             contentType = contentType
         )
+    }
+
+    private fun clientInstanceId(): String {
+        return deviceId.filter { it.isLetterOrDigit() }.take(16).uppercase()
     }
 
     private fun Int.unsigned(): Long {

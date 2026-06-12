@@ -9,6 +9,7 @@ import android.net.nsd.NsdServiceInfo
 import android.os.Build
 import android.util.Log
 import android.view.KeyEvent
+import com.zevclip.sender.airplay.AirPlayIdentity
 import java.io.BufferedReader
 import java.io.ByteArrayOutputStream
 import java.io.Closeable
@@ -16,16 +17,28 @@ import java.io.InputStreamReader
 import java.net.ServerSocket
 import java.net.Socket
 import java.util.Locale
-import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
 
 data class AirPlayDacpSession(
-    val dacpId: String = UUID.randomUUID().toString().replace("-", "").take(16).uppercase(Locale.US),
-    val activeRemote: String = "1"
-)
+    val dacpId: String,
+    val activeRemote: String = "1",
+    val senderName: String
+) {
+    companion object {
+        fun fromIdentity(identity: AirPlayIdentity): AirPlayDacpSession {
+            return AirPlayDacpSession(
+                dacpId = identity.deviceId
+                    .filter { it.isLetterOrDigit() }
+                    .take(16)
+                    .uppercase(Locale.US),
+                senderName = identity.senderName
+            )
+        }
+    }
+}
 
 enum class AirPlayDacpCommand {
     PlayPause,
@@ -136,8 +149,8 @@ class AirPlayDacpControlServer(
             setAttribute("txtvers", "1")
             setAttribute("Ver", "131075")
             setAttribute("DbId", session.dacpId)
-            setAttribute("DvNm", "ZevClip")
-            setAttribute("CtlN", "ZevClip")
+            setAttribute("DvNm", session.senderName)
+            setAttribute("CtlN", session.senderName)
         }
 
         val listener = object : NsdManager.RegistrationListener {
