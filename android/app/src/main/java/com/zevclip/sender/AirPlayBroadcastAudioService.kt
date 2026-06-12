@@ -25,7 +25,8 @@ class AirPlayBroadcastAudioService : Service() {
     data class TargetSpec(
         val target: AirPlayTarget,
         val password: String,
-        val delayMs: Int = 0
+        val delayMs: Int = 0,
+        val receiverKey: String = "${target.host}:${target.port}"
     )
 
     private val running = AtomicBoolean(false)
@@ -144,8 +145,18 @@ class AirPlayBroadcastAudioService : Service() {
                     error(getString(R.string.airplay_broadcast_no_sessions))
                 }
 
+                val hasUnapprovedReceiver = targets.any {
+                    !ZevClipPreferences.isAirPlayBroadcastReceiverApproved(this, it.receiverKey)
+                }
+                if (hasUnapprovedReceiver) {
+                    updateStatus(getString(R.string.airplay_broadcast_waiting_for_approval, sessions.size))
+                    sendSilenceWarmup(APPROVAL_WARMUP_MS)
+                }
                 updateStatus(getString(R.string.airplay_broadcast_aligning, sessions.size))
-                sendSilencePreRoll()
+                sendSilenceWarmup(PRE_ROLL_MS)
+                targets.forEach {
+                    ZevClipPreferences.setAirPlayBroadcastReceiverApproved(this, it.receiverKey, true)
+                }
                 record.startRecording()
                 updateStatus(getString(R.string.airplay_broadcast_live, sessions.size))
                 streamBroadcast(record)
@@ -177,11 +188,18 @@ class AirPlayBroadcastAudioService : Service() {
         }
     }
 
-    private fun sendSilencePreRoll() {
+    private fun sendSilenceWarmup(durationMs: Int) {
         val silence = ByteArray(PACKET_BYTES)
-        repeat(PRE_ROLL_PACKET_COUNT) {
+        repeat(packetCountForDuration(durationMs)) {
             if (!running.get() || sessions.isEmpty()) return
             sendBroadcastPacket(silence, FRAMES_PER_PACKET)
+            sleepPacketDuration()
+        }
+    }
+
+    private fun sleepPacketDuration() {
+        runCatching {
+            Thread.sleep(FRAMES_PER_PACKET * 1_000L / SAMPLE_RATE)
         }
     }
 
@@ -315,16 +333,16 @@ class AirPlayBroadcastAudioService : Service() {
         private const val EXTRA_REQUIRES_PASSWORD = "requires_password"
         private const val EXTRA_PASSWORDS = "passwords"
         private const val EXTRA_DELAYS_MS = "delays_ms"
+        private const val EXTRA_RECEIVER_KEYS = "receiver_keys"
         private const val LEGACY_AIRPLAY_NOTIFICATION_ID = 2042
         private const val SAMPLE_RATE = RaopAudioSession.SAMPLE_RATE
         private const val FRAMES_PER_PACKET = RaopAudioSession.FRAMES_PER_PACKET
         private const val BYTES_PER_FRAME = 4
         private const val PACKET_BYTES = FRAMES_PER_PACKET * BYTES_PER_FRAME
         private const val PRE_ROLL_MS = 1_000
+        private const val APPROVAL_WARMUP_MS = 12_000
         private const val MIN_LATENCY_MS = 1_000
         private const val MAX_DEVICE_DELAY_MS = 1_000
-        private val PRE_ROLL_PACKET_COUNT =
-            (PRE_ROLL_MS * SAMPLE_RATE + (FRAMES_PER_PACKET * 1_000) - 1) / (FRAMES_PER_PACKET * 1_000)
 
         fun start(context: Context, resultCode: Int, resultData: Intent, targets: List<TargetSpec>) {
             val intent = Intent(context, AirPlayBroadcastAudioService::class.java)
@@ -340,6 +358,7 @@ class AirPlayBroadcastAudioService : Service() {
                 .putExtra(EXTRA_REQUIRES_PASSWORD, targets.map { it.target.requiresPassword == true }.toBooleanArray())
                 .putStringArrayListExtra(EXTRA_PASSWORDS, ArrayList(targets.map { it.password }))
                 .putIntegerArrayListExtra(EXTRA_DELAYS_MS, ArrayList(targets.map { it.delayMs }))
+                .putStringArrayListExtra(EXTRA_RECEIVER_KEYS, ArrayList(targets.map { it.receiverKey }))
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
             } else {
@@ -364,6 +383,7 @@ class AirPlayBroadcastAudioService : Service() {
             val features = intent.getStringArrayListExtra(EXTRA_FEATURES).orEmpty()
             val passwords = intent.getStringArrayListExtra(EXTRA_PASSWORDS).orEmpty()
             val delaysMs = intent.getIntegerArrayListExtra(EXTRA_DELAYS_MS).orEmpty()
+            val receiverKeys = intent.getStringArrayListExtra(EXTRA_RECEIVER_KEYS).orEmpty()
             val requiresPasswords = intent.getBooleanArrayExtra(EXTRA_REQUIRES_PASSWORD)
             return hosts.mapIndexedNotNull { index, host ->
                 val port = ports.getOrNull(index) ?: return@mapIndexedNotNull null
@@ -379,10 +399,15 @@ class AirPlayBroadcastAudioService : Service() {
                             requiresPassword = requiresPasswords?.getOrNull(index)
                         ),
                         password = passwords.getOrNull(index).orEmpty(),
-                        delayMs = delaysMs.getOrNull(index) ?: 0
+                        delayMs = delaysMs.getOrNull(index) ?: 0,
+                        receiverKey = receiverKeys.getOrNull(index).orEmpty().ifBlank { "$host:$port" }
                     )
                 }.getOrNull()
             }
+        }
+
+        private fun packetCountForDuration(durationMs: Int): Int {
+            return (durationMs * SAMPLE_RATE + (FRAMES_PER_PACKET * 1_000) - 1) / (FRAMES_PER_PACKET * 1_000)
         }
 
         private fun latencyFramesForDelay(delayMs: Int): Long {

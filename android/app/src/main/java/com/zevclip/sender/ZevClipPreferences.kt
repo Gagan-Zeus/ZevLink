@@ -42,6 +42,7 @@ object ZevClipPreferences {
     private const val KEY_LAST_TILE_SUBTITLE = "last_tile_subtitle"
     private const val KEY_AIRPLAY_BROADCAST_PASSWORD_PREFIX = "airplay_broadcast_password_"
     private const val KEY_AIRPLAY_BROADCAST_DELAY_PREFIX = "airplay_broadcast_delay_"
+    private const val KEY_AIRPLAY_BROADCAST_APPROVED_PREFIX = "airplay_broadcast_approved_"
 
     private const val PREFERENCES_NAME = "zevclip_preferences"
     private const val LEGACY_ACTIVITY_PREFERENCES_NAME = "MainActivity"
@@ -292,6 +293,17 @@ object ZevClipPreferences {
     fun setAirPlayBroadcastDelayMs(context: Context, receiverKey: String, delayMs: Int) {
         preferences(context).edit()
             .putInt(KEY_AIRPLAY_BROADCAST_DELAY_PREFIX + receiverKey, delayMs.coerceIn(-1_000, 1_000))
+            .apply()
+    }
+
+    fun isAirPlayBroadcastReceiverApproved(context: Context, receiverKey: String): Boolean {
+        return preferences(context)
+            .getBoolean(KEY_AIRPLAY_BROADCAST_APPROVED_PREFIX + receiverKey, false)
+    }
+
+    fun setAirPlayBroadcastReceiverApproved(context: Context, receiverKey: String, isApproved: Boolean) {
+        preferences(context).edit()
+            .putBoolean(KEY_AIRPLAY_BROADCAST_APPROVED_PREFIX + receiverKey, isApproved)
             .apply()
     }
 

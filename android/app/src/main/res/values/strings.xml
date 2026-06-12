@@ -66,6 +66,7 @@
     <string name="airplay_broadcast_missing_password">Add the AirPlay password for %1$s first.</string>
     <string name="airplay_broadcast_connecting">Connecting broadcast audio to %1$d device(s)…</string>
     <string name="airplay_broadcast_preparing_device">Preparing %3$s (%1$d/%2$d)…</string>
+    <string name="airplay_broadcast_waiting_for_approval">Waiting for AirPlay approval on %1$d device(s)…</string>
     <string name="airplay_broadcast_aligning">Aligning %1$d AirPlay device(s)…</string>
     <string name="airplay_broadcast_device_failed">%1$s failed: %2$s</string>
     <string name="airplay_broadcast_no_sessions">No AirPlay broadcast sessions could start.</string>

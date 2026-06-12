@@ -1078,7 +1078,8 @@ class MainActivity : Activity() {
                 AirPlayBroadcastAudioService.TargetSpec(
                     target = receiver.target,
                     password = password,
-                    delayMs = ZevClipPreferences.airPlayBroadcastDelayMs(this, receiver.key)
+                    delayMs = ZevClipPreferences.airPlayBroadcastDelayMs(this, receiver.key),
+                    receiverKey = receiver.key
                 )
             }
 
