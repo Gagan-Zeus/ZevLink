@@ -308,8 +308,8 @@ class AirPlayMirrorStreamClient(
     private companion object {
         const val DEFAULT_TIMEOUT_MS = 4_000
         const val PACKET_HEADER_SIZE = 128
-        const val STREAM_SEND_BUFFER_SIZE = 512 * 1024
-        const val MAX_PENDING_VIDEO_FRAMES = 2
+        const val STREAM_SEND_BUFFER_SIZE = 2 * 1024 * 1024
+        const val MAX_PENDING_VIDEO_FRAMES = 5
         const val TYPE_VIDEO: Byte = 0
         const val TYPE_CODEC: Byte = 1
         const val TYPE_HEARTBEAT: Byte = 2

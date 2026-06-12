@@ -74,7 +74,7 @@ class AirPlayScreenEncoder(
             }
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
                 setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileBaseline)
-                setInteger(MediaFormat.KEY_LEVEL, MediaCodecInfo.CodecProfileLevel.AVCLevel4)
+                setInteger(MediaFormat.KEY_LEVEL, MediaCodecInfo.CodecProfileLevel.AVCLevel42)
                 setInteger(MediaFormat.KEY_OPERATING_RATE, frameRate)
                 setInteger(MediaFormat.KEY_PRIORITY, 0)
             }
@@ -129,10 +129,11 @@ class AirPlayScreenEncoder(
     companion object {
         private const val TARGET_FRAME_RATE = 60
         private const val FALLBACK_FRAME_RATE = 30
-        private const val I_FRAME_INTERVAL_SECONDS = 2
+        private const val I_FRAME_INTERVAL_SECONDS = 1
         private const val DEQUEUE_TIMEOUT_US = 5_000L
-        private const val MIN_BIT_RATE = 6_000_000
-        private const val MAX_BIT_RATE = 14_000_000
+        private const val MIN_BIT_RATE = 10_000_000
+        private const val MAX_BIT_RATE = 24_000_000
+        private const val BITS_PER_PIXEL_FRAME_X100 = 28L
 
         fun scaledSize(sourceWidth: Int, sourceHeight: Int, maxWidth: Int = 1280): Pair<Int, Int> {
             if (sourceWidth <= 0 || sourceHeight <= 0) return 1280 to 720
@@ -144,7 +145,7 @@ class AirPlayScreenEncoder(
 
         private fun targetBitRate(width: Int, height: Int, frameRate: Int): Int {
             val pixels = width.toLong() * height.toLong()
-            val scaled = (pixels * frameRate * 18L).toInt()
+            val scaled = (pixels * frameRate * BITS_PER_PIXEL_FRAME_X100 / 100L).toInt()
             return scaled.coerceIn(MIN_BIT_RATE, MAX_BIT_RATE)
         }
 

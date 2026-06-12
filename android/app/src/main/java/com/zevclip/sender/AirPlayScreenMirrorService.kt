@@ -57,10 +57,6 @@ class AirPlayScreenMirrorService : Service() {
     @Volatile
     private var activeCaptureSize: MirrorCaptureSize? = null
     @Volatile
-    private var pendingCaptureSize: MirrorCaptureSize? = null
-    @Volatile
-    private var pendingCaptureSizeSinceMs: Long = 0L
-    @Volatile
     private var mirrorFailure: String? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -411,8 +407,6 @@ class AirPlayScreenMirrorService : Service() {
             }
         }
         activeCaptureSize = null
-        pendingCaptureSize = null
-        pendingCaptureSizeSinceMs = 0L
         restartingEncoder = false
     }
 
