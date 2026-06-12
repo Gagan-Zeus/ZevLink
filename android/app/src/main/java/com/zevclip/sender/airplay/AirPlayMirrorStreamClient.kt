@@ -122,8 +122,10 @@ class AirPlayMirrorStreamClient(
     fun updateVideoSize(width: Int, height: Int) {
         if (width <= 0 || height <= 0) return
         if (contentWidth == width && contentHeight == height) return
+        videoQueue.clear()
         contentWidth = width
         contentHeight = height
+        codecConfig = null
         codecConfigSent = false
         Log.i(TAG, "Updated AirPlay mirror video size to ${width}x$height")
     }

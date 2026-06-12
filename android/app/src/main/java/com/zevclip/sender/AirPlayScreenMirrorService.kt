@@ -51,10 +51,15 @@ class AirPlayScreenMirrorService : Service() {
     private var mirrorAudioStreamer: AirPlayPcmStreamer? = null
     private var mediaVolumeRestorer: AirPlayPlaybackCapture.MediaVolumeRestorer? = null
     private var dacpControlServer: AirPlayDacpControlServer? = null
+    private var encoderGeneration = 0
     @Volatile
     private var restartingEncoder = false
     @Volatile
     private var activeCaptureSize: MirrorCaptureSize? = null
+    @Volatile
+    private var pendingCaptureSize: MirrorCaptureSize? = null
+    @Volatile
+    private var pendingCaptureSizeSinceMs: Long = 0L
     @Volatile
     private var mirrorFailure: String? = null
 
@@ -368,11 +373,12 @@ class AirPlayScreenMirrorService : Service() {
                 streamClient,
                 running
             )
+            val generation = ++encoderGeneration
             encoder = screenEncoder
             encoderWorker = thread(name = "zevclip-airplay-screen-encoder", isDaemon = true) {
                 runCatching { screenEncoder.start(projection) }
                     .onFailure { error ->
-                        if (running.get() && !restartingEncoder) {
+                        if (running.get() && generation == encoderGeneration && encoder === screenEncoder && !restartingEncoder) {
                             val message = error.message ?: error.javaClass.simpleName
                             mirrorFailure = message
                             Log.w(TAG, "AirPlay screen encoder failed", error)
@@ -397,6 +403,7 @@ class AirPlayScreenMirrorService : Service() {
         val oldWorker = encoderWorker
         encoder = null
         encoderWorker = null
+        encoderGeneration++
         runCatching { oldEncoder?.close() }
         runCatching {
             if (oldWorker != null && oldWorker !== Thread.currentThread()) {
@@ -404,26 +411,18 @@ class AirPlayScreenMirrorService : Service() {
             }
         }
         activeCaptureSize = null
+        pendingCaptureSize = null
+        pendingCaptureSizeSinceMs = 0L
         restartingEncoder = false
     }
 
     private fun captureSize(): MirrorCaptureSize {
         val metrics = resources.displayMetrics
-        val width = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            getSystemService(WindowManager::class.java).currentWindowMetrics.bounds.width()
-        } else {
-            @Suppress("DEPRECATION")
-            metrics.widthPixels
-        }
-        val height = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            getSystemService(WindowManager::class.java).currentWindowMetrics.bounds.height()
-        } else {
-            @Suppress("DEPRECATION")
-            metrics.heightPixels
-        }
-        val squareEdge = maxOf(width, height)
-        val (scaledWidth, _) = AirPlayScreenEncoder.scaledSize(squareEdge, squareEdge)
-        return MirrorCaptureSize(scaledWidth, scaledWidth, metrics.densityDpi)
+        return MirrorCaptureSize(
+            MACBOOK_MIRROR_WIDTH,
+            MACBOOK_MIRROR_HEIGHT,
+            metrics.densityDpi
+        )
     }
 
     private fun stopMirror() {
@@ -484,6 +483,8 @@ class AirPlayScreenMirrorService : Service() {
         private const val AUDIO_STOP_JOIN_MS = 700L
         private const val ENABLE_MIRROR_SESSION_AUDIO = true
         private const val MIRROR_AUDIO_LATENCY_FRAMES = 22_050L
+        private const val MACBOOK_MIRROR_WIDTH = 1440
+        private const val MACBOOK_MIRROR_HEIGHT = 900
         private const val TAG = "ZevClipAirPlayScreen"
 
         fun start(context: Context, resultCode: Int, resultData: Intent, screenCode: String) {
