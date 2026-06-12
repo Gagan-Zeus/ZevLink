@@ -41,6 +41,7 @@ object ZevClipPreferences {
     private const val KEY_ANDROID_DEVICE_ID = "android_device_id"
     private const val KEY_LAST_TILE_SUBTITLE = "last_tile_subtitle"
     private const val KEY_AIRPLAY_BROADCAST_PASSWORD_PREFIX = "airplay_broadcast_password_"
+    private const val KEY_AIRPLAY_BROADCAST_DELAY_PREFIX = "airplay_broadcast_delay_"
 
     private const val PREFERENCES_NAME = "zevclip_preferences"
     private const val LEGACY_ACTIVITY_PREFERENCES_NAME = "MainActivity"
@@ -279,6 +280,18 @@ object ZevClipPreferences {
     fun setAirPlayBroadcastPassword(context: Context, receiverKey: String, password: String) {
         preferences(context).edit()
             .putString(KEY_AIRPLAY_BROADCAST_PASSWORD_PREFIX + receiverKey, password.trim())
+            .apply()
+    }
+
+    fun airPlayBroadcastDelayMs(context: Context, receiverKey: String): Int {
+        return preferences(context)
+            .getInt(KEY_AIRPLAY_BROADCAST_DELAY_PREFIX + receiverKey, 0)
+            .coerceIn(-1_000, 1_000)
+    }
+
+    fun setAirPlayBroadcastDelayMs(context: Context, receiverKey: String, delayMs: Int) {
+        preferences(context).edit()
+            .putInt(KEY_AIRPLAY_BROADCAST_DELAY_PREFIX + receiverKey, delayMs.coerceIn(-1_000, 1_000))
             .apply()
     }
 

@@ -51,6 +51,12 @@
     <string name="airplay_broadcast_selected">Selected</string>
     <string name="airplay_broadcast_not_selected">Not selected</string>
     <string name="airplay_broadcast_password">Password</string>
+    <string name="airplay_broadcast_sync_delay">Sync Delay</string>
+    <string name="airplay_broadcast_delay_value">Delay %+d ms</string>
+    <string name="airplay_broadcast_delay_title">Sync delay</string>
+    <string name="airplay_broadcast_delay_message">Adjust %1$s if it sounds early or late. Use -1000 to 1000 ms.</string>
+    <string name="airplay_broadcast_save_delay">Save Delay</string>
+    <string name="airplay_broadcast_delay_invalid">Enter a delay from -1000 to 1000 ms.</string>
     <string name="airplay_broadcast_password_title">AirPlay password</string>
     <string name="airplay_broadcast_password_message">Enter the AirPlay password or on-screen code for %1$s.</string>
     <string name="airplay_broadcast_save_password">Save Password</string>
@@ -60,6 +66,7 @@
     <string name="airplay_broadcast_missing_password">Add the AirPlay password for %1$s first.</string>
     <string name="airplay_broadcast_connecting">Connecting broadcast audio to %1$d device(s)…</string>
     <string name="airplay_broadcast_preparing_device">Preparing %3$s (%1$d/%2$d)…</string>
+    <string name="airplay_broadcast_aligning">Aligning %1$d AirPlay device(s)…</string>
     <string name="airplay_broadcast_device_failed">%1$s failed: %2$s</string>
     <string name="airplay_broadcast_no_sessions">No AirPlay broadcast sessions could start.</string>
     <string name="airplay_broadcast_live">Broadcasting Android audio to %1$d device(s).</string>

@@ -59,7 +59,7 @@ class RaopAudioSession(
     private var keepAliveRunning = false
     private var keepAliveThread: Thread? = null
 
-    fun start() {
+    fun start(playbackClock: AirPlayClock = AirPlayClock(sampleRate = SAMPLE_RATE, latencyFrames = DEFAULT_LATENCY_FRAMES)) {
         connect()
         val localHost = requireNotNull(socket?.localAddress?.hostAddress) {
             "RAOP local address is not available."
@@ -86,16 +86,11 @@ class RaopAudioSession(
         val remoteControlPort = remotePorts["control_port"]?.toIntOrNull() ?: 0
         rtspSession = setup.header("session")?.substringBefore(';')?.trim().orEmpty()
 
-        val nextClock = AirPlayClock(
-            sampleRate = SAMPLE_RATE,
-            latencyFrames = LOW_LATENCY_FRAMES
-        )
-        nextClock.reset()
-        clock = nextClock
+        clock = playbackClock
 
         if (remoteControlPort > 0) {
             syncSender = AirPlaySyncSender(
-                clock = nextClock,
+                clock = playbackClock,
                 host = target.host,
                 port = remoteControlPort,
                 socket = nextControlSocket
@@ -104,7 +99,7 @@ class RaopAudioSession(
 
         sequenceNumber = randomUnsignedShort()
         record()
-        flush(rtspSession, sequenceNumber, nextClock.rtpTime32)
+        flush(rtspSession, sequenceNumber, playbackClock.rtpTime32)
         setVolume()
         audioSender = AirPlayUdpPacketSender(target.host, serverPort)
         startKeepAlive()
@@ -123,8 +118,12 @@ class RaopAudioSession(
         ) + payload
         sink.send(packet)
         sequenceNumber = (sequenceNumber + 1) and 0xFFFF
-        activeClock.advance(FRAMES_PER_PACKET)
         packetCount++
+    }
+
+    fun advanceClock(frames: Int) {
+        val activeClock = clock ?: error("RAOP clock is not ready.")
+        activeClock.advance(frames)
     }
 
     private fun connect() {
@@ -464,9 +463,9 @@ class RaopAudioSession(
     companion object {
         const val FRAMES_PER_PACKET = 352
         const val SAMPLE_RATE = 44_100
+        const val DEFAULT_LATENCY_FRAMES = 88_200L
         private const val DEFAULT_TIMEOUT_MS = 5_000
         private const val KEEP_ALIVE_INTERVAL_MS = 20_000L
-        private const val LOW_LATENCY_FRAMES = 11_025L
         private const val USER_AGENT = "AirTunes/366.0"
         private const val DIGEST_USERNAME = "pyatv"
         private val HEADER_END = byteArrayOf('\r'.code.toByte(), '\n'.code.toByte(), '\r'.code.toByte(), '\n'.code.toByte())

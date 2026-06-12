@@ -18,7 +18,11 @@ class AirPlayClock(
     }
 
     fun reset() {
-        startTimestamp = ntpToRtpTimestamp(ntpNow(), sampleRate)
+        resetAt(ntpNow())
+    }
+
+    fun resetAt(ntp: Long) {
+        startTimestamp = ntpToRtpTimestamp(ntp, sampleRate)
         headTimestamp = startTimestamp
     }
 

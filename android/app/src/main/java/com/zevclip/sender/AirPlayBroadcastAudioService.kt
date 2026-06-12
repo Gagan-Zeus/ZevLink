@@ -16,6 +16,7 @@ import android.os.Build
 import android.os.IBinder
 import com.zevclip.sender.airplay.AirPlayIdentityStore
 import com.zevclip.sender.airplay.AirPlayTarget
+import com.zevclip.sender.airplay.AirPlayClock
 import com.zevclip.sender.airplay.RaopAudioSession
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
@@ -23,7 +24,8 @@ import kotlin.concurrent.thread
 class AirPlayBroadcastAudioService : Service() {
     data class TargetSpec(
         val target: AirPlayTarget,
-        val password: String
+        val password: String,
+        val delayMs: Int = 0
     )
 
     private val running = AtomicBoolean(false)
@@ -101,7 +103,6 @@ class AirPlayBroadcastAudioService : Service() {
 
                 val record = createPlaybackAudioRecord(projection)
                 audioRecord = record
-                record.startRecording()
                 mediaVolumeRestorer = MediaVolumeRestorer(getSystemService(AudioManager::class.java))
                     .also { it.muteMusicStream() }
 
@@ -111,16 +112,21 @@ class AirPlayBroadcastAudioService : Service() {
                     AirPlayMediaControlDispatcher.dispatch(this, command)
                 }.also { it.start() }
 
+                val broadcastStartNtp = AirPlayClock.ntpNow()
                 targets.forEachIndexed { index, spec ->
                     updateStatus(getString(R.string.airplay_broadcast_preparing_device, index + 1, targets.size, spec.target.name ?: spec.target.host))
                     runCatching {
+                        val clock = AirPlayClock(
+                            sampleRate = SAMPLE_RATE,
+                            latencyFrames = latencyFramesForDelay(spec.delayMs)
+                        ).also { it.resetAt(broadcastStartNtp) }
                         RaopAudioSession(
                             target = spec.target,
                             password = spec.password,
                             identity = identity,
                             dacpSession = dacpSession
                         ).also { session ->
-                            session.start()
+                            session.start(clock)
                             sessions.add(RaopAudioSession.Started(spec.target, session))
                         }
                     }.onFailure { error ->
@@ -138,6 +144,9 @@ class AirPlayBroadcastAudioService : Service() {
                     error(getString(R.string.airplay_broadcast_no_sessions))
                 }
 
+                updateStatus(getString(R.string.airplay_broadcast_aligning, sessions.size))
+                sendSilencePreRoll()
+                record.startRecording()
                 updateStatus(getString(R.string.airplay_broadcast_live, sessions.size))
                 streamBroadcast(record)
             }.onSuccess {
@@ -164,27 +173,40 @@ class AirPlayBroadcastAudioService : Service() {
             }
             if (offset <= 0) continue
             val frameCount = offset / BYTES_PER_FRAME
-            val iterator = sessions.iterator()
-            while (iterator.hasNext()) {
-                val started = iterator.next()
-                runCatching {
-                    started.session.sendPcm(buffer, frameCount)
-                }.onFailure { error ->
-                    runCatching { started.session.close() }
-                    iterator.remove()
-                    updateStatus(
-                        getString(
-                            R.string.airplay_broadcast_device_failed,
-                            started.target.name ?: started.target.host,
-                            error.message ?: "unknown error"
-                        )
+            sendBroadcastPacket(buffer, frameCount)
+        }
+    }
+
+    private fun sendSilencePreRoll() {
+        val silence = ByteArray(PACKET_BYTES)
+        repeat(PRE_ROLL_PACKET_COUNT) {
+            if (!running.get() || sessions.isEmpty()) return
+            sendBroadcastPacket(silence, FRAMES_PER_PACKET)
+        }
+    }
+
+    private fun sendBroadcastPacket(buffer: ByteArray, frameCount: Int) {
+        val iterator = sessions.iterator()
+        while (iterator.hasNext()) {
+            val started = iterator.next()
+            runCatching {
+                started.session.sendPcm(buffer, frameCount)
+            }.onFailure { error ->
+                runCatching { started.session.close() }
+                iterator.remove()
+                updateStatus(
+                    getString(
+                        R.string.airplay_broadcast_device_failed,
+                        started.target.name ?: started.target.host,
+                        error.message ?: "unknown error"
                     )
-                }
-            }
-            if (sessions.isEmpty()) {
-                error(getString(R.string.airplay_broadcast_all_devices_failed))
+                )
             }
         }
+        if (sessions.isEmpty()) {
+            error(getString(R.string.airplay_broadcast_all_devices_failed))
+        }
+        sessions.forEach { started -> started.session.advanceClock(FRAMES_PER_PACKET) }
     }
 
     private fun createPlaybackAudioRecord(projection: MediaProjection): AudioRecord {
@@ -292,11 +314,17 @@ class AirPlayBroadcastAudioService : Service() {
         private const val EXTRA_FEATURES = "features"
         private const val EXTRA_REQUIRES_PASSWORD = "requires_password"
         private const val EXTRA_PASSWORDS = "passwords"
+        private const val EXTRA_DELAYS_MS = "delays_ms"
         private const val LEGACY_AIRPLAY_NOTIFICATION_ID = 2042
         private const val SAMPLE_RATE = RaopAudioSession.SAMPLE_RATE
         private const val FRAMES_PER_PACKET = RaopAudioSession.FRAMES_PER_PACKET
         private const val BYTES_PER_FRAME = 4
         private const val PACKET_BYTES = FRAMES_PER_PACKET * BYTES_PER_FRAME
+        private const val PRE_ROLL_MS = 1_000
+        private const val MIN_LATENCY_MS = 1_000
+        private const val MAX_DEVICE_DELAY_MS = 1_000
+        private val PRE_ROLL_PACKET_COUNT =
+            (PRE_ROLL_MS * SAMPLE_RATE + (FRAMES_PER_PACKET * 1_000) - 1) / (FRAMES_PER_PACKET * 1_000)
 
         fun start(context: Context, resultCode: Int, resultData: Intent, targets: List<TargetSpec>) {
             val intent = Intent(context, AirPlayBroadcastAudioService::class.java)
@@ -311,6 +339,7 @@ class AirPlayBroadcastAudioService : Service() {
                 .putStringArrayListExtra(EXTRA_FEATURES, ArrayList(targets.map { it.target.features.orEmpty() }))
                 .putExtra(EXTRA_REQUIRES_PASSWORD, targets.map { it.target.requiresPassword == true }.toBooleanArray())
                 .putStringArrayListExtra(EXTRA_PASSWORDS, ArrayList(targets.map { it.password }))
+                .putIntegerArrayListExtra(EXTRA_DELAYS_MS, ArrayList(targets.map { it.delayMs }))
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
             } else {
@@ -334,6 +363,7 @@ class AirPlayBroadcastAudioService : Service() {
             val models = intent.getStringArrayListExtra(EXTRA_MODELS).orEmpty()
             val features = intent.getStringArrayListExtra(EXTRA_FEATURES).orEmpty()
             val passwords = intent.getStringArrayListExtra(EXTRA_PASSWORDS).orEmpty()
+            val delaysMs = intent.getIntegerArrayListExtra(EXTRA_DELAYS_MS).orEmpty()
             val requiresPasswords = intent.getBooleanArrayExtra(EXTRA_REQUIRES_PASSWORD)
             return hosts.mapIndexedNotNull { index, host ->
                 val port = ports.getOrNull(index) ?: return@mapIndexedNotNull null
@@ -348,10 +378,19 @@ class AirPlayBroadcastAudioService : Service() {
                             features = features.getOrNull(index)?.takeIf { it.isNotBlank() },
                             requiresPassword = requiresPasswords?.getOrNull(index)
                         ),
-                        password = passwords.getOrNull(index).orEmpty()
+                        password = passwords.getOrNull(index).orEmpty(),
+                        delayMs = delaysMs.getOrNull(index) ?: 0
                     )
                 }.getOrNull()
             }
+        }
+
+        private fun latencyFramesForDelay(delayMs: Int): Long {
+            val clampedDelayMs = delayMs.coerceIn(-MAX_DEVICE_DELAY_MS, MAX_DEVICE_DELAY_MS)
+            val baseFrames = RaopAudioSession.DEFAULT_LATENCY_FRAMES
+            val minFrames = MIN_LATENCY_MS.toLong() * SAMPLE_RATE / 1_000L
+            val delayFrames = clampedDelayMs.toLong() * SAMPLE_RATE / 1_000L
+            return maxOf(minFrames, baseFrames + delayFrames)
         }
     }
 }
