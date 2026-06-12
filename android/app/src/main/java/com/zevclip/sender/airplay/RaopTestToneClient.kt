@@ -86,8 +86,6 @@ class RaopTestToneClient(
         metadataProvider: (() -> NowPlayingMetadata?)? = null,
         publishMetadataToAirPlay: Boolean = true
     ): Result {
-        require(password.isNotBlank()) { "AirPlay password is empty." }
-
         val timingServer = AirPlayTimingServer()
         var controlSocket: DatagramSocket? = null
         var audioSender: AirPlayUdpPacketSender? = null

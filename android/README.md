@@ -105,6 +105,8 @@ Screen mirroring flow:
 3. Enter the AirPlay one-time code shown on the Mac.
 4. Approve Android screen capture.
 
+AirPlay audio and audio broadcast start from Android without a separate Mac password prompt. If a receiver rejects an audio session, check the receiver's AirPlay settings on that device.
+
 AirPlay capture requires Android 10+ and microphone/audio recording permission.
 
 ### 7. Add the Quick Settings Fallback

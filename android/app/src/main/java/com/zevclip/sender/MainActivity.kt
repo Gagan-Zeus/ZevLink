@@ -912,13 +912,10 @@ class MainActivity : Activity() {
         airPlayBroadcastReceivers.forEach { receiver ->
             val target = receiver.target
             val displayName = target.name ?: receiver.serviceName
-            val password = ZevClipPreferences.airPlayBroadcastPassword(this, receiver.key)
             val delayMs = ZevClipPreferences.airPlayBroadcastDelayMs(this, receiver.key)
-            val needsPassword = target.requiresPassword == true && password.isBlank()
             val selected = receiver.key in selectedAirPlayBroadcastReceivers
             val status = when {
                 selected -> getString(R.string.airplay_broadcast_selected)
-                needsPassword -> getString(R.string.airplay_broadcast_locked)
                 else -> getString(R.string.airplay_broadcast_ready)
             }
             val detail = listOfNotNull(
@@ -930,57 +927,30 @@ class MainActivity : Activity() {
 
             airPlayBroadcastDevicesContainer.addView(card(colors.surface).apply {
                 addView(cardTitle(displayName))
-                addView(textView(detail, 14f, if (needsPassword) colors.warning else colors.muted).apply {
+                addView(textView(detail, 14f, colors.muted).apply {
                     setPadding(0, dp(6), 0, dp(12))
                 })
-                addView(horizontalButtons(
-                    tonalButton(
-                        getString(
-                            if (selected) {
-                                R.string.airplay_broadcast_selected
-                            } else {
-                                R.string.airplay_broadcast_not_selected
-                            }
-                        )
-                    ) {
+                addView(tonalButton(
+                    getString(
                         if (selected) {
-                            selectedAirPlayBroadcastReceivers.remove(receiver.key)
+                            R.string.airplay_broadcast_selected
                         } else {
-                            selectedAirPlayBroadcastReceivers.add(receiver.key)
+                            R.string.airplay_broadcast_not_selected
                         }
-                        renderAirPlayBroadcastReceivers()
-                    },
-                    quietButton(getString(R.string.airplay_broadcast_password)) {
-                        promptForAirPlayBroadcastPassword(receiver)
+                    )
+                ) {
+                    if (selected) {
+                        selectedAirPlayBroadcastReceivers.remove(receiver.key)
+                    } else {
+                        selectedAirPlayBroadcastReceivers.add(receiver.key)
                     }
-                ))
+                    renderAirPlayBroadcastReceivers()
+                }, matchWidth())
                 addView(quietButton(getString(R.string.airplay_broadcast_sync_delay)) {
                     promptForAirPlayBroadcastDelay(receiver)
                 }, matchWidth(topMargin = 10))
             }, matchWidth(topMargin = 10))
         }
-    }
-
-    private fun promptForAirPlayBroadcastPassword(receiver: AirPlayDiscoveredReceiver) {
-        val target = receiver.target
-        val displayName = target.name ?: receiver.serviceName
-        val input = EditText(this).apply {
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
-            isSingleLine = true
-            setText(ZevClipPreferences.airPlayBroadcastPassword(this@MainActivity, receiver.key))
-            selectAll()
-        }
-
-        AlertDialog.Builder(this)
-            .setTitle(getString(R.string.airplay_broadcast_password_title))
-            .setMessage(getString(R.string.airplay_broadcast_password_message, displayName))
-            .setView(input)
-            .setPositiveButton(getString(R.string.airplay_broadcast_save_password)) { _, _ ->
-                ZevClipPreferences.setAirPlayBroadcastPassword(this, receiver.key, input.text.toString())
-                renderAirPlayBroadcastReceivers()
-            }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
     }
 
     private fun promptForAirPlayBroadcastDelay(receiver: AirPlayDiscoveredReceiver) {
@@ -1036,13 +1006,6 @@ class MainActivity : Activity() {
             return
         }
 
-        if (ZevClipPreferences.airPlayPasscode(this).isBlank()) {
-            promptForAirPlayAudioPassword {
-                toggleAirPlayAudioCapture()
-            }
-            return
-        }
-
         val projectionManager = getSystemService(MediaProjectionManager::class.java)
         ZevClipPreferences.setAirPlayTestStatus(this, getString(R.string.airplay_streaming_starting))
         refreshSyncStatuses()
@@ -1091,45 +1054,6 @@ class MainActivity : Activity() {
         }
 
         requestScreenAirPlayCode(endpoint)
-    }
-
-    private fun promptForAirPlayAudioPassword(onSaved: () -> Unit) {
-        val input = styledEditText().apply {
-            hint = getString(R.string.airplay_password_dialog_hint)
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
-            imeOptions = EditorInfo.IME_ACTION_DONE
-            setText(ZevClipPreferences.airPlayPasscode(this@MainActivity))
-            isSingleLine = true
-            selectAll()
-        }
-
-        AlertDialog.Builder(this)
-            .setTitle(getString(R.string.airplay_password_dialog_title))
-            .setMessage(getString(R.string.airplay_password_dialog_message))
-            .setView(input)
-            .setPositiveButton(getString(R.string.airplay_password_dialog_save), null)
-            .setNegativeButton(android.R.string.cancel, null)
-            .create()
-            .also { dialog ->
-                dialog.setOnShowListener {
-                    dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                        val password = input.text.toString().trim()
-                        if (password.isBlank()) {
-                            ZevClipPreferences.setAirPlayTestStatus(
-                                this,
-                                getString(R.string.airplay_password_missing)
-                            )
-                            refreshSyncStatuses()
-                            return@setOnClickListener
-                        }
-                        ZevClipPreferences.setAirPlayPasscode(this, password)
-                        dialog.dismiss()
-                        onSaved()
-                    }
-                }
-                dialog.show()
-                input.requestFocus()
-            }
     }
 
     private fun requestScreenAirPlayCode(endpoint: Endpoint) {
@@ -1370,18 +1294,9 @@ class MainActivity : Activity() {
         val selectedTargets = airPlayBroadcastReceivers
             .filter { it.key in selectedAirPlayBroadcastReceivers }
             .map { receiver ->
-                val password = ZevClipPreferences.airPlayBroadcastPassword(this, receiver.key)
-                if (receiver.target.requiresPassword == true && password.isBlank()) {
-                    ZevClipPreferences.setAirPlayBroadcastStatus(
-                        this,
-                        getString(R.string.airplay_broadcast_missing_password, receiver.target.name ?: receiver.serviceName)
-                    )
-                    refreshSyncStatuses()
-                    return
-                }
                 AirPlayBroadcastAudioService.TargetSpec(
                     target = receiver.target,
-                    password = password,
+                    password = "",
                     delayMs = ZevClipPreferences.airPlayBroadcastDelayMs(this, receiver.key),
                     receiverKey = receiver.key
                 )

@@ -79,8 +79,7 @@ class AirPlayAudioCaptureService : Service() {
         }
 
         val endpoint = ZevClipPreferences.endpoint(this)
-        val passcode = ZevClipPreferences.airPlayPasscode(this)
-        if (endpoint == null || passcode.isBlank()) {
+        if (endpoint == null) {
             finishWithStatus(getString(R.string.airplay_capture_pairing_needed))
             return
         }
@@ -117,7 +116,7 @@ class AirPlayAudioCaptureService : Service() {
 
                 RaopTestToneClient(
                     target = target,
-                    password = passcode,
+                    password = "",
                     identity = identity,
                     dacpSession = dacpSession
                 ).use { client ->
