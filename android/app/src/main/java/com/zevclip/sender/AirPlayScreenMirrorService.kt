@@ -476,7 +476,7 @@ class AirPlayScreenMirrorService : Service() {
         private const val ENCODER_RESTART_JOIN_MS = 700L
         private const val AUDIO_STOP_JOIN_MS = 700L
         private const val ENABLE_MIRROR_SESSION_AUDIO = true
-        private const val MIRROR_AUDIO_LATENCY_FRAMES = 22_050L
+        private const val MIRROR_AUDIO_LATENCY_FRAMES = 8_820L
         private const val MACBOOK_MIRROR_WIDTH = 1440
         private const val MACBOOK_MIRROR_HEIGHT = 900
         private const val TAG = "ZevClipAirPlayScreen"
