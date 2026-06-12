@@ -4,6 +4,7 @@ import ServiceManagement
 @MainActor
 final class AppSettings: ObservableObject {
     private enum DefaultsKey {
+        static let migratedFromLegacyBundleId = "migratedFromLegacyBundleId"
         static let launchAtLoginEnabled = "launchAtLoginEnabled"
         static let launchAtLoginRegisteredPath = "launchAtLoginRegisteredPath"
         static let showMenuBarIcon = "showMenuBarIcon"
@@ -14,6 +15,7 @@ final class AppSettings: ObservableObject {
     @Published private(set) var showMenuBarIcon: Bool
 
     init() {
+        Self.migrateLegacyDefaultsIfNeeded()
         let status = SMAppService.mainApp.status
         let savedPreference = UserDefaults.standard.object(
             forKey: DefaultsKey.launchAtLoginEnabled
@@ -120,6 +122,12 @@ final class AppSettings: ObservableObject {
     private static var fallbackRegistrationURL: URL {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/LaunchAgents", isDirectory: true)
+            .appendingPathComponent("com.zevlink.receiver.plist")
+    }
+
+    private static var legacyFallbackRegistrationURL: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/LaunchAgents", isDirectory: true)
             .appendingPathComponent("com.zevclip.receiver.plist")
     }
 
@@ -129,7 +137,7 @@ final class AppSettings: ObservableObject {
 
     private static func installFallbackRegistration() throws {
         let propertyList: [String: Any] = [
-            "Label": "com.zevclip.receiver",
+            "Label": "com.zevlink.receiver",
             "ProgramArguments": [
                 "/usr/bin/open",
                 "-gj",
@@ -152,6 +160,27 @@ final class AppSettings: ObservableObject {
 
     private static func removeFallbackRegistration() {
         try? FileManager.default.removeItem(at: fallbackRegistrationURL)
+        try? FileManager.default.removeItem(at: legacyFallbackRegistrationURL)
+    }
+
+    private static func migrateLegacyDefaultsIfNeeded() {
+        let defaults = UserDefaults.standard
+        guard defaults.object(forKey: DefaultsKey.migratedFromLegacyBundleId) == nil else {
+            return
+        }
+
+        if let legacyDomain = defaults.persistentDomain(forName: "com.zevclip.receiver") {
+            for key in [
+                DefaultsKey.launchAtLoginEnabled,
+                DefaultsKey.launchAtLoginRegisteredPath,
+                DefaultsKey.showMenuBarIcon
+            ] where defaults.object(forKey: key) == nil {
+                defaults.set(legacyDomain[key], forKey: key)
+            }
+        }
+
+        try? FileManager.default.removeItem(at: legacyFallbackRegistrationURL)
+        defaults.set(true, forKey: DefaultsKey.migratedFromLegacyBundleId)
     }
 
     private static func isLaunchAtLoginRequested(_ status: SMAppService.Status) -> Bool {

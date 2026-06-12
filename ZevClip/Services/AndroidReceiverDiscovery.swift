@@ -63,7 +63,7 @@ final class AndroidReceiverDiscovery: NSObject {
         resolvedEndpoints.removeAll()
         isDiscovering = true
 
-        updateStatus("Searching for ZevClip Android receivers...", true)
+        updateStatus("Searching for ZevLink Android receivers...", true)
         browser.searchForServices(ofType: Self.serviceType, inDomain: Self.serviceDomain)
 
         let timeout = DispatchWorkItem { [weak self] in
@@ -71,7 +71,7 @@ final class AndroidReceiverDiscovery: NSObject {
                 guard let self, self.isDiscovering else { return }
                 if self.resolvedEndpoints.isEmpty {
                     self.stopBrowsingOnly()
-                    self.updateStatus("No ZevClip Android receiver found.", false)
+                    self.updateStatus("No ZevLink Android receiver found.", false)
                 } else {
                     self.selectResolvedEndpoint()
                 }

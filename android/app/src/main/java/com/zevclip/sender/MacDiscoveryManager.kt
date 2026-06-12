@@ -29,7 +29,7 @@ class MacDiscoveryManager(
     private val discoveryTimeout = Runnable {
         if (services.isEmpty()) {
             stopDiscovery()
-            updateStatus("No ZevClip Mac receiver found. Confirm the Mac receiver is running.", false)
+            updateStatus("No ZevLink Mac receiver found. Confirm the Mac receiver is running.", false)
         } else {
             selectAndResolveService()
         }
@@ -45,7 +45,7 @@ class MacDiscoveryManager(
 
         services.clear()
         resolving = false
-        updateStatus("Searching for ZevClip Mac receivers…", true)
+        updateStatus("Searching for ZevLink Mac receivers…", true)
 
         val listener = object : NsdManager.DiscoveryListener {
             override fun onDiscoveryStarted(serviceType: String) {
@@ -252,7 +252,7 @@ class MacDiscoveryManager(
     private companion object {
         const val TAG = "ZevClip"
         const val SERVICE_TYPE = "_zevclip._tcp."
-        const val PREFERRED_SERVICE_NAME = "ZevClip Mac Receiver"
+        const val PREFERRED_SERVICE_NAME = "ZevLink Mac Receiver"
         const val SELECTION_DELAY_MS = 1_500L
         const val DISCOVERY_TIMEOUT_MS = 8_000L
     }

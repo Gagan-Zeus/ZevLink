@@ -36,7 +36,7 @@ case "$MODE" in
     ;;
   --telemetry|telemetry)
     open_app
-    /usr/bin/log stream --info --style compact --predicate "subsystem == \"com.zevclip.receiver\""
+    /usr/bin/log stream --info --style compact --predicate "subsystem == \"com.zevlink.receiver\""
     ;;
   --verify|verify)
     open_app
@@ -48,4 +48,3 @@ case "$MODE" in
     exit 2
     ;;
 esac
-

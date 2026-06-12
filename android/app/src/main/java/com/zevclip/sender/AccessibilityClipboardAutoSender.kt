@@ -48,14 +48,14 @@ object AccessibilityClipboardAutoSender {
                 ClipboardSyncResult.NoEndpoint -> {
                     updateStatus(
                         appContext,
-                        "Skipped: enter a valid Mac IP and port in ZevClip.",
+                        "Skipped: enter a valid Mac IP and port in ZevLink.",
                         uiVisible
                     )
                 }
                 ClipboardSyncResult.NoToken -> {
                     updateStatus(
                         appContext,
-                        "Skipped: enter the Mac pairing token in ZevClip.",
+                        "Skipped: enter the Mac pairing token in ZevLink.",
                         uiVisible
                     )
                 }

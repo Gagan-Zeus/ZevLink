@@ -43,7 +43,7 @@ data class PairingQrPayload(
                         Result.success(PairingQrPayload(name, deviceId, host, hosts, port, token))
                 }
             } catch (_: JSONException) {
-                Result.failure(IllegalArgumentException("QR code is not valid ZevClip JSON."))
+                Result.failure(IllegalArgumentException("QR code is not valid ZevLink JSON."))
             }
         }
     }

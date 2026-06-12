@@ -49,6 +49,14 @@ final class ZevClipRuntime {
         receiver.onAndroidCall = { call in
             MacNotificationPresenter.shared.show(call)
         }
+        receiver.onAndroidNowPlaying = { payload in
+            MacNowPlayingController.shared.update(from: payload)
+        }
+        MacNowPlayingController.shared.start { [weak self] action in
+            Task { @MainActor in
+                self?.androidClipboardSender.sendAndroidMediaCommand(action: action)
+            }
+        }
         MacNotificationPresenter.shared.onDismiss = { [weak self] notificationKey in
             Task { @MainActor in
                 self?.androidClipboardSender.dismissAndroidNotification(notificationKey: notificationKey)
@@ -126,7 +134,7 @@ private final class SettingsWindowController {
             )
         )
         let window = NSWindow(contentViewController: hostingController)
-        window.title = "ZevClip Settings"
+        window.title = "ZevLink Settings"
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
         window.setContentSize(NSSize(width: 500, height: 560))
         window.setFrameAutosaveName("settings")
@@ -295,7 +303,7 @@ private final class StatusItemController: NSObject {
         menu.addItem(actionItem(title: "Open Settings...", action: #selector(openSettingsWindow)))
 
         menu.addItem(.separator())
-        menu.addItem(actionItem(title: "Quit ZevClip", action: #selector(quit)))
+        menu.addItem(actionItem(title: "Quit ZevLink", action: #selector(quit)))
 
         return menu
     }
@@ -306,14 +314,14 @@ private final class StatusItemController: NSObject {
         if let endpoint = androidClipboardSender.resolvedEndpoint {
             button.image = nil
             button.attributedTitle = batteryMenuAttributedTitle(for: endpoint)
-            button.toolTip = "ZevClip Android battery: \(batteryMenuTitle(for: endpoint))"
+            button.toolTip = "ZevLink Android battery: \(batteryMenuTitle(for: endpoint))"
             return
         }
 
         button.attributedTitle = NSAttributedString()
         button.title = ""
         button.image = phoneStatusImage()
-        button.toolTip = "ZevClip: Android not connected"
+        button.toolTip = "ZevLink: Android not connected"
     }
 
     private func batteryMenuTitle(for endpoint: AndroidReceiverEndpoint) -> String {

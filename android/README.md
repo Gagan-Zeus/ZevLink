@@ -1,31 +1,28 @@
-# ZevClip Android Sender
+# ZevLink Android
 
-This native Kotlin Android app syncs UTF-8 clipboard text with the ZevClip
-macOS receiver over the local network.
+This native Kotlin Android app connects an Android phone to the ZevLink macOS app over the local network.
 
 It includes:
 
-- Manual Send as a reliable fallback.
-- Best-effort, event-driven automatic sending through an Accessibility Service.
-- User-invoked clipboard sending through a Quick Settings **Sync Clipboard**
-  tile.
-- Bonjour/mDNS discovery of the Mac receiver through Android NSD.
+- Two-way clipboard text sync with the Mac.
+- AirPlay screen mirroring to the paired Mac.
+- AirPlay audio streaming to the Mac.
+- AirPlay audio broadcast to selected AirPlay receivers.
+- Android notification mirroring to macOS.
+- Android call controls from the Mac.
+- Bonjour/mDNS discovery through Android NSD.
 - QR pairing from the Mac settings window, including stable Mac identity.
-- Simple pairing through a shared token sent as `X-ZevClip-Token`.
-- No polling loop, foreground service, wakelock, cloud service, or encryption.
+- Shared-token pairing through the compatibility header `X-ZevClip-Token`.
+- Quick Settings **Sync Clipboard** tile as a reliable manual fallback.
 
-The app uses Android platform APIs and `HttpURLConnection`. It has no runtime
-third-party networking dependencies. QR scanning uses Google Play services Code
-Scanner, which provides the scanner UI without a ZevClip camera permission.
+The app uses Android platform APIs and `HttpURLConnection`. QR scanning uses Google Play services Code Scanner, which provides the scanner UI without requiring ZevLink to request camera permission.
 
-The MVP intentionally targets Android 16 / API 36. When ZevClip later targets
-Android 17 / API 37, it must add the new local-network runtime permission:
+The app currently targets Android 16 / API 36. When ZevLink later targets Android 17 / API 37, it must add the new local-network runtime permission:
 <https://developer.android.com/privacy-and-security/local-network-permission>
 
-## Build and install
+## Build and Install
 
-Open the `android` folder in Android Studio, let Gradle sync, and run the `app`
-configuration on the Android phone.
+Open the `android` folder in Android Studio, let Gradle sync, and run the `app` configuration on the Android phone.
 
 From a terminal with an Android SDK configured and USB debugging enabled:
 
@@ -44,204 +41,95 @@ android/app/build/outputs/apk/debug/app-debug.apk
 
 ### 1. Install the APK
 
-With the iQOO 12 connected over ADB:
+With a device connected over ADB:
 
 ```sh
 cd android
 ./gradlew installDebug
 ```
 
-### 2. Start the Mac receiver
+### 2. Start the Mac App
 
-Connect the Mac and Android phone to the same Wi-Fi network.
+Connect the Mac and Android phone to the same Wi-Fi/LAN. A phone hotspot also works.
 
-From the ZevClip repository root:
+From the repository root:
 
 ```sh
 ./script/build_and_run.sh
 ```
 
-Confirm the Mac app shows **Running** and **Advertising** on port `9876`. Copy
-the token shown in the Mac **Pairing** section. If macOS asks whether to allow
-incoming network connections, allow them.
+Confirm the Mac app is running and showing the ZevLink settings/menu-bar UI. If macOS asks whether to allow incoming network connections, allow it.
 
-Both devices must be on the same Wi-Fi/LAN and normally need to be on the same
-subnet. Guest Wi-Fi client isolation can block both discovery and sending.
+### 3. Pair Android with Mac
 
-### 3. Discover the Mac from Android
+1. Open ZevLink on the Android phone.
+2. Open **Settings**.
+3. Tap **Scan Mac QR**.
+4. Scan the QR code shown in the Mac ZevLink settings window.
+5. Confirm Android reports that it saved the Mac host, port, token, and paired identity.
 
-1. Open ZevClip on the Android phone.
-2. Tap **Scan Pairing QR**.
-3. Scan the QR code shown in the Mac ZevClip settings window.
-4. Confirm the app reports that it saved `ZevClip Mac Receiver`, the Mac host,
-   port, token, and paired identity.
-5. Enter test text under **Manual send** and tap **Send to Mac**.
-6. Paste on the Mac to verify the paired endpoint works.
+QR pairing is intended to be one-time. If the saved Mac IP becomes stale, Android first tries the saved endpoint, then runs Bonjour discovery for `_zevclip._tcp`, selects the receiver whose TXT `deviceId` matches the paired Mac, saves the new host/port, and retries once.
 
-QR pairing is one-time when the Mac QR includes `deviceId`. Android stores that
-identity with the token. If the saved Mac IP becomes stale, Android first tries
-the saved endpoint, then runs Bonjour discovery for `_zevclip._tcp`, selects the
-receiver whose TXT `deviceId` matches the paired Mac, saves the new host/port,
-and retries the send once. Older QR codes without `deviceId` remain supported,
-but stale-IP rediscovery by identity requires scanning a newer QR code.
+Manual discovery remains available in Android settings if Bonjour is blocked by the network.
 
-Manual discovery remains available:
+### 4. Enable Clipboard Sync Permissions
 
-1. Tap **Discover Mac**.
-2. Confirm the discovery status shows `ZevClip Mac Receiver` and the resolved
-   address and port.
-3. Paste the Mac pairing token into **Pairing token** and tap
-   **Save Pairing Token**.
+For automatic Android to Mac clipboard sync:
 
-If multiple ZevClip receivers are found, the app reports the count and prefers
-the receiver named `ZevClip Mac Receiver`.
+1. Open ZevLink Settings on Android.
+2. Tap **Accessibility**.
+3. Find ZevLink and enable its Accessibility Service.
 
-### 4. Enable Accessibility auto-send
+ZevLink cannot silently enable Accessibility. Android requires the user to grant that permission in system Settings.
 
-1. Tap **Open Accessibility Settings**.
-2. Find ZevClip and enable its Accessibility Service.
+Android may disable the service after reinstalling or updating the APK; if so, enable it again.
 
-The ZevClip app should then show **Accessibility permission: Enabled**. The app
-also shows whether the service is currently bound and the last lifecycle event
-reported by Android. Tap **Recheck Permission** after returning from Settings if
-the status looks stale.
+### 5. Enable Notification and Call Features
 
-ZevClip checks `Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES` for its exact
-component name. It does not and cannot silently enable Accessibility; Android
-requires the user to grant that permission in Settings.
+- Enable notification access for Android notification mirroring.
+- Grant phone permissions for call controls.
+- Grant Do Not Disturb access if you want the Mac to silence ringing/vibration.
 
-Android may disable the service after reinstalling or updating the APK; if so,
-enable it again.
+### 6. Use AirPlay
 
-### 5. Add the Sync Clipboard Quick Settings tile
+The Android home screen has an **AirPlay** card:
 
-1. In ZevClip, tap **Add Sync Clipboard Tile**.
+- **AirPlay Screen to Mac** starts Android screen mirroring.
+- **AirPlay Audio to Mac** streams Android audio.
+- **AirPlay Audio Broadcast** streams audio to selected AirPlay receivers.
+
+Screen mirroring flow:
+
+1. Enable AirPlay Receiver on the Mac.
+2. Tap **AirPlay Screen to Mac** on Android.
+3. Enter the AirPlay one-time code shown on the Mac.
+4. Approve Android screen capture.
+
+AirPlay audio and audio broadcast start from Android without a separate Mac password prompt. If a receiver rejects an audio session, check the receiver's AirPlay settings on that device.
+
+AirPlay capture requires Android 10+ and microphone/audio recording permission.
+
+### 7. Add the Quick Settings Fallback
+
+1. In ZevLink, tap **Add Sync Clipboard Tile** if available.
 2. Approve the Android prompt if it appears.
-3. If no prompt appears, swipe down twice, tap edit/pencil, and add
-   **Sync Clipboard** manually.
+3. If no prompt appears, swipe down twice, tap edit/pencil, and add **Sync Clipboard** manually.
 
-The tile is the recommended reliable fallback when Android emits a copy event
-but hides clipboard content from the background Accessibility Service.
+The tile is the reliable fallback when Android emits a copy event but hides clipboard content from the background Accessibility Service.
 
-### 6. Test automatic sending
+## Clipboard Behavior
 
-1. Open another Android app.
-2. Select text and tap **Copy**.
-3. Return to ZevClip to inspect the last auto-send status if needed.
+ZevLink watches accessibility events for likely copy actions, waits briefly, then reads and sends the current clipboard text.
 
-ZevClip watches accessibility events for likely copy actions, waits briefly,
-then reads and sends the current clipboard text.
+Accessibility auto-send does not depend on `MainActivity`. After pairing and enabling Accessibility, closing ZevLink normally leaves the system-bound Accessibility Service available to receive copy events.
 
-Accessibility auto-send does not depend on `MainActivity`. After pairing and
-enabling Accessibility, closing ZevClip normally leaves the system-bound
-Accessibility Service available to receive copy events. Preferences, duplicate
-suppression, resilient sending, status persistence, and logging run through
-app-level classes.
+For Android/OEM builds that hide clipboard contents from a background Accessibility Service, ZevLink first uses selected text exposed by Accessibility. If selected text is also unavailable, ZevLink briefly opens a transparent focused clipboard reader, sends the text, and immediately returns to the app where the copy occurred.
 
-For Android/OEM builds that hide clipboard contents from a background
-Accessibility Service, ZevClip first uses selected text exposed by
-Accessibility. If selected text is also unavailable, ZevClip briefly opens a
-transparent focused clipboard reader, sends the text, and immediately returns
-to the app where the copy occurred. This remains event-driven and does not use
-polling, a foreground service, or a wakelock.
+Use the Quick Settings tile when automatic clipboard sync is blocked by Android/OEM policy.
 
-Use `adb logcat -s ZevClipAccessibility` to verify closed-UI behavior. Copy-event
-and send-result logs include `uiVisible=false` when no ZevClip activity is
-resumed. If Android/OEM policy explicitly denies clipboard access, ZevClip logs
-`Android denied clipboard access; uiVisible=false`. If Android silently hides
-clipboard content and blocks the focused fallback, ZevClip records the failure.
-Use the Quick Settings tile as the reliable manual fallback.
+## Diagnostics
 
-### 7. Use the Quick Settings fallback
-
-1. Copy text in any Android app.
-2. Swipe down to open Quick Settings.
-3. Tap **Sync Clipboard**.
-4. Paste on the Mac.
-
-The tile briefly brings a ZevClip **Syncing clipboard…** screen to the
-foreground so Android permits the explicit user-invoked clipboard read. It then
-sends changed text to the saved Mac endpoint, immediately closes, and reports
-`Sent`, `Empty`, `No Mac IP`, or `Failed`.
-
-### 8. Verify the Mac clipboard
-
-Paste into any Mac text field, or run:
-
-```sh
-pbpaste
-```
-
-The output should match the text sent from Android.
-
-## Manual Send fallback
-
-Enter text in ZevClip and tap **Send to Mac**. The status message should show
-`Sent successfully (HTTP 200).` If the saved Mac IP has changed and Android has
-a paired `deviceId` from QR pairing, ZevClip will attempt Bonjour rediscovery
-and retry the send once.
-
-Manual IP entry remains available if Bonjour discovery is blocked. To find the
-Mac IP manually, open **System Settings > Wi-Fi > Details** on the Mac or run
-`ipconfig getifaddr en0`.
-
-If ZevClip reports HTTP `401`, the Android pairing token is missing or does not
-match the token currently shown on the Mac. Paste the Mac token again and tap
-**Save Pairing Token**. If you regenerate the Mac token, all Android installs
-must be updated.
-
-Manual Send remains available because Accessibility Service detection and
-Bonjour discovery are best-effort.
-
-## Accessibility limitations
-
-- Android may not expose every copy action as an accessibility event.
-- Some apps, custom context menus, browsers, or password/security-sensitive
-  screens may not trigger automatic sending.
-- Android may deny background clipboard reads in some situations or OS builds.
-- On the tested iQOO 12 Android 16 build, Chrome emits a useful `copied`
-  accessibility event but may still hide the clipboard text from the service.
-  Use the **Sync Clipboard** Quick Settings tile in this case. ZevClip uses a
-  brief focused foreground activity after the tile tap because this build also
-  hides clipboard content from a background `TileService`.
-- Repeated copies of the same text are suppressed until different text is
-  successfully auto-sent.
-- Accessibility auto-send does not poll the Android clipboard. If no useful
-  event is emitted, use Manual Send.
-
-### iQOO / vivo persistence notes
-
-If Accessibility is enabled but later disappears from ZevClip's status after
-closing or reopening the app, check the iQOO/vivo power and security settings:
-
-1. Do not use **Force stop** / force quit for ZevClip.
-2. Enable the ZevClip Accessibility service.
-3. Set ZevClip battery usage to **Unrestricted** / allow background activity.
-4. Enable **Auto start** for ZevClip if available.
-5. Lock ZevClip in recent apps if using the system cleaner.
-6. Keep the Quick Settings tile as the reliable fallback.
-
-The app's **Background Health** section shows Accessibility state, battery
-optimization state, last service connection, and last automatic send. Its
-buttons open the closest available Android or vivo/iQOO management screen.
-Auto-start settings vary by firmware, so ZevClip shows manual instructions if
-no supported screen is available.
-
-On the tested iQOO 12, force-stopping `com.zevclip.sender` immediately removed
-ZevClip from `Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES`, which disables
-the Accessibility permission at the OS level. Closing the app normally does not
-revoke the permission.
-
-These settings are OEM-specific. If `Settings.Secure` no longer lists
-`com.zevclip.sender/com.zevclip.sender.ClipboardAccessibilityService`, Android
-or the OEM layer has genuinely disabled the permission and ZevClip must be
-re-enabled manually in Accessibility Settings.
-
-The ZevClip app cannot silently re-enable Accessibility after a force stop or
-OEM cleanup. Android intentionally requires the user to enable Accessibility
-services from system Settings.
-
-For ADB diagnostics:
+Useful ADB commands:
 
 ```sh
 adb shell settings get secure enabled_accessibility_services
@@ -249,9 +137,29 @@ adb shell settings get secure accessibility_enabled
 adb logcat -s ZevClipAccessibility
 ```
 
-## MVP security note
+Some internal package names, log tags, service types, and HTTP headers still use `zevclip` for compatibility with existing paired installs.
 
-The app allows cleartext HTTP traffic for local LAN testing. There is no
-encryption, so use it only on a trusted local network. Pairing prevents random
-LAN devices from writing to the Mac clipboard, but it does not hide clipboard
-contents from network observers.
+## Accessibility Limitations
+
+- Android may not expose every copy action as an accessibility event.
+- Some apps, custom context menus, browsers, or password/security-sensitive screens may not trigger automatic sending.
+- Android may deny background clipboard reads in some situations or OS builds.
+- Repeated copies of the same text are suppressed until different text is successfully auto-sent.
+- Accessibility auto-send does not poll the Android clipboard. If no useful event is emitted, use the Quick Settings tile.
+
+## iQOO / vivo Persistence Notes
+
+If Accessibility is enabled but later disappears from ZevLink's status after closing or reopening the app:
+
+1. Do not use **Force stop** / force quit for ZevLink.
+2. Enable the ZevLink Accessibility service.
+3. Set ZevLink battery usage to **Unrestricted** / allow background activity.
+4. Enable **Auto start** for ZevLink if available.
+5. Lock ZevLink in recent apps if using the system cleaner.
+6. Keep the Quick Settings tile as the reliable fallback.
+
+On the tested iQOO 12, force-stopping `com.zevclip.sender` immediately removed ZevLink from `Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES`, which disables the Accessibility permission at the OS level. Closing the app normally does not revoke the permission.
+
+## Security Note
+
+The app allows cleartext HTTP traffic for local LAN communication. Pairing prevents random LAN devices from writing to the Mac clipboard, but it does not hide clipboard contents from network observers. Use ZevLink on trusted local networks.

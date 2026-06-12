@@ -384,12 +384,12 @@ class AndroidCallMirrorService : Service() {
             return if (telecomSilenced || streamMuted) {
                 AndroidCallActionResult(
                     false,
-                    "Sound muted, but vibration needs Do Not Disturb access for ZevClip."
+                    "Sound muted, but vibration needs Do Not Disturb access for ZevLink."
                 )
             } else {
                 AndroidCallActionResult(
                     false,
-                    "Enable Do Not Disturb access for ZevClip to silence vibration."
+                    "Enable Do Not Disturb access for ZevLink to silence vibration."
                 )
             }
         }
@@ -409,7 +409,7 @@ class AndroidCallMirrorService : Service() {
             Log.w(TAG, "Android denied silent ringer mode", error)
             AndroidCallActionResult(
                 false,
-                "Android denied silent mode. Enable Do Not Disturb access for ZevClip."
+                "Android denied silent mode. Enable Do Not Disturb access for ZevLink."
             )
         } catch (error: RuntimeException) {
             Log.w(TAG, "Could not silence ringer and vibration", error)

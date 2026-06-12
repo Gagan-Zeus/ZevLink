@@ -152,6 +152,9 @@ class AndroidClipboardReceiverService : Service() {
             },
             onCallAction = { action, callId ->
                 AndroidCallMirrorService.performCallAction(action, callId)
+            },
+            onMediaControlAction = { action ->
+                AirPlayMediaControlDispatcher.dispatch(this, action.toAirPlayDacpCommand())
             }
         )
 
@@ -413,7 +416,7 @@ class AndroidClipboardReceiverService : Service() {
         const val ACTION_START = "com.zevclip.sender.action.START_ANDROID_RECEIVER"
         const val ACTION_STOP = "com.zevclip.sender.action.STOP_ANDROID_RECEIVER"
         const val SERVICE_TYPE = "_zevclip-android._tcp."
-        const val SERVICE_NAME = "ZevClip Android Receiver"
+        const val SERVICE_NAME = "ZevLink Android Receiver"
 
         private const val TAG = "ZevClipAndroidReceiver"
         private const val TXT_DEVICE_ID = "deviceId"
@@ -435,5 +438,15 @@ class AndroidClipboardReceiverService : Service() {
                 action = ACTION_STOP
             })
         }
+    }
+}
+
+private fun String.toAirPlayDacpCommand(): AirPlayDacpCommand {
+    return when (lowercase()) {
+        "play" -> AirPlayDacpCommand.PlayPause
+        "pause" -> AirPlayDacpCommand.Pause
+        "next", "nextitem", "skip_next" -> AirPlayDacpCommand.Next
+        "previous", "prev", "previtem", "skip_previous" -> AirPlayDacpCommand.Previous
+        else -> AirPlayDacpCommand.PlayPause
     }
 }

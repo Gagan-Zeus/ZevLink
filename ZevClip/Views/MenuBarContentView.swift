@@ -55,7 +55,7 @@ struct MenuBarContentView: View {
         }
 
         Section {
-            Button("Quit ZevClip") {
+            Button("Quit ZevLink") {
                 NSApplication.shared.terminate(nil)
             }
             .keyboardShortcut("q")

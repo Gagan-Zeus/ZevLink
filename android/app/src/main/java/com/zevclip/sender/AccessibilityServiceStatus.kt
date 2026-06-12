@@ -65,9 +65,9 @@ object AccessibilityServiceStatus {
     ): String {
         return when {
             !isEnabled && enabledServices.isBlank() ->
-                "Android Settings does not list ZevClip. Re-enable the Accessibility Service; force-stop or OEM cleanup disabled it."
+                "Android Settings does not list ZevLink. Re-enable the Accessibility Service; force-stop or OEM cleanup disabled it."
             !isEnabled ->
-                "Android Settings lists Accessibility services, but not ZevClip."
+                "Android Settings lists Accessibility services, but not ZevLink."
             isEnabled && !savedServiceBound ->
                 "Permission is enabled. Android may still be reconnecting the service."
             else ->

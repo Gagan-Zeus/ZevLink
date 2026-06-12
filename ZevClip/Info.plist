@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>ZevClip</string>
+	<string>ZevLink</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -30,6 +30,6 @@
 		<string>_zevclip-android._tcp</string>
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>ZevClip receives clipboard text from devices on your local network.</string>
+	<string>ZevLink receives clipboard text from devices on your local network.</string>
 </dict>
 </plist>

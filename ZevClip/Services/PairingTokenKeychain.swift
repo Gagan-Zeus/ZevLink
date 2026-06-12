@@ -2,13 +2,19 @@ import Foundation
 import Security
 
 enum PairingTokenKeychain {
-    private static let service = "com.zevclip.receiver"
+    private static let service = "com.zevlink.receiver"
+    private static let legacyService = "com.zevclip.receiver"
     private static let account = "pairing-token"
     private static let byteCount = 32
 
     static func loadOrCreateToken() throws -> String {
         if let token = try loadToken(), !token.isEmpty {
             return token
+        }
+
+        if let legacyToken = try loadToken(service: legacyService), !legacyToken.isEmpty {
+            try saveToken(legacyToken)
+            return legacyToken
         }
 
         let token = try generateToken()
@@ -23,7 +29,11 @@ enum PairingTokenKeychain {
     }
 
     private static func loadToken() throws -> String? {
-        var query = baseQuery()
+        try loadToken(service: service)
+    }
+
+    private static func loadToken(service: String) throws -> String? {
+        var query = baseQuery(service: service)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
 
@@ -50,7 +60,7 @@ enum PairingTokenKeychain {
 
     private static func saveToken(_ token: String) throws {
         let data = Data(token.utf8)
-        let query = baseQuery()
+        let query = baseQuery(service: service)
 
         let attributes: [String: Any] = [
             kSecValueData as String: data
@@ -86,7 +96,7 @@ enum PairingTokenKeychain {
         return bytes.map { String(format: "%02x", $0) }.joined()
     }
 
-    private static func baseQuery() -> [String: Any] {
+    private static func baseQuery(service: String) -> [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,

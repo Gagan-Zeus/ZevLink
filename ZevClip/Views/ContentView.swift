@@ -56,7 +56,7 @@ struct ContentView: View {
                     .frame(width: 11, height: 11)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("ZevClip")
+                    Text("ZevLink")
                         .font(.title.bold())
                     Text(syncTitle)
                         .foregroundStyle(.secondary)

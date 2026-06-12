@@ -30,7 +30,7 @@ class ZevClipBootReceiver : BroadcastReceiver() {
             Log.w(TAG, "Could not restart ZevClip services after $action", error)
             ZevClipPreferences.setLastAutoStatus(
                 appContext,
-                "Android blocked ZevClip autostart. Allow Auto start or unrestricted battery."
+                "Android blocked ZevLink autostart. Allow Auto start or unrestricted battery."
             )
             ZevClipStatusNotification.update(appContext)
         }

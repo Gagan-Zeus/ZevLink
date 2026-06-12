@@ -24,7 +24,7 @@ final class ClipboardReceiver: ObservableObject {
     }
 
     static let port: UInt16 = 9876
-    static let serviceName = "ZevClip Mac Receiver"
+    static let serviceName = "ZevLink Mac Receiver"
     static let serviceType = "_zevclip._tcp"
 
     @Published private(set) var status: ServerStatus = .stopped
@@ -44,6 +44,7 @@ final class ClipboardReceiver: ObservableObject {
     var onAndroidEndpointSeen: ((AndroidReceiverEndpoint) -> Void)?
     var onAndroidNotification: ((AndroidMirroredNotification) -> Void)?
     var onAndroidCall: ((AndroidMirroredCall) -> Void)?
+    var onAndroidNowPlaying: ((AndroidNowPlayingPayload) -> Void)?
 
     private let server = ClipboardHTTPServer()
     private let tokenProvider = PairingTokenProvider(token: "")
@@ -114,6 +115,11 @@ final class ClipboardReceiver: ObservableObject {
             onAndroidCall: { [weak self] data in
                 Task { @MainActor in
                     self?.receiveAndroidCall(data)
+                }
+            },
+            onAndroidNowPlaying: { [weak self] data in
+                Task { @MainActor in
+                    self?.receiveAndroidNowPlaying(data)
                 }
             }
         )
@@ -203,6 +209,16 @@ final class ClipboardReceiver: ObservableObject {
             onAndroidCall?(call)
         } catch {
             detailMessage = "Received Android call event, but could not decode it."
+        }
+    }
+
+    private func receiveAndroidNowPlaying(_ data: Data) {
+        do {
+            let payload = try JSONDecoder().decode(AndroidNowPlayingPayload.self, from: data)
+            detailMessage = "Updated Android Now Playing."
+            onAndroidNowPlaying?(payload)
+        } catch {
+            detailMessage = "Received Android Now Playing, but could not decode it."
         }
     }
 }
