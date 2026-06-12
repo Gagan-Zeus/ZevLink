@@ -26,6 +26,7 @@ class AirPlayVideoController(
     private var eventChannel: AirPlayEventChannel? = null
     private var timingServer: AirPlayTimingServer? = null
     private var cseq = 1
+    private val senderInfo = AirPlaySenderInfo.fromIdentity(identity)
     private val sessionUuid = UUID.randomUUID().toString().uppercase()
     private val playSessionId = UUID.randomUUID().toString()
     private val streamId = "1"
@@ -50,9 +51,9 @@ class AirPlayVideoController(
             BPlist.dict(
                 "Content-Location" to BPlist.string(url),
                 "Start-Position-Seconds" to BPlist.real(0.0),
-                "SenderMACAddress" to BPlist.string(identity.deviceId),
-                "model" to BPlist.string("iPhone14,3"),
-                "osBuildVersion" to BPlist.string("20F66"),
+                "SenderMACAddress" to BPlist.string(senderInfo.deviceId),
+                "model" to BPlist.string(senderInfo.model),
+                "osBuildVersion" to BPlist.string(senderInfo.osBuildVersion),
                 "clientBundleID" to BPlist.string("com.zevclip.sender"),
                 "clientProcName" to BPlist.string("ZevClip"),
                 "mediaType" to BPlist.string("file"),
@@ -100,17 +101,11 @@ class AirPlayVideoController(
 
         val setupBody = BPlist.encode(
             BPlist.dict(
-                "deviceID" to BPlist.string(identity.deviceId),
-                "macAddress" to BPlist.string(identity.deviceId),
+                *senderInfo.setupEntries(),
                 "sessionUUID" to BPlist.string(sessionUuid),
                 "isMultiSelectAirPlay" to BPlist.bool(true),
                 "timingProtocol" to BPlist.string("NTP"),
                 "timingPort" to BPlist.int(timingPort.toLong()),
-                "name" to BPlist.string(identity.senderName),
-                "model" to BPlist.string("iPhone14,3"),
-                "osName" to BPlist.string("iPhone OS"),
-                "osVersion" to BPlist.string("16.5"),
-                "sourceVersion" to BPlist.string("690.7.1"),
                 "senderSupportsRelay" to BPlist.bool(true),
                 "statsCollectionEnabled" to BPlist.bool(false)
             )
@@ -265,6 +260,6 @@ class AirPlayVideoController(
 
     private companion object {
         private const val TAG = "ZevClipAirPlayVideo"
-        private const val USER_AGENT = "AirPlay/690.7.1 ZevClip"
+        private const val USER_AGENT = "AirPlay/${AirPlaySenderInfo.SOURCE_VERSION} ZevClip"
     }
 }

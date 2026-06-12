@@ -264,7 +264,16 @@ class AirPlayPairSetupClient(
             append("Content-Length: ")
             append(body.size)
             append("\r\n")
-            append("User-Agent: AirPlay/950.7.1 ZevClip\r\n")
+            append("User-Agent: AirPlay/${AirPlaySenderInfo.SOURCE_VERSION} ZevClip\r\n")
+            append("X-Apple-Device-ID: ")
+            append(identity.deviceId)
+            append("\r\n")
+            append("X-Apple-Client-Name: ")
+            append(identity.senderName.asciiHeaderValue())
+            append("\r\n")
+            append("Client-Instance: ")
+            append(identity.clientInstanceId())
+            append("\r\n")
             extraHeaders.forEach { (name, value) ->
                 append(name)
                 append(": ")
@@ -352,6 +361,17 @@ class AirPlayPairSetupClient(
     override fun close() {
         runCatching { socket?.close() }
         socket = null
+    }
+
+    private fun AirPlayIdentity.clientInstanceId(): String {
+        return deviceId.filter { it.isLetterOrDigit() }.take(16).uppercase(Locale.US)
+    }
+
+    private fun String.asciiHeaderValue(): String {
+        return map { char -> if (char.code in 0x20..0x7E) char else '?' }
+            .joinToString("")
+            .trim()
+            .ifBlank { "Android" }
     }
 
     private companion object {

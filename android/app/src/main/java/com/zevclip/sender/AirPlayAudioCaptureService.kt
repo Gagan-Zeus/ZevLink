@@ -6,8 +6,6 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.media.AudioAttributes
-import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.projection.MediaProjection
@@ -25,7 +23,7 @@ class AirPlayAudioCaptureService : Service() {
     private var worker: Thread? = null
     private var mediaProjection: MediaProjection? = null
     private var audioRecord: AudioRecord? = null
-    private var mediaVolumeRestorer: MediaVolumeRestorer? = null
+    private var mediaVolumeRestorer: AirPlayPlaybackCapture.MediaVolumeRestorer? = null
     private var dacpControlServer: AirPlayDacpControlServer? = null
     private var nowPlayingSender: AndroidNowPlayingSender? = null
 
@@ -97,12 +95,12 @@ class AirPlayAudioCaptureService : Service() {
                 val projection = projectionManager.getMediaProjection(resultCode, resultData)
                     ?: error(getString(R.string.airplay_capture_permission_missing))
                 mediaProjection = projection
-                val record = createPlaybackAudioRecord(projection)
+                val record = AirPlayPlaybackCapture.createAudioRecord(projection)
                 audioRecord = record
                 record.startRecording()
                 val metadataSender = AndroidNowPlayingSender(this)
                 nowPlayingSender = metadataSender
-                mediaVolumeRestorer = MediaVolumeRestorer(getSystemService(AudioManager::class.java))
+                mediaVolumeRestorer = AirPlayPlaybackCapture.MediaVolumeRestorer(getSystemService(AudioManager::class.java))
                     .also { it.muteMusicStream() }
                 updateStatus(getString(R.string.airplay_streaming_live))
 
@@ -143,30 +141,6 @@ class AirPlayAudioCaptureService : Service() {
             stopCapture()
             stopSelf()
         }
-    }
-
-    private fun createPlaybackAudioRecord(projection: MediaProjection): AudioRecord {
-        val captureConfig = android.media.AudioPlaybackCaptureConfiguration.Builder(projection)
-            .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
-            .addMatchingUsage(AudioAttributes.USAGE_GAME)
-            .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN)
-            .build()
-        val format = AudioFormat.Builder()
-            .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-            .setSampleRate(SAMPLE_RATE)
-            .setChannelMask(AudioFormat.CHANNEL_IN_STEREO)
-            .build()
-        val minBuffer = AudioRecord.getMinBufferSize(
-            SAMPLE_RATE,
-            AudioFormat.CHANNEL_IN_STEREO,
-            AudioFormat.ENCODING_PCM_16BIT
-        )
-        val bufferSize = maxOf(minBuffer, PACKET_BYTES * 4)
-        return AudioRecord.Builder()
-            .setAudioPlaybackCaptureConfig(captureConfig)
-            .setAudioFormat(format)
-            .setBufferSizeInBytes(bufferSize)
-            .build()
     }
 
     private fun stopCapture() {
@@ -223,37 +197,13 @@ class AirPlayAudioCaptureService : Service() {
         private val record: AudioRecord,
         private val running: AtomicBoolean
     ) : RaopTestToneClient.PcmPacketSource {
+        private val delegate = AirPlayPlaybackCapture.PacketSource(record, running)
+
         override fun readPacket(buffer: ByteArray): Int {
-            if (!running.get()) return -1
-            buffer.fill(0)
-            var offset = 0
-            while (offset < PACKET_BYTES && running.get()) {
-                val read = record.read(buffer, offset, PACKET_BYTES - offset, AudioRecord.READ_BLOCKING)
-                if (read < 0) return -1
-                if (read == 0) break
-                offset += read
-            }
-            return if (offset <= 0) 0 else offset / BYTES_PER_FRAME
+            return delegate.readPacket(buffer)
         }
 
-        override fun close() = Unit
-    }
-
-    private class MediaVolumeRestorer(
-        private val audioManager: AudioManager
-    ) {
-        private val originalVolume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
-        private var restored = false
-
-        fun muteMusicStream() {
-            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, 0, 0)
-        }
-
-        fun restore() {
-            if (restored) return
-            restored = true
-            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, originalVolume, 0)
-        }
+        override fun close() = delegate.close()
     }
 
     companion object {
@@ -262,10 +212,6 @@ class AirPlayAudioCaptureService : Service() {
         private const val EXTRA_RESULT_CODE = "result_code"
         private const val EXTRA_RESULT_DATA = "result_data"
         private const val LEGACY_AIRPLAY_NOTIFICATION_ID = 2042
-        private const val SAMPLE_RATE = 44_100
-        private const val FRAMES_PER_PACKET = 352
-        private const val BYTES_PER_FRAME = 4
-        private const val PACKET_BYTES = FRAMES_PER_PACKET * BYTES_PER_FRAME
 
         fun start(context: Context, resultCode: Int, resultData: Intent) {
             val intent = Intent(context, AirPlayAudioCaptureService::class.java)

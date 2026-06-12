@@ -49,23 +49,19 @@ object AirPlayAudioSetup {
         deviceId: String,
         timingPort: Int,
         ids: SessionIds = SessionIds(),
-        senderName: String = "ZevClip"
+        senderName: String = "ZevClip",
+        senderInfo: AirPlaySenderInfo = AirPlaySenderInfo.fromDevice(deviceId, senderName)
     ): ByteArray {
         require(deviceId.isNotBlank()) { "AirPlay device id must not be blank." }
         require(timingPort in 0..65535) { "AirPlay timing port must fit in UDP port range." }
         return BPlist.encode(
             BPlist.dict(
-                "deviceID" to BPlist.string(deviceId),
-                "macAddress" to BPlist.string(deviceId),
+                *senderInfo.setupEntries(),
                 "sessionUUID" to BPlist.string(ids.sessionUuid),
                 "groupUUID" to BPlist.string(ids.groupUuid),
                 "isMultiSelectAirPlay" to BPlist.bool(true),
                 "timingProtocol" to BPlist.string("NTP"),
-                "timingPort" to BPlist.int(timingPort.toLong()),
-                "name" to BPlist.string(senderName),
-                "model" to BPlist.string("Android"),
-                "osName" to BPlist.string("Android"),
-                "sourceVersion" to BPlist.string("950.7.1")
+                "timingPort" to BPlist.int(timingPort.toLong())
             )
         )
     }

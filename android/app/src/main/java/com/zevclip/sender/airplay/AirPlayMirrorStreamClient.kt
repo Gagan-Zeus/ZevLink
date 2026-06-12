@@ -25,7 +25,8 @@ class AirPlayMirrorStreamClient(
     private val legacyHttpStream: Boolean = false,
     private val connectTimeoutMs: Int = DEFAULT_TIMEOUT_MS,
     private val readTimeoutMs: Int = DEFAULT_TIMEOUT_MS,
-    private val socketFactory: () -> Socket = { Socket() }
+    private val socketFactory: () -> Socket = { Socket() },
+    private val onFatalError: (Throwable) -> Unit = {}
 ) : AirPlayScreenSampleSink, Closeable {
     private val outputLock = Any()
     private val sessionId = CryptoPrimitives.randomBytes(4).toUIntLe()
@@ -93,7 +94,11 @@ class AirPlayMirrorStreamClient(
                     .onFailure { error ->
                         if (running.get()) Log.w(TAG, "AirPlay mirror heartbeat failed", error)
                     }
-                Thread.sleep(1_000L)
+                try {
+                    Thread.sleep(1_000L)
+                } catch (_: InterruptedException) {
+                    break
+                }
             }
         }
         videoWriterWorker = thread(name = "zevclip-airplay-mirror-video-writer", isDaemon = true) {
@@ -104,6 +109,7 @@ class AirPlayMirrorStreamClient(
                 }.onFailure { error ->
                     if (running.get()) {
                         Log.w(TAG, "AirPlay mirror video writer failed", error)
+                        onFatalError(error)
                         running.set(false)
                     }
                     return@thread
@@ -292,6 +298,7 @@ class AirPlayMirrorStreamClient(
         socket = null
         videoWriterWorker?.interrupt()
         videoWriterWorker = null
+        heartbeatWorker?.interrupt()
         heartbeatWorker = null
         videoQueue.clear()
     }

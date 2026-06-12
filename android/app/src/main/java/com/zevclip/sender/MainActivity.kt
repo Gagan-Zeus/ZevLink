@@ -1106,6 +1106,13 @@ class MainActivity : Activity() {
             return
         }
 
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), REQUEST_RECORD_AUDIO)
+            ZevClipPreferences.setAirPlayTestStatus(this, getString(R.string.airplay_capture_record_audio_needed))
+            refreshSyncStatuses()
+            return
+        }
+
         if (::airPlayPasscodeInput.isInitialized) {
             ZevClipPreferences.setAirPlayPasscode(applicationContext, airPlayPasscodeInput.text.toString())
         }
