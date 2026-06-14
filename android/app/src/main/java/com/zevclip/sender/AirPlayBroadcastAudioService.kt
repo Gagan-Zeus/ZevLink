@@ -6,14 +6,12 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.media.AudioAttributes
-import android.media.AudioFormat
-import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.IBinder
+import android.util.Log
 import com.zevclip.sender.airplay.AirPlayIdentityStore
 import com.zevclip.sender.airplay.AirPlayTarget
 import com.zevclip.sender.airplay.AirPlayClock
@@ -33,7 +31,7 @@ class AirPlayBroadcastAudioService : Service() {
     private var worker: Thread? = null
     private var mediaProjection: MediaProjection? = null
     private var audioRecord: AudioRecord? = null
-    private var mediaVolumeRestorer: MediaVolumeRestorer? = null
+    private var localPlaybackSilencer: LocalPlaybackSilencer? = null
     private var dacpControlServer: AirPlayDacpControlServer? = null
     private val sessions = mutableListOf<RaopAudioSession.Started>()
 
@@ -91,6 +89,8 @@ class AirPlayBroadcastAudioService : Service() {
             return
         }
 
+        Log.i(TAG, "Starting AirPlay audio broadcast; enabling local playback silencer.")
+        localPlaybackSilencer = LocalPlaybackSilencer(this).also { it.start() }
         running.set(true)
         ZevClipPreferences.setAirPlayBroadcastStreaming(this, true)
         updateStatus(getString(R.string.airplay_broadcast_connecting, targets.size))
@@ -102,10 +102,8 @@ class AirPlayBroadcastAudioService : Service() {
                     ?: error(getString(R.string.airplay_capture_permission_missing))
                 mediaProjection = projection
 
-                val record = createPlaybackAudioRecord(projection)
+                val record = AirPlayPlaybackCapture.createAudioRecord(projection)
                 audioRecord = record
-                mediaVolumeRestorer = MediaVolumeRestorer(getSystemService(AudioManager::class.java))
-                    .also { it.muteMusicStream() }
 
                 val identity = AirPlayIdentityStore.getOrCreate(this)
                 val dacpSession = AirPlayDacpSession.fromIdentity(identity)
@@ -227,30 +225,6 @@ class AirPlayBroadcastAudioService : Service() {
         sessions.forEach { started -> started.session.advanceClock(FRAMES_PER_PACKET) }
     }
 
-    private fun createPlaybackAudioRecord(projection: MediaProjection): AudioRecord {
-        val captureConfig = android.media.AudioPlaybackCaptureConfiguration.Builder(projection)
-            .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
-            .addMatchingUsage(AudioAttributes.USAGE_GAME)
-            .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN)
-            .build()
-        val format = AudioFormat.Builder()
-            .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-            .setSampleRate(SAMPLE_RATE)
-            .setChannelMask(AudioFormat.CHANNEL_IN_STEREO)
-            .build()
-        val minBuffer = AudioRecord.getMinBufferSize(
-            SAMPLE_RATE,
-            AudioFormat.CHANNEL_IN_STEREO,
-            AudioFormat.ENCODING_PCM_16BIT
-        )
-        val bufferSize = maxOf(minBuffer, PACKET_BYTES * 4)
-        return AudioRecord.Builder()
-            .setAudioPlaybackCaptureConfig(captureConfig)
-            .setAudioFormat(format)
-            .setBufferSizeInBytes(bufferSize)
-            .build()
-    }
-
     private fun stopBroadcast() {
         if (!running.getAndSet(false)) {
             cleanupStreamingState()
@@ -259,8 +233,8 @@ class AirPlayBroadcastAudioService : Service() {
         runCatching { audioRecord?.stop() }
         runCatching { audioRecord?.release() }
         audioRecord = null
-        runCatching { mediaVolumeRestorer?.restore() }
-        mediaVolumeRestorer = null
+        runCatching { localPlaybackSilencer?.close() }
+        localPlaybackSilencer = null
         cleanupStreamingState()
         runCatching { mediaProjection?.stop() }
         mediaProjection = null
@@ -273,11 +247,15 @@ class AirPlayBroadcastAudioService : Service() {
         sessions.clear()
         runCatching { dacpControlServer?.close() }
         dacpControlServer = null
+        runCatching { localPlaybackSilencer?.close() }
+        localPlaybackSilencer = null
         ZevClipPreferences.setAirPlayBroadcastStreaming(this, false)
     }
 
     private fun finishWithStatus(status: String) {
         updateStatus(status)
+        runCatching { localPlaybackSilencer?.close() }
+        localPlaybackSilencer = null
         ZevClipPreferences.setAirPlayBroadcastStreaming(this, false)
         stopForegroundKeepingStatus()
         stopSelf()
@@ -302,23 +280,6 @@ class AirPlayBroadcastAudioService : Service() {
         getSystemService(NotificationManager::class.java).cancel(LEGACY_AIRPLAY_NOTIFICATION_ID)
     }
 
-    private class MediaVolumeRestorer(
-        private val audioManager: AudioManager
-    ) {
-        private val originalVolume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
-        private var restored = false
-
-        fun muteMusicStream() {
-            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, 0, 0)
-        }
-
-        fun restore() {
-            if (restored) return
-            restored = true
-            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, originalVolume, 0)
-        }
-    }
-
     companion object {
         private const val ACTION_START = "com.zevclip.sender.airplay.broadcast.START"
         private const val ACTION_STOP = "com.zevclip.sender.airplay.broadcast.STOP"
@@ -335,6 +296,7 @@ class AirPlayBroadcastAudioService : Service() {
         private const val EXTRA_DELAYS_MS = "delays_ms"
         private const val EXTRA_RECEIVER_KEYS = "receiver_keys"
         private const val LEGACY_AIRPLAY_NOTIFICATION_ID = 2042
+        private const val TAG = "ZevClipAirPlayBroadcast"
         private const val SAMPLE_RATE = RaopAudioSession.SAMPLE_RATE
         private const val FRAMES_PER_PACKET = RaopAudioSession.FRAMES_PER_PACKET
         private const val BYTES_PER_FRAME = 4

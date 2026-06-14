@@ -35,6 +35,7 @@ import android.view.Window
 import android.view.WindowInsets
 import android.view.WindowManager
 import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -1085,6 +1086,10 @@ class MainActivity : Activity() {
         val dialog = Dialog(this).apply {
             requestWindowFeature(Window.FEATURE_NO_TITLE)
             setCanceledOnTouchOutside(true)
+            window?.setSoftInputMode(
+                WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE or
+                    WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+            )
         }
 
         val content = LinearLayout(this).apply {
@@ -1243,6 +1248,10 @@ class MainActivity : Activity() {
         dialog.window?.apply {
             setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
             addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+            setSoftInputMode(
+                WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE or
+                    WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+            )
             attributes = attributes.apply {
                 dimAmount = 0.58f
             }
@@ -1270,7 +1279,11 @@ class MainActivity : Activity() {
                 }
                 .start()
         }, 260)
-        codeBoxes.first().requestFocus()
+        codeBoxes.first().post {
+            codeBoxes.first().requestFocus()
+            getSystemService(InputMethodManager::class.java)
+                ?.showSoftInput(codeBoxes.first(), InputMethodManager.SHOW_IMPLICIT)
+        }
     }
 
     private fun toggleAirPlayBroadcastCapture() {

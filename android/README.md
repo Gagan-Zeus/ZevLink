@@ -2,7 +2,7 @@
 
 This native Kotlin Android app connects an Android phone to the ZevLink macOS app over the local network.
 
-Current release version: **2.0.0**.
+Current release version: **2.1.0**.
 
 It includes:
 
@@ -110,6 +110,8 @@ Screen mirroring flow:
 AirPlay audio and audio broadcast start from Android without a separate Mac password prompt. If a receiver rejects an audio session, check the receiver's AirPlay settings on that device.
 
 AirPlay capture requires Android 10+ and microphone/audio recording permission.
+
+While AirPlay is active, ZevLink mutes local Android media playback so audio stays on the AirPlay target. Android volume keys are consumed during the session with a toast that says to stop AirPlay to listen locally, then the previous Android media volume is restored when AirPlay stops.
 
 ### 7. Add the Quick Settings Fallback
 

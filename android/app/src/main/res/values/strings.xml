@@ -82,6 +82,7 @@
     <string name="airplay_streaming_live">Android audio is streaming to Mac.</string>
     <string name="airplay_streaming_stopped">AirPlay audio stopped.</string>
     <string name="airplay_streaming_failed">AirPlay audio failed: %1$s</string>
+    <string name="airplay_local_volume_blocked">Stop AirPlay to listen here</string>
     <string name="airplay_capture_permission_missing">Android audio capture permission was not granted.</string>
     <string name="airplay_capture_android_q_required">Phone audio capture needs Android 10 or newer.</string>
     <string name="airplay_capture_record_audio_needed">Enable microphone/audio recording permission for phone audio capture.</string>

@@ -2,7 +2,6 @@ package com.zevclip.sender
 
 import android.media.AudioAttributes
 import android.media.AudioFormat
-import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.projection.MediaProjection
 import java.io.Closeable
@@ -56,22 +55,5 @@ object AirPlayPlaybackCapture {
         }
 
         override fun close() = Unit
-    }
-
-    class MediaVolumeRestorer(
-        private val audioManager: AudioManager
-    ) {
-        private val originalVolume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
-        private var restored = false
-
-        fun muteMusicStream() {
-            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, 0, 0)
-        }
-
-        fun restore() {
-            if (restored) return
-            restored = true
-            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, originalVolume, 0)
-        }
     }
 }

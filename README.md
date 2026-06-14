@@ -32,7 +32,7 @@ It works over the same Wi-Fi/LAN, including a phone hotspot. Pair once with the 
 
 ## Downloads
 
-Latest release: **2.0.0**.
+Latest release: **2.1.0**.
 
 Download builds from GitHub Releases.
 
@@ -77,7 +77,7 @@ ZevLink can start AirPlay directly from the Android home screen:
 
 For screen mirroring, macOS may show an AirPlay one-time code. After tapping **AirPlay Screen to Mac**, ZevLink opens an **AirPlay One-Time Code** dialog on Android; enter the code shown on the Mac, then approve Android screen capture.
 
-AirPlay audio and audio broadcast start from the Android app without a separate Mac password prompt. If a receiver rejects an audio session, check the receiver's AirPlay settings on that device.
+AirPlay audio and audio broadcast start from the Android app without a separate Mac password prompt. While AirPlay is running, ZevLink mutes local Android playback so audio stays on the AirPlay target, blocks local volume changes with a reminder toast, and restores the previous Android media volume when AirPlay stops. If a receiver rejects an audio session, check the receiver's AirPlay settings on that device.
 
 ## How Pairing Works
 

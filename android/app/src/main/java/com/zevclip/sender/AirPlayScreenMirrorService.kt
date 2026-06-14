@@ -6,7 +6,6 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
@@ -49,7 +48,7 @@ class AirPlayScreenMirrorService : Service() {
     private var mirrorAudioSyncSender: AirPlaySyncSender? = null
     private var mirrorAudioPacketSink: AirPlayUdpPacketSender? = null
     private var mirrorAudioStreamer: AirPlayPcmStreamer? = null
-    private var mediaVolumeRestorer: AirPlayPlaybackCapture.MediaVolumeRestorer? = null
+    private var localPlaybackSilencer: LocalPlaybackSilencer? = null
     private var dacpControlServer: AirPlayDacpControlServer? = null
     private var encoderGeneration = 0
     @Volatile
@@ -114,6 +113,8 @@ class AirPlayScreenMirrorService : Service() {
             return
         }
 
+        Log.i(TAG, "Starting AirPlay screen mirror; enabling local playback silencer.")
+        localPlaybackSilencer = LocalPlaybackSilencer(this).also { it.start() }
         running.set(true)
         mirrorFailure = null
         ZevClipPreferences.setAirPlayScreenMirroring(this, true)
@@ -200,6 +201,8 @@ class AirPlayScreenMirrorService : Service() {
             Log.w(TAG, "Mac did not return an AirPlay mirror audio stream; continuing video-only.")
             runCatching { audioControlSocket?.close() }
             mirrorAudioControlSocket = null
+            runCatching { localPlaybackSilencer?.close() }
+            localPlaybackSilencer = null
         }
     }
 
@@ -244,8 +247,9 @@ class AirPlayScreenMirrorService : Service() {
         if (!running.get()) return
         val record = AirPlayPlaybackCapture.createAudioRecord(projection)
         mirrorAudioRecord = record
-        mediaVolumeRestorer = AirPlayPlaybackCapture.MediaVolumeRestorer(getSystemService(AudioManager::class.java))
-            .also { it.muteMusicStream() }
+        if (localPlaybackSilencer == null) {
+            localPlaybackSilencer = LocalPlaybackSilencer(this).also { it.start() }
+        }
 
         val dacpSession = AirPlayDacpSession.fromIdentity(identity)
         dacpControlServer = AirPlayDacpControlServer(this, dacpSession) { command ->
@@ -348,8 +352,8 @@ class AirPlayScreenMirrorService : Service() {
         mirrorAudioControlSocket = null
         runCatching { dacpControlServer?.close() }
         dacpControlServer = null
-        runCatching { mediaVolumeRestorer?.restore() }
-        mediaVolumeRestorer = null
+        runCatching { localPlaybackSilencer?.close() }
+        localPlaybackSilencer = null
     }
 
     private fun startEncoder(
@@ -442,6 +446,8 @@ class AirPlayScreenMirrorService : Service() {
 
     private fun finishWithStatus(status: String) {
         updateStatus(status)
+        runCatching { localPlaybackSilencer?.close() }
+        localPlaybackSilencer = null
         ZevClipPreferences.setAirPlayScreenMirroring(this, false)
         stopForegroundKeepingStatus()
         stopSelf()

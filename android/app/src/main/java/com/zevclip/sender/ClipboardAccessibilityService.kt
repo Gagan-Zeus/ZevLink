@@ -1,13 +1,16 @@
 package com.zevclip.sender
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.AccessibilityServiceInfo
 import android.content.ClipboardManager
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
+import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.widget.Toast
 
 class ClipboardAccessibilityService : AccessibilityService() {
     private val handler = Handler(Looper.getMainLooper())
@@ -44,9 +47,13 @@ class ClipboardAccessibilityService : AccessibilityService() {
     private var longPressedText: String? = null
     private var longPressedTextAt = 0L
     private var clipboardListenerRegistered = false
+    private var lastAirPlayVolumeToastAt = 0L
 
     override fun onServiceConnected() {
         super.onServiceConnected()
+        serviceInfo = serviceInfo.apply {
+            flags = flags or AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS
+        }
         registerClipboardListener()
         ZevClipPreferences.setAccessibilityServiceState(
             this,
@@ -56,6 +63,25 @@ class ClipboardAccessibilityService : AccessibilityService() {
         )
         Log.i(TAG, "Accessibility service connected; watching clipboard changes")
         AccessibilityServiceStatus.logCurrentState(this, "onServiceConnected")
+    }
+
+    override fun onKeyEvent(event: KeyEvent): Boolean {
+        if (!isAirPlayActive()) {
+            return super.onKeyEvent(event)
+        }
+
+        return when (event.keyCode) {
+            KeyEvent.KEYCODE_VOLUME_UP,
+            KeyEvent.KEYCODE_VOLUME_DOWN,
+            KeyEvent.KEYCODE_VOLUME_MUTE -> {
+                if (event.action == KeyEvent.ACTION_DOWN) {
+                    showAirPlayVolumeBlockedToast()
+                    Log.i(TAG, "Blocked Android volume key during AirPlay: keyCode=${event.keyCode}")
+                }
+                true
+            }
+            else -> super.onKeyEvent(event)
+        }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -127,6 +153,26 @@ class ClipboardAccessibilityService : AccessibilityService() {
         getSystemService(ClipboardManager::class.java)
             .removePrimaryClipChangedListener(clipboardChangedListener)
         clipboardListenerRegistered = false
+    }
+
+    private fun isAirPlayActive(): Boolean {
+        return ZevClipPreferences.isAirPlayStreaming(this) ||
+            ZevClipPreferences.isAirPlayScreenMirroring(this) ||
+            ZevClipPreferences.isAirPlayBroadcastStreaming(this)
+    }
+
+    private fun showAirPlayVolumeBlockedToast() {
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastAirPlayVolumeToastAt < AIRPLAY_VOLUME_TOAST_THROTTLE_MS) {
+            return
+        }
+
+        lastAirPlayVolumeToastAt = now
+        Toast.makeText(
+            applicationContext,
+            getString(R.string.airplay_local_volume_blocked),
+            Toast.LENGTH_SHORT
+        ).show()
     }
 
     private fun eventCandidates(event: AccessibilityEvent): List<String> {
@@ -358,6 +404,7 @@ class ClipboardAccessibilityService : AccessibilityService() {
         const val PASSIVE_CLIPBOARD_ECHO_SUPPRESSION_MS = 6_000L
         const val SELECTION_MAX_AGE_MS = 15_000L
         const val LONG_PRESS_TEXT_MAX_AGE_MS = 12_000L
+        const val AIRPLAY_VOLUME_TOAST_THROTTLE_MS = 2_000L
         const val MIN_TRUSTED_FALLBACK_LENGTH = 3
         const val MAX_TRUSTED_FALLBACK_LENGTH = 20_000
 

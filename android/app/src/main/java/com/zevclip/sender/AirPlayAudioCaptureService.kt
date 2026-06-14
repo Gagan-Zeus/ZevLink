@@ -6,12 +6,12 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.IBinder
+import android.util.Log
 import com.zevclip.sender.airplay.AirPlayIdentityStore
 import com.zevclip.sender.airplay.AirPlayTarget
 import com.zevclip.sender.airplay.RaopTestToneClient
@@ -23,7 +23,7 @@ class AirPlayAudioCaptureService : Service() {
     private var worker: Thread? = null
     private var mediaProjection: MediaProjection? = null
     private var audioRecord: AudioRecord? = null
-    private var mediaVolumeRestorer: AirPlayPlaybackCapture.MediaVolumeRestorer? = null
+    private var localPlaybackSilencer: LocalPlaybackSilencer? = null
     private var dacpControlServer: AirPlayDacpControlServer? = null
     private var nowPlayingSender: AndroidNowPlayingSender? = null
 
@@ -84,6 +84,8 @@ class AirPlayAudioCaptureService : Service() {
             return
         }
 
+        Log.i(TAG, "Starting AirPlay audio capture; enabling local playback silencer.")
+        localPlaybackSilencer = LocalPlaybackSilencer(this).also { it.start() }
         running.set(true)
         ZevClipPreferences.setAirPlayStreaming(this, true)
         ZevClipPreferences.setAirPlayTestStatus(this, getString(R.string.airplay_streaming_connecting))
@@ -99,8 +101,6 @@ class AirPlayAudioCaptureService : Service() {
                 record.startRecording()
                 val metadataSender = AndroidNowPlayingSender(this)
                 nowPlayingSender = metadataSender
-                mediaVolumeRestorer = AirPlayPlaybackCapture.MediaVolumeRestorer(getSystemService(AudioManager::class.java))
-                    .also { it.muteMusicStream() }
                 updateStatus(getString(R.string.airplay_streaming_live))
 
                 val target = AirPlayTarget(
@@ -148,14 +148,16 @@ class AirPlayAudioCaptureService : Service() {
             nowPlayingSender = null
             runCatching { dacpControlServer?.close() }
             dacpControlServer = null
+            runCatching { localPlaybackSilencer?.close() }
+            localPlaybackSilencer = null
             ZevClipPreferences.setAirPlayStreaming(this, false)
             return
         }
         runCatching { audioRecord?.stop() }
         runCatching { audioRecord?.release() }
         audioRecord = null
-        runCatching { mediaVolumeRestorer?.restore() }
-        mediaVolumeRestorer = null
+        runCatching { localPlaybackSilencer?.close() }
+        localPlaybackSilencer = null
         runCatching { nowPlayingSender?.stop() }
         nowPlayingSender = null
         runCatching { dacpControlServer?.close() }
@@ -168,6 +170,8 @@ class AirPlayAudioCaptureService : Service() {
 
     private fun finishWithStatus(status: String) {
         updateStatus(status)
+        runCatching { localPlaybackSilencer?.close() }
+        localPlaybackSilencer = null
         ZevClipPreferences.setAirPlayStreaming(this, false)
         stopForegroundKeepingStatus()
         stopSelf()
@@ -211,6 +215,7 @@ class AirPlayAudioCaptureService : Service() {
         private const val EXTRA_RESULT_CODE = "result_code"
         private const val EXTRA_RESULT_DATA = "result_data"
         private const val LEGACY_AIRPLAY_NOTIFICATION_ID = 2042
+        private const val TAG = "ZevClipAirPlayAudio"
 
         fun start(context: Context, resultCode: Int, resultData: Intent) {
             val intent = Intent(context, AirPlayAudioCaptureService::class.java)
