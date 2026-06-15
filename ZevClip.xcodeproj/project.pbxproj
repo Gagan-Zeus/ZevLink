@@ -288,7 +288,7 @@
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 21;
+				CURRENT_PROJECT_VERSION = 22;
 				"DEVELOPMENT_TEAM[sdk=macosx*]" = MXM45UV8RV;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_DEBUG_DYLIB = NO;
@@ -298,7 +298,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 2.1.0;
+				MARKETING_VERSION = 2.2.0;
 				OTHER_CODE_SIGN_FLAGS = "--options runtime";
 				PRODUCT_BUNDLE_IDENTIFIER = com.zevlink.receiver;
 				PRODUCT_NAME = ZevLink;
@@ -314,7 +314,7 @@
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 21;
+				CURRENT_PROJECT_VERSION = 22;
 				"DEVELOPMENT_TEAM[sdk=macosx*]" = MXM45UV8RV;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_DEBUG_DYLIB = NO;
@@ -324,7 +324,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 2.1.0;
+				MARKETING_VERSION = 2.2.0;
 				OTHER_CODE_SIGN_FLAGS = "--options runtime";
 				PRODUCT_BUNDLE_IDENTIFIER = com.zevlink.receiver;
 				PRODUCT_NAME = ZevLink;

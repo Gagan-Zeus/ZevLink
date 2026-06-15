@@ -15,6 +15,7 @@ data class AndroidNotificationMirrorPayload(
     val appName: String,
     val packageName: String,
     val appIconPngBase64: String?,
+    val notificationImagePngBase64: String? = null,
     val title: String?,
     val body: String?,
     val subtext: String?,
@@ -40,6 +41,7 @@ data class AndroidNotificationMirrorPayload(
             .put("appName", appName)
             .put("packageName", packageName)
             .put("appIconPngBase64", appIconPngBase64)
+            .put("notificationImagePngBase64", notificationImagePngBase64)
             .put("title", title)
             .put("body", body)
             .put("subtext", subtext)

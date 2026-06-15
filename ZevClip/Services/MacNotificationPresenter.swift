@@ -6,6 +6,7 @@ struct AndroidMirroredNotification: Decodable {
     let appName: String
     let packageName: String
     let appIconPngBase64: String?
+    let notificationImagePngBase64: String?
     let title: String?
     let body: String?
     let subtext: String?
@@ -679,7 +680,7 @@ final class MacNotificationPresenter: NSObject, UNUserNotificationCenterDelegate
     private static let callActionAccept = "ANDROID_CALL_ACCEPT"
     private static let callActionReject = "ANDROID_CALL_REJECT"
     private static let callActionSilence = "ANDROID_CALL_SILENCE"
-    private static let maximumIconBytes = 256 * 1024
+    private static let maximumImageBytes = 512 * 1024
     private static let notificationShadeSwipeThreshold: CGFloat = 90
     private static let globalHideSwipeThreshold: CGFloat = 70
     private static let notificationShadeGestureWidth: CGFloat = 280
@@ -688,17 +689,23 @@ final class MacNotificationPresenter: NSObject, UNUserNotificationCenterDelegate
     fileprivate static func appIconImage(
         for notification: AndroidMirroredNotification
     ) -> NSImage? {
-        guard
-            let encodedIcon = notification.appIconPngBase64,
-            let iconData = Data(base64Encoded: encodedIcon, options: [.ignoreUnknownCharacters]),
-            !iconData.isEmpty,
-            iconData.count <= maximumIconBytes,
-            iconData.starts(with: [0x89, 0x50, 0x4e, 0x47])
-        else {
-            return nil
+        if let notificationImage = image(fromBase64Png: notification.notificationImagePngBase64) {
+            return notificationImage
         }
 
-        return NSImage(data: iconData)
+        return image(fromBase64Png: notification.appIconPngBase64)
+    }
+
+    private static func image(fromBase64Png encodedImage: String?) -> NSImage? {
+        guard
+            let encodedImage,
+            let imageData = Data(base64Encoded: encodedImage, options: [.ignoreUnknownCharacters]),
+            !imageData.isEmpty,
+            imageData.count <= maximumImageBytes,
+            imageData.starts(with: [0x89, 0x50, 0x4e, 0x47])
+        else { return nil }
+
+        return NSImage(data: imageData)
     }
 }
 

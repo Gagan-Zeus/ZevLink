@@ -114,6 +114,7 @@ class AndroidNotificationMirrorService : NotificationListenerService() {
             appName = appName,
             packageName = sbn.packageName,
             appIconPngBase64 = AndroidPackageIconLoader.appIconPngBase64ForPackage(this, sbn.packageName),
+            notificationImagePngBase64 = AndroidNotificationImageEncoder.notificationImagePngBase64(this, notification),
             title = title.takeUnless { it.isNullOrBlank() },
             body = (bigText ?: text).takeUnless { it.isNullOrBlank() },
             subtext = subtext.takeUnless { it.isNullOrBlank() },
@@ -193,6 +194,7 @@ class AndroidNotificationMirrorService : NotificationListenerService() {
                 payload.title.orEmpty(),
                 payload.body.orEmpty(),
                 payload.subtext.orEmpty(),
+                payload.notificationImagePngBase64.orEmpty(),
                 payload.actions.joinToString(separator = ",") { action ->
                     listOf(
                         action.id,

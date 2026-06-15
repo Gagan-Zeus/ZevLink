@@ -32,7 +32,7 @@ It works over the same Wi-Fi/LAN, including a phone hotspot. Pair once with the 
 
 ## Downloads
 
-Latest release: **2.1.0**.
+Latest release: **2.2.0**.
 
 Download builds from GitHub Releases.
 
