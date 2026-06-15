@@ -417,6 +417,7 @@ private final class AndroidNotificationPanelController: NSObject {
     private var packageName = ""
     private var coalescingTitle = ""
     private var notificationActions: [AndroidMirroredNotificationAction] = []
+    private var detectedOTPCode: String?
     private var activeReplyAction: AndroidMirroredNotificationAction?
     private var replyKeyMonitor: Any?
     private var autoCloseTimer: Timer?
@@ -444,9 +445,10 @@ private final class AndroidNotificationPanelController: NSObject {
     private static let expandedBodyLineLimit = 4
     private static let expandedMaxHeight: CGFloat = 210
     private static let expandedMinHeight: CGFloat = 80
-    private static let defaultVisibleDuration: TimeInterval = 5
+    private static let defaultVisibleDuration: TimeInterval = 10
     private static let unhoverVisibleDuration: TimeInterval = 3
     private static let hoverAnimationDuration: TimeInterval = 0.32
+    private static let copyOTPActionId = "zevlink.copy-otp-code"
 
     init(
         notification: AndroidMirroredNotification,
@@ -544,10 +546,16 @@ private final class AndroidNotificationPanelController: NSObject {
         fullTitle = Self.singleLine(notification.displayTitle)
         coalescingTitle = fullTitle
         fullBody = Self.singleLine(notification.displayBody)
+        detectedOTPCode = Self.detectOTPCode(in: [
+            notification.title,
+            notification.body,
+            notification.subtext
+        ])
         let wasReplying = activeReplyAction != nil
+        let maximumAndroidActions = detectedOTPCode == nil ? 4 : 3
         notificationActions = notification.actions?
             .filter { !$0.id.isEmpty && !$0.cleanTitle.isEmpty }
-            .prefix(4)
+            .prefix(maximumAndroidActions)
             .map { $0 } ?? []
         if let activeReplyAction,
            !notificationActions.contains(where: { $0.id == activeReplyAction.id }) {
@@ -856,7 +864,7 @@ private final class AndroidNotificationPanelController: NSObject {
     }
 
     private func applyDisplayState(animated: Bool) {
-        let shouldShowActionRow = !notificationActions.isEmpty || activeReplyAction != nil
+        let shouldShowActionRow = detectedOTPCode != nil || !notificationActions.isEmpty || activeReplyAction != nil
         let shouldFadeActionsOut = animated && !shouldShowActionRow && !actionContainerView.isHidden
         let keepsActionRowVisible = shouldShowActionRow || shouldFadeActionsOut
         let actionOffset: CGFloat = keepsActionRowVisible ? -14 : 0
@@ -926,6 +934,19 @@ private final class AndroidNotificationPanelController: NSObject {
             view.removeFromSuperview()
         }
 
+        if detectedOTPCode != nil {
+            let button = NotificationActionButton(title: "Copy code", target: self, action: #selector(performNotificationAction(_:)))
+            button.identifier = NSUserInterfaceItemIdentifier(Self.copyOTPActionId)
+            button.controlSize = .small
+            button.font = .systemFont(ofSize: 11, weight: .semibold)
+            button.isEnabled = true
+            configureActionButton(button)
+            button.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            button.widthAnchor.constraint(equalToConstant: Self.actionButtonWidth(for: button.title, font: button.font)).isActive = true
+            button.heightAnchor.constraint(equalToConstant: 24).isActive = true
+            actionStack.addArrangedSubview(button)
+        }
+
         notificationActions.forEach { action in
             let button = NotificationActionButton(title: action.cleanTitle, target: self, action: #selector(performNotificationAction(_:)))
             button.identifier = NSUserInterfaceItemIdentifier(action.id)
@@ -947,10 +968,18 @@ private final class AndroidNotificationPanelController: NSObject {
     }
 
     @objc private func performNotificationAction(_ sender: NSButton) {
+        guard let actionId = sender.identifier?.rawValue else {
+            return
+        }
+
+        if actionId == Self.copyOTPActionId {
+            copyDetectedOTPCode(from: sender)
+            return
+        }
+
         guard
             let notificationKey,
             !notificationKey.isEmpty,
-            let actionId = sender.identifier?.rawValue,
             let action = notificationActions.first(where: { $0.id == actionId })
         else {
             return
@@ -970,6 +999,16 @@ private final class AndroidNotificationPanelController: NSObject {
                 }
             }
         }
+    }
+
+    private func copyDetectedOTPCode(from sender: NSButton) {
+        guard let detectedOTPCode, !detectedOTPCode.isEmpty else { return }
+
+        sender.isEnabled = false
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(detectedOTPCode, forType: .string)
+        dismissFromAndroid()
     }
 
     private func showInlineReplyComposer(for action: AndroidMirroredNotificationAction) {
@@ -1352,6 +1391,48 @@ private final class AndroidNotificationPanelController: NSObject {
             + actionHeight
             + bottomPadding
         return min(expandedMaxHeight, max(expandedMinHeight, ceil(contentHeight)))
+    }
+
+    private static func detectOTPCode(in textParts: [String?]) -> String? {
+        let message = textParts
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        guard !message.isEmpty else { return nil }
+
+        let lowercasedMessage = message.lowercased()
+        let otpKeywords = [
+            "otp",
+            "one time",
+            "one-time",
+            "verification",
+            "verify",
+            "code",
+            "passcode",
+            "security code",
+            "login code",
+            "authentication"
+        ]
+        guard otpKeywords.contains(where: { lowercasedMessage.contains($0) }) else {
+            return nil
+        }
+
+        let range = NSRange(message.startIndex..<message.endIndex, in: message)
+        guard
+            let regex = try? NSRegularExpression(pattern: #"(?<!\d)(\d(?:[ -]?\d){3,7})(?!\d)"#)
+        else {
+            return nil
+        }
+
+        for match in regex.matches(in: message, range: range) {
+            guard let matchRange = Range(match.range(at: 1), in: message) else { continue }
+            let candidate = message[matchRange].filter(\.isNumber)
+            if candidate.count >= 4 && candidate.count <= 8 {
+                return String(candidate)
+            }
+        }
+
+        return nil
     }
 
     private static func singleLine(_ text: String) -> String {

@@ -194,7 +194,9 @@ class MainActivity : Activity() {
         super.onResume()
         AccessibilityServiceStatus.logCurrentState(this, "MainActivity.onResume")
         if (ZevClipPreferences.isClipboardSyncEnabled(this)) {
-            requestPhoneCallPermissionsIfNeeded()
+            if (!requestPhoneCallPermissionsIfNeeded()) {
+                requestSmsOTPPermissionIfNeeded()
+            }
             AndroidClipboardReceiverService.start(this)
             AndroidCallMirrorService.start(this)
         }
@@ -213,7 +215,10 @@ class MainActivity : Activity() {
         } else if (requestCode == REQUEST_PHONE_CALLS) {
             if (ZevClipPreferences.isClipboardSyncEnabled(this)) {
                 AndroidCallMirrorService.start(this)
+                requestSmsOTPPermissionIfNeeded()
             }
+            refreshSyncStatuses()
+        } else if (requestCode == REQUEST_SMS_OTP_MIRROR) {
             refreshSyncStatuses()
         } else if (requestCode == REQUEST_RECORD_AUDIO) {
             val pendingCapture = pendingAirPlayCaptureAfterPermission
@@ -476,7 +481,9 @@ class MainActivity : Activity() {
         saveEndpointAndTokenFromUi()
         ZevClipPreferences.setClipboardSyncEnabled(this, true)
         AndroidClipboardReceiverService.start(this)
-        requestPhoneCallPermissionsIfNeeded()
+        if (!requestPhoneCallPermissionsIfNeeded()) {
+            requestSmsOTPPermissionIfNeeded()
+        }
         AndroidCallMirrorService.start(this)
         discoveryManager.discover()
 
@@ -786,18 +793,26 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun requestPhoneCallPermissionsIfNeeded() {
+    private fun requestPhoneCallPermissionsIfNeeded(): Boolean {
         val missingPermissions = phoneCallPermissions().filter {
             checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED
         }
         if (missingPermissions.isNotEmpty()) {
             requestPermissions(missingPermissions.toTypedArray(), REQUEST_PHONE_CALLS)
+            return true
         }
+        return false
     }
 
     private fun hasPhoneCallPermissions(): Boolean {
         return phoneCallPermissions().all {
             checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED
+        }
+    }
+
+    private fun requestSmsOTPPermissionIfNeeded() {
+        if (checkSelfPermission(Manifest.permission.RECEIVE_SMS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.RECEIVE_SMS), REQUEST_SMS_OTP_MIRROR)
         }
     }
 
@@ -1858,6 +1873,7 @@ class MainActivity : Activity() {
         const val REQUEST_AIRPLAY_CAPTURE = 2004
         const val REQUEST_AIRPLAY_BROADCAST_CAPTURE = 2005
         const val REQUEST_AIRPLAY_SCREEN_CAPTURE = 2006
+        const val REQUEST_SMS_OTP_MIRROR = 2007
         val FALLBACK_BACKGROUND: Int = Color.rgb(247, 248, 250)
         val FALLBACK_TEXT: Int = Color.rgb(26, 28, 32)
         val FALLBACK_MUTED: Int = Color.rgb(91, 95, 103)

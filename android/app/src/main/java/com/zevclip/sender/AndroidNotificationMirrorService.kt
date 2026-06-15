@@ -4,15 +4,10 @@ import android.app.PendingIntent
 import android.app.Notification
 import android.app.RemoteInput
 import android.content.Intent
-import android.graphics.Bitmap
-import android.graphics.Canvas
-import android.graphics.drawable.Drawable
 import android.os.Bundle
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
-import android.util.Base64
 import android.util.Log
-import java.io.ByteArrayOutputStream
 import java.security.MessageDigest
 import java.util.concurrent.Executors
 
@@ -107,12 +102,16 @@ class AndroidNotificationMirrorService : NotificationListenerService() {
         if (title.isNullOrBlank() && text.isNullOrBlank() && bigText.isNullOrBlank()) {
             return null
         }
+        if (isRedactedSensitiveNotification(title, text, bigText, subtext)) {
+            rememberRecentSMSNotificationKey(sbn)
+            return null
+        }
 
         return AndroidNotificationMirrorPayload(
             event = EVENT_POSTED,
             appName = appName,
             packageName = sbn.packageName,
-            appIconPngBase64 = appIconPngBase64ForPackage(sbn.packageName),
+            appIconPngBase64 = AndroidPackageIconLoader.appIconPngBase64ForPackage(this, sbn.packageName),
             title = title.takeUnless { it.isNullOrBlank() },
             body = (bigText ?: text).takeUnless { it.isNullOrBlank() },
             subtext = subtext.takeUnless { it.isNullOrBlank() },
@@ -288,36 +287,25 @@ class AndroidNotificationMirrorService : NotificationListenerService() {
         }
     }
 
-    private fun appIconPngBase64ForPackage(packageName: String): String? {
-        return try {
-            val drawable = packageManager.getApplicationIcon(packageName)
-            val bitmap = drawable.renderToBitmap(APP_ICON_SIZE_PX)
-            val output = ByteArrayOutputStream()
-            bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)
-            Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP)
-        } catch (error: Exception) {
-            Log.w(TAG, "Could not load icon for $packageName", error)
-            null
-        }
+    private fun isRedactedSensitiveNotification(vararg textParts: String?): Boolean {
+        val joinedText = textParts
+            .filterNotNull()
+            .joinToString(separator = " ")
+            .trim()
+            .lowercase()
+        return joinedText == "sensitive notification content hidden"
+            || joinedText.contains("sensitive notification content hidden")
     }
 
-    private fun Drawable.renderToBitmap(sizePx: Int): Bitmap {
-        val bitmap = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(bitmap)
-        val sourceWidth = intrinsicWidth.takeIf { it > 0 } ?: sizePx
-        val sourceHeight = intrinsicHeight.takeIf { it > 0 } ?: sizePx
-        val scale = minOf(
-            sizePx.toFloat() / sourceWidth.toFloat(),
-            sizePx.toFloat() / sourceHeight.toFloat()
-        )
-        val drawWidth = (sourceWidth * scale).toInt().coerceAtLeast(1)
-        val drawHeight = (sourceHeight * scale).toInt().coerceAtLeast(1)
-        val left = (sizePx - drawWidth) / 2
-        val top = (sizePx - drawHeight) / 2
-
-        setBounds(left, top, left + drawWidth, top + drawHeight)
-        draw(canvas)
-        return bitmap
+    private fun rememberRecentSMSNotificationKey(sbn: StatusBarNotification) {
+        synchronized(recentSMSNotificationKeysByPackage) {
+            recentSMSNotificationKeysByPackage[sbn.packageName] = RecentNotificationKey(
+                key = sbn.key,
+                postedAtMillis = sbn.postTime,
+                recordedAtMillis = System.currentTimeMillis()
+            )
+        }
+        OTPMessageReceiver.flushPendingOTPForPackage(applicationContext, sbn.packageName, sbn.key, sbn.postTime)
     }
 
     private fun sha256(text: String): String {
@@ -331,6 +319,12 @@ class AndroidNotificationMirrorService : NotificationListenerService() {
         val sentAtMillis: Long
     )
 
+    private data class RecentNotificationKey(
+        val key: String,
+        val postedAtMillis: Long,
+        val recordedAtMillis: Long
+    )
+
     private data class MirroredActionIntent(
         val actionIntent: PendingIntent,
         val remoteInputs: Array<RemoteInput>
@@ -340,12 +334,26 @@ class AndroidNotificationMirrorService : NotificationListenerService() {
         private const val TAG = "ZevClipNotifyMirror"
         private const val DUPLICATE_WINDOW_MS = 30_000L
         private const val MAX_TRACKED_NOTIFICATIONS = 100
-        private const val APP_ICON_SIZE_PX = 128
+        private const val RECENT_SMS_NOTIFICATION_WINDOW_MS = 20_000L
         private const val EVENT_POSTED = "posted"
         private const val EVENT_REMOVED = "removed"
 
         @Volatile
         private var activeService: AndroidNotificationMirrorService? = null
+        private val recentSMSNotificationKeysByPackage = mutableMapOf<String, RecentNotificationKey>()
+
+        fun recentSMSNotificationKey(packageName: String): Pair<String, Long>? {
+            val now = System.currentTimeMillis()
+            return synchronized(recentSMSNotificationKeysByPackage) {
+                val recent = recentSMSNotificationKeysByPackage[packageName] ?: return@synchronized null
+                if (now - recent.recordedAtMillis > RECENT_SMS_NOTIFICATION_WINDOW_MS) {
+                    recentSMSNotificationKeysByPackage.remove(packageName)
+                    null
+                } else {
+                    recent.key to recent.postedAtMillis
+                }
+            }
+        }
 
         fun cancelMirroredNotification(notificationKey: String): Boolean {
             val service = activeService ?: return false
