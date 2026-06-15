@@ -332,7 +332,8 @@ final class MacNotificationPresenter: NSObject, UNUserNotificationCenterDelegate
         retainedNotifications[retainedId] = RetainedAndroidNotification(
             id: retainedId,
             notification: notification,
-            icon: Self.appIconImage(for: notification)
+            icon: Self.appIconImage(for: notification),
+            receivedAt: Date()
         )
         refreshNotificationShade()
     }
@@ -717,6 +718,7 @@ private struct RetainedAndroidNotification {
     let id: String
     let notification: AndroidMirroredNotification
     let icon: NSImage?
+    let receivedAt: Date
 }
 
 private final class AndroidNotificationShadeStackController {
@@ -764,7 +766,7 @@ private final class AndroidNotificationShadeStackController {
         order = items.map(\.id)
         for item in items {
             if let existingPanel = panels[item.id] {
-                existingPanel.update(item.notification)
+                existingPanel.update(item.notification, mediaSnapshotReceivedAt: item.receivedAt)
             } else {
                 let panel = AndroidNotificationPanelController(
                     notification: item.notification,
@@ -785,7 +787,8 @@ private final class AndroidNotificationShadeStackController {
                     onLayoutChange: { [weak self] in
                         self?.reposition(orderFront: false)
                     },
-                    shouldAutoClose: false
+                    shouldAutoClose: false,
+                    mediaSnapshotReceivedAt: item.receivedAt
                 )
                 panels[item.id] = panel
             }
@@ -950,6 +953,7 @@ private final class AndroidNotificationPanelController: NSObject {
     private static let defaultVisibleDuration: TimeInterval = 7
     private static let unhoverVisibleDuration: TimeInterval = 3
     private static let hoverAnimationDuration: TimeInterval = 0.32
+    private static let activeMediaDisplayOffsetMillis: Int64 = 1000
     private static let copyOTPActionId = "zevlink.copy-otp-code"
     private static let mediaSeekActionId = "zevlink.media-seek-to"
 
@@ -961,7 +965,8 @@ private final class AndroidNotificationPanelController: NSObject {
         onHideAll: @escaping () -> Void,
         onClose: @escaping () -> Void,
         onLayoutChange: @escaping () -> Void,
-        shouldAutoClose: Bool = true
+        shouldAutoClose: Bool = true,
+        mediaSnapshotReceivedAt: Date = Date()
     ) {
         self.onDismiss = onDismiss
         self.onAction = onAction
@@ -989,7 +994,7 @@ private final class AndroidNotificationPanelController: NSObject {
 
         super.init()
         configureContent()
-        update(notification, icon: icon)
+        update(notification, icon: icon, mediaSnapshotReceivedAt: mediaSnapshotReceivedAt)
     }
 
     var currentHeight: CGFloat {
@@ -1015,7 +1020,15 @@ private final class AndroidNotificationPanelController: NSObject {
     }
 
     func update(_ notification: AndroidMirroredNotification) {
-        update(notification, icon: MacNotificationPresenter.appIconImage(for: notification))
+        update(notification, icon: MacNotificationPresenter.appIconImage(for: notification), mediaSnapshotReceivedAt: Date())
+    }
+
+    func update(_ notification: AndroidMirroredNotification, mediaSnapshotReceivedAt: Date) {
+        update(
+            notification,
+            icon: MacNotificationPresenter.appIconImage(for: notification),
+            mediaSnapshotReceivedAt: mediaSnapshotReceivedAt
+        )
     }
 
     func refreshVisibility() {
@@ -1058,7 +1071,11 @@ private final class AndroidNotificationPanelController: NSObject {
         onClose()
     }
 
-    private func update(_ notification: AndroidMirroredNotification, icon: NSImage?) {
+    private func update(
+        _ notification: AndroidMirroredNotification,
+        icon: NSImage?,
+        mediaSnapshotReceivedAt: Date
+    ) {
         if let incomingKey = notification.notificationKey?.trimmingCharacters(in: .whitespacesAndNewlines),
            !incomingKey.isEmpty {
             notificationKey = incomingKey
@@ -1074,7 +1091,7 @@ private final class AndroidNotificationPanelController: NSObject {
         {
             mediaDurationMillis = duration
             mediaPositionMillis = min(position, duration)
-            mediaPositionUpdatedAt = Date()
+            mediaPositionUpdatedAt = mediaSnapshotReceivedAt
             mediaIsPlaying = notification.mediaIsPlaying == true
             mediaCanSeek = notification.mediaCanSeek == true
         } else {
@@ -1643,7 +1660,8 @@ private final class AndroidNotificationPanelController: NSObject {
         }
 
         let elapsedMillis = Int64(Date().timeIntervalSince(updatedAt) * 1000)
-        return min(max(basePosition + elapsedMillis, 0), duration)
+        let compensatedPosition = basePosition + elapsedMillis + Self.activeMediaDisplayOffsetMillis
+        return min(max(compensatedPosition, 0), duration)
     }
 
     @objc private func seekMediaTimeline(_ sender: NSSlider) {
