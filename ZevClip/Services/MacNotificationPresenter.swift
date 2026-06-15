@@ -117,10 +117,22 @@ final class MacNotificationPresenter: NSObject, UNUserNotificationCenterDelegate
     private var activeNotificationPanels: [String: AndroidNotificationPanelController] = [:]
     private var notificationPanelOrder: [String] = []
     private var notificationPanelSerial = 0
+    private var retainedNotifications: [String: RetainedAndroidNotification] = [:]
+    private var retainedNotificationOrder: [String] = []
+    private var notificationShadeStack: AndroidNotificationShadeStackController?
+    private var notificationShadeGlobalMonitor: Any?
+    private var notificationShadeLocalMonitor: Any?
+    private var notificationShadeClickGlobalMonitor: Any?
+    private var notificationShadeClickLocalMonitor: Any?
+    private var notificationShadeSwipeAmount: CGFloat = 0
+    private var didTriggerNotificationShade = false
+    private var globalHideSwipeAmount: CGFloat = 0
+    private var didTriggerGlobalHide = false
 
     private override init() {
         super.init()
         center.delegate = self
+        installNotificationShadeGestureMonitor()
         center.setNotificationCategories([
             UNNotificationCategory(
                 identifier: Self.androidNotificationCategory,
@@ -167,7 +179,9 @@ final class MacNotificationPresenter: NSObject, UNUserNotificationCenterDelegate
         }
 
         DispatchQueue.main.async { [weak self] in
-            self?.showNotificationPanel(notification)
+            guard let self else { return }
+            self.remember(notification)
+            self.showNotificationPanel(notification)
         }
     }
 
@@ -203,6 +217,7 @@ final class MacNotificationPresenter: NSObject, UNUserNotificationCenterDelegate
         center.removePendingNotificationRequests(withIdentifiers: identifiers)
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
+            self.forget(notification)
             let matchingPanelIds = self.notificationPanelOrder.filter { panelId in
                 self.activeNotificationPanels[panelId]?.matches(notification) == true
             }
@@ -254,10 +269,13 @@ final class MacNotificationPresenter: NSObject, UNUserNotificationCenterDelegate
             notification: notification,
             icon: Self.appIconImage(for: notification),
             onDismiss: { [weak self] notificationKey in
-                self?.onDismiss?(notificationKey)
+                self?.dismissAndroidNotificationFromMac(notificationKey)
             },
             onAction: { [weak self] notificationKey, actionId, replyText, completion in
                 self?.onNotificationAction?(notificationKey, actionId, replyText, completion)
+            },
+            onHideAll: { [weak self] in
+                self?.hideAllMacNotifications()
             },
             onClose: { [weak self] in
                 guard let self else { return }
@@ -274,6 +292,264 @@ final class MacNotificationPresenter: NSObject, UNUserNotificationCenterDelegate
         repositionNotificationPanels()
         panel.show(atTopY: notificationPanelTopY(for: panelId))
         NSSound(named: "Glass")?.play()
+    }
+
+    private func remember(_ notification: AndroidMirroredNotification) {
+        guard !notification.isRemoval else { return }
+
+        let retainedId = retainedNotificationIdentifier(for: notification)
+        if retainedNotifications[retainedId] == nil {
+            retainedNotificationOrder.append(retainedId)
+        }
+        retainedNotifications[retainedId] = RetainedAndroidNotification(
+            id: retainedId,
+            notification: notification,
+            icon: Self.appIconImage(for: notification)
+        )
+        refreshNotificationShade()
+    }
+
+    private func forget(_ notification: AndroidMirroredNotification) {
+        if let notificationKey = notification.notificationKey?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !notificationKey.isEmpty {
+            forgetRetainedNotification(matchingKey: notificationKey)
+            return
+        }
+
+        forgetRetainedNotification(withId: retainedNotificationIdentifier(for: notification))
+    }
+
+    private func forgetRetainedNotification(matchingKey notificationKey: String) {
+        let matchingIds = retainedNotificationOrder.filter { retainedId in
+            retainedNotifications[retainedId]?.notification.notificationKey == notificationKey
+        }
+        matchingIds.forEach { forgetRetainedNotification(withId: $0) }
+        refreshNotificationShade()
+    }
+
+    private func forgetRetainedNotification(withId retainedId: String) {
+        retainedNotifications[retainedId] = nil
+        retainedNotificationOrder.removeAll { $0 == retainedId }
+        refreshNotificationShade()
+    }
+
+    private func retainedNotificationIdentifier(for notification: AndroidMirroredNotification) -> String {
+        if let notificationKey = notification.notificationKey?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !notificationKey.isEmpty {
+            return notificationKey
+        }
+
+        let postedAt = notification.postedAtMillis.map(String.init) ?? "unknown"
+        return "\(notification.macNotificationIdentifier).\(postedAt)"
+    }
+
+    private func retainedNotificationItems() -> [RetainedAndroidNotification] {
+        retainedNotificationOrder
+            .reversed()
+            .compactMap { retainedNotifications[$0] }
+    }
+
+    private func showNotificationShade() {
+        let items = retainedNotificationItems()
+        guard !items.isEmpty else { return }
+
+        if notificationShadeStack == nil {
+            notificationShadeStack = AndroidNotificationShadeStackController(
+                onDismiss: { [weak self] notificationKey in
+                    self?.dismissAndroidNotificationFromMac(notificationKey)
+                },
+                onAction: { [weak self] notificationKey, actionId, replyText, completion in
+                    self?.onNotificationAction?(notificationKey, actionId, replyText, completion)
+                },
+                onHideAll: { [weak self] in
+                    self?.hideAllMacNotifications()
+                },
+                onClose: { [weak self] in
+                    self?.notificationShadeStack = nil
+                }
+            )
+        }
+        notificationShadeStack?.show(items: items)
+    }
+
+    private func refreshNotificationShade() {
+        let items = retainedNotificationItems()
+        notificationShadeStack?.update(items: items)
+        if items.isEmpty {
+            notificationShadeStack?.close()
+            notificationShadeStack = nil
+        }
+    }
+
+    private func dismissAndroidNotificationFromMac(_ notificationKey: String) {
+        let trimmedKey = notificationKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedKey.isEmpty else { return }
+
+        forgetRetainedNotification(matchingKey: trimmedKey)
+        let matchingPanelIds = notificationPanelOrder.filter { panelId in
+            activeNotificationPanels[panelId]?.hasNotificationKey(trimmedKey) == true
+        }
+        matchingPanelIds.forEach { panelId in
+            activeNotificationPanels[panelId]?.close()
+        }
+        onDismiss?(trimmedKey)
+    }
+
+    private func hideAllMacNotifications() {
+        Array(activeNotificationPanels.values).forEach { $0.close() }
+        notificationShadeStack?.close()
+        notificationShadeStack = nil
+    }
+
+    private func installNotificationShadeGestureMonitor() {
+        notificationShadeGlobalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+            DispatchQueue.main.async {
+                self?.handleNotificationShadeGesture(event)
+            }
+        }
+        notificationShadeLocalMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+            self?.handleNotificationShadeGesture(event)
+            return event
+        }
+        let mouseEvents: NSEvent.EventTypeMask = [
+            .leftMouseDown,
+            .rightMouseDown,
+            .otherMouseDown,
+            .leftMouseUp,
+            .rightMouseUp,
+            .otherMouseUp
+        ]
+        notificationShadeClickGlobalMonitor = NSEvent.addGlobalMonitorForEvents(matching: mouseEvents) { [weak self] event in
+            DispatchQueue.main.async {
+                self?.hideNotificationShadeIfClickIsOutside(event, isLocalEvent: false)
+            }
+        }
+        notificationShadeClickLocalMonitor = NSEvent.addLocalMonitorForEvents(matching: mouseEvents) { [weak self] event in
+            self?.hideNotificationShadeIfClickIsOutside(event, isLocalEvent: true)
+            return event
+        }
+    }
+
+    private func hideNotificationShadeIfClickIsOutside(_ event: NSEvent, isLocalEvent: Bool) {
+        guard let notificationShadeStack else { return }
+        guard !notificationShadeStack.contains(point: screenPoint(for: event, isLocalEvent: isLocalEvent)) else { return }
+
+        notificationShadeStack.close()
+        self.notificationShadeStack = nil
+    }
+
+    private func screenPoint(for event: NSEvent, isLocalEvent: Bool) -> NSPoint {
+        if isLocalEvent, let window = event.window {
+            return window.convertPoint(toScreen: event.locationInWindow)
+        }
+
+        let eventLocation = event.locationInWindow
+        if eventLocation != .zero {
+            return eventLocation
+        }
+
+        return NSEvent.mouseLocation
+    }
+
+    private func handleNotificationShadeGesture(_ event: NSEvent) {
+        if notificationShadeStack?.handleScroll(event) == true {
+            resetGlobalHideGestureIfNeeded(event)
+            return
+        }
+
+        if handleGlobalHideGesture(event) {
+            return
+        }
+
+        let phase = event.phase
+        if phase.contains(.began) || phase.contains(.mayBegin) {
+            notificationShadeSwipeAmount = 0
+            didTriggerNotificationShade = false
+        }
+
+        guard isPointerInTopRightGestureRegion() else {
+            notificationShadeSwipeAmount = 0
+            return
+        }
+
+        let vertical = normalizedFingerVerticalDelta(from: event)
+        let horizontal = normalizedFingerHorizontalDelta(from: event)
+        let isDownwardSwipe = vertical < 0 && abs(vertical) > abs(horizontal) * 1.25
+
+        if isDownwardSwipe {
+            notificationShadeSwipeAmount += abs(vertical)
+            if notificationShadeSwipeAmount > Self.notificationShadeSwipeThreshold,
+               !didTriggerNotificationShade {
+                didTriggerNotificationShade = true
+                showNotificationShade()
+            }
+        }
+
+        if phase.contains(.ended)
+            || phase.contains(.cancelled)
+            || event.momentumPhase.contains(.ended)
+            || event.momentumPhase.contains(.cancelled) {
+            notificationShadeSwipeAmount = 0
+            didTriggerNotificationShade = false
+        }
+    }
+
+    private func handleGlobalHideGesture(_ event: NSEvent) -> Bool {
+        guard notificationShadeStack != nil || !activeNotificationPanels.isEmpty else {
+            resetGlobalHideGestureIfNeeded(event)
+            return false
+        }
+
+        let phase = event.phase
+        if phase.contains(.began) || phase.contains(.mayBegin) {
+            globalHideSwipeAmount = 0
+            didTriggerGlobalHide = false
+        }
+
+        let vertical = normalizedFingerVerticalDelta(from: event)
+        let horizontal = normalizedFingerHorizontalDelta(from: event)
+        let isUpwardSwipe = vertical > 0 && abs(vertical) > abs(horizontal) * 1.25
+
+        if isUpwardSwipe {
+            globalHideSwipeAmount += abs(vertical)
+            if globalHideSwipeAmount > Self.globalHideSwipeThreshold,
+               !didTriggerGlobalHide {
+                didTriggerGlobalHide = true
+                hideAllMacNotifications()
+                return true
+            }
+        }
+
+        resetGlobalHideGestureIfNeeded(event)
+        return false
+    }
+
+    private func resetGlobalHideGestureIfNeeded(_ event: NSEvent) {
+        if event.phase.contains(.ended)
+            || event.phase.contains(.cancelled)
+            || event.momentumPhase.contains(.ended)
+            || event.momentumPhase.contains(.cancelled) {
+            globalHideSwipeAmount = 0
+            didTriggerGlobalHide = false
+        }
+    }
+
+    private func isPointerInTopRightGestureRegion() -> Bool {
+        let mouseLocation = NSEvent.mouseLocation
+        let screen = NSScreen.screens.first { NSMouseInRect(mouseLocation, $0.frame, false) } ?? NSScreen.main
+        guard let screen else { return false }
+
+        let frame = screen.frame
+        return mouseLocation.x >= frame.maxX - Self.notificationShadeGestureWidth
+            && mouseLocation.y >= frame.maxY - Self.notificationShadeGestureHeight
+    }
+
+    private func normalizedFingerHorizontalDelta(from event: NSEvent) -> CGFloat {
+        event.isDirectionInvertedFromDevice ? -event.scrollingDeltaX : event.scrollingDeltaX
+    }
+
+    private func normalizedFingerVerticalDelta(from event: NSEvent) -> CGFloat {
+        event.isDirectionInvertedFromDevice ? -event.scrollingDeltaY : event.scrollingDeltaY
     }
 
     private func existingNotificationPanelId(for notification: AndroidMirroredNotification) -> String? {
@@ -367,7 +643,9 @@ final class MacNotificationPresenter: NSObject, UNUserNotificationCenterDelegate
             return
         }
 
-        onDismiss?(notificationKey)
+        await MainActor.run {
+            dismissAndroidNotificationFromMac(notificationKey)
+        }
     }
 
     private static let androidNotificationCategory = "ANDROID_MIRRORED_NOTIFICATION"
@@ -376,6 +654,10 @@ final class MacNotificationPresenter: NSObject, UNUserNotificationCenterDelegate
     private static let callActionReject = "ANDROID_CALL_REJECT"
     private static let callActionSilence = "ANDROID_CALL_SILENCE"
     private static let maximumIconBytes = 256 * 1024
+    private static let notificationShadeSwipeThreshold: CGFloat = 90
+    private static let globalHideSwipeThreshold: CGFloat = 70
+    private static let notificationShadeGestureWidth: CGFloat = 280
+    private static let notificationShadeGestureHeight: CGFloat = 170
 
     fileprivate static func appIconImage(
         for notification: AndroidMirroredNotification
@@ -391,6 +673,170 @@ final class MacNotificationPresenter: NSObject, UNUserNotificationCenterDelegate
         }
 
         return NSImage(data: iconData)
+    }
+}
+
+private struct RetainedAndroidNotification {
+    let id: String
+    let notification: AndroidMirroredNotification
+    let icon: NSImage?
+}
+
+private final class AndroidNotificationShadeStackController {
+    private var panels: [String: AndroidNotificationPanelController] = [:]
+    private var order: [String] = []
+    private let onDismiss: (String) -> Void
+    private let onAction: (String, String, String?, @escaping (Bool, String) -> Void) -> Void
+    private let onHideAll: () -> Void
+    private let onClose: () -> Void
+    private var scrollOffset: CGFloat = 0
+    private var isClosing = false
+
+    private static let panelSpacing: CGFloat = 10
+    private static let topPadding: CGFloat = 18
+
+    init(
+        onDismiss: @escaping (String) -> Void,
+        onAction: @escaping (String, String, String?, @escaping (Bool, String) -> Void) -> Void,
+        onHideAll: @escaping () -> Void,
+        onClose: @escaping () -> Void
+    ) {
+        self.onDismiss = onDismiss
+        self.onAction = onAction
+        self.onHideAll = onHideAll
+        self.onClose = onClose
+    }
+
+    func show(items: [RetainedAndroidNotification]) {
+        update(items: items)
+    }
+
+    func update(items: [RetainedAndroidNotification]) {
+        guard !items.isEmpty else {
+            close()
+            return
+        }
+
+        let incomingIds = Set(items.map(\.id))
+        let staleIds = order.filter { !incomingIds.contains($0) }
+        staleIds.forEach { id in
+            panels[id]?.close()
+            panels[id] = nil
+        }
+
+        order = items.map(\.id)
+        for item in items {
+            if let existingPanel = panels[item.id] {
+                existingPanel.update(item.notification)
+            } else {
+                let panel = AndroidNotificationPanelController(
+                    notification: item.notification,
+                    icon: item.icon,
+                    onDismiss: { [weak self] notificationKey in
+                        self?.onDismiss(notificationKey)
+                    },
+                    onAction: { [weak self] notificationKey, actionId, replyText, completion in
+                        self?.onAction(notificationKey, actionId, replyText, completion)
+                    },
+                    onHideAll: { [weak self] in
+                        self?.onHideAll()
+                    },
+                    onClose: { [weak self] in
+                        self?.panels[item.id] = nil
+                        self?.order.removeAll { $0 == item.id }
+                    },
+                    onLayoutChange: { [weak self] in
+                        self?.reposition(orderFront: false)
+                    },
+                    shouldAutoClose: false
+                )
+                panels[item.id] = panel
+            }
+        }
+
+        clampScrollOffset()
+        reposition(orderFront: true)
+    }
+
+    func handleScroll(_ event: NSEvent) -> Bool {
+        guard !panels.isEmpty, pointerIsInsideStack() else {
+            return false
+        }
+
+        let horizontal = normalizedFingerHorizontalDelta(from: event)
+        let vertical = normalizedFingerVerticalDelta(from: event)
+        guard abs(vertical) > abs(horizontal), abs(vertical) > 0.2 else {
+            return false
+        }
+
+        scrollOffset += vertical
+        clampScrollOffset()
+        reposition(orderFront: false)
+        return true
+    }
+
+    func close() {
+        guard !isClosing else { return }
+        isClosing = true
+        Array(panels.values).forEach { $0.close() }
+        panels.removeAll()
+        order.removeAll()
+        onClose()
+    }
+
+    private func reposition(orderFront: Bool) {
+        var nextTopY = initialTopY() - scrollOffset
+        for id in order {
+            guard let panel = panels[id] else { continue }
+            if orderFront {
+                panel.show(atTopY: nextTopY)
+            } else {
+                panel.move(toTopY: nextTopY)
+            }
+            nextTopY -= panel.currentHeight + Self.panelSpacing
+        }
+    }
+
+    private func pointerIsInsideStack() -> Bool {
+        contains(point: NSEvent.mouseLocation)
+    }
+
+    func contains(point: NSPoint) -> Bool {
+        return panels.values.contains { panel in
+            NSMouseInRect(point, panel.screenFrame.insetBy(dx: -12, dy: -12), false)
+        }
+    }
+
+    private func clampScrollOffset() {
+        scrollOffset = min(max(scrollOffset, 0), maximumScrollOffset())
+    }
+
+    private func maximumScrollOffset() -> CGFloat {
+        max(0, contentHeight() - availableHeight())
+    }
+
+    private func contentHeight() -> CGFloat {
+        let heights = order.compactMap { panels[$0]?.currentHeight }
+        guard !heights.isEmpty else { return 0 }
+        return heights.reduce(0, +) + (CGFloat(heights.count - 1) * Self.panelSpacing)
+    }
+
+    private func availableHeight() -> CGFloat {
+        guard let screen = NSScreen.main else { return 0 }
+        return max(0, screen.visibleFrame.height - (Self.topPadding * 2))
+    }
+
+    private func initialTopY() -> CGFloat {
+        guard let screen = NSScreen.main else { return 0 }
+        return screen.visibleFrame.maxY - Self.topPadding
+    }
+
+    private func normalizedFingerHorizontalDelta(from event: NSEvent) -> CGFloat {
+        event.isDirectionInvertedFromDevice ? -event.scrollingDeltaX : event.scrollingDeltaX
+    }
+
+    private func normalizedFingerVerticalDelta(from event: NSEvent) -> CGFloat {
+        event.isDirectionInvertedFromDevice ? -event.scrollingDeltaY : event.scrollingDeltaY
     }
 }
 
@@ -410,8 +856,10 @@ private final class AndroidNotificationPanelController: NSObject {
     private let replySendButton = NotificationActionButton(title: "", target: nil, action: nil)
     private let onDismiss: (String) -> Void
     private let onAction: (String, String, String?, @escaping (Bool, String) -> Void) -> Void
+    private let onHideAll: () -> Void
     private let onClose: () -> Void
     private let onLayoutChange: () -> Void
+    private let shouldAutoClose: Bool
     private var notificationKey: String?
     private var notificationKeys = Set<String>()
     private var packageName = ""
@@ -445,7 +893,7 @@ private final class AndroidNotificationPanelController: NSObject {
     private static let expandedBodyLineLimit = 4
     private static let expandedMaxHeight: CGFloat = 210
     private static let expandedMinHeight: CGFloat = 80
-    private static let defaultVisibleDuration: TimeInterval = 10
+    private static let defaultVisibleDuration: TimeInterval = 7
     private static let unhoverVisibleDuration: TimeInterval = 3
     private static let hoverAnimationDuration: TimeInterval = 0.32
     private static let copyOTPActionId = "zevlink.copy-otp-code"
@@ -455,13 +903,17 @@ private final class AndroidNotificationPanelController: NSObject {
         icon: NSImage?,
         onDismiss: @escaping (String) -> Void,
         onAction: @escaping (String, String, String?, @escaping (Bool, String) -> Void) -> Void,
+        onHideAll: @escaping () -> Void,
         onClose: @escaping () -> Void,
-        onLayoutChange: @escaping () -> Void
+        onLayoutChange: @escaping () -> Void,
+        shouldAutoClose: Bool = true
     ) {
         self.onDismiss = onDismiss
         self.onAction = onAction
+        self.onHideAll = onHideAll
         self.onClose = onClose
         self.onLayoutChange = onLayoutChange
+        self.shouldAutoClose = shouldAutoClose
 
         panel = NotificationInteractionPanel(
             contentRect: NSRect(x: 0, y: 0, width: 352, height: Self.collapsedHeight),
@@ -489,10 +941,16 @@ private final class AndroidNotificationPanelController: NSObject {
         panel.frame.height
     }
 
+    var screenFrame: NSRect {
+        panel.frame
+    }
+
     func show(atTopY topY: CGFloat) {
         move(toTopY: topY)
         panel.orderFrontRegardless()
-        restartAutoCloseTimer(after: Self.defaultVisibleDuration)
+        if shouldAutoClose {
+            restartAutoCloseTimer(after: Self.defaultVisibleDuration)
+        }
     }
 
     func move(toTopY topY: CGFloat) {
@@ -505,7 +963,7 @@ private final class AndroidNotificationPanelController: NSObject {
 
     func refreshVisibility() {
         panel.orderFrontRegardless()
-        if !isHovering && activeReplyAction == nil {
+        if shouldAutoClose && !isHovering && activeReplyAction == nil {
             restartAutoCloseTimer(after: Self.defaultVisibleDuration)
         }
     }
@@ -515,6 +973,10 @@ private final class AndroidNotificationPanelController: NSObject {
             return false
         }
         return notificationKeys.contains(removedKey) || notificationKey == removedKey
+    }
+
+    func hasNotificationKey(_ notificationKey: String) -> Bool {
+        notificationKeys.contains(notificationKey) || self.notificationKey == notificationKey
     }
 
     func shouldCoalesce(with notification: AndroidMirroredNotification) -> Bool {
@@ -596,6 +1058,10 @@ private final class AndroidNotificationPanelController: NSObject {
         contentView.onSwipeRight = { [weak self] in
             self?.dismissFromAndroid()
         }
+        contentView.onSwipeUp = { [weak self] in
+            self?.onHideAll()
+        }
+        contentView.allowsScrollWheelSwipeUp = shouldAutoClose
         configurePanelContentView(contentView)
         panel.acceptsMouseMovedEvents = true
 
@@ -830,7 +1296,7 @@ private final class AndroidNotificationPanelController: NSObject {
 
     private func restartAutoCloseTimer(after interval: TimeInterval) {
         autoCloseTimer?.invalidate()
-        guard !isHovering, activeReplyAction == nil else {
+        guard shouldAutoClose, !isHovering, activeReplyAction == nil else {
             autoCloseTimer = nil
             return
         }
@@ -1442,6 +1908,10 @@ private final class AndroidNotificationPanelController: NSObject {
             .joined(separator: " ")
     }
 
+    fileprivate static func singleLineForDisplay(_ text: String) -> String {
+        singleLine(text)
+    }
+
     @objc private func dismissFromAndroid() {
         if let notificationKey, !notificationKey.isEmpty {
             onDismiss(notificationKey)
@@ -1450,13 +1920,18 @@ private final class AndroidNotificationPanelController: NSObject {
     }
 }
 
-private final class HoverTrackingView: NSView {
+private class HoverTrackingView: NSView {
     var onHoverChanged: ((Bool) -> Void)?
     var onSwipeRight: (() -> Void)?
+    var onSwipeUp: (() -> Void)?
+    var allowsScrollWheelSwipeUp = true
     private var trackingAreaReference: NSTrackingArea?
     private var horizontalSwipeAmount: CGFloat = 0
+    private var verticalSwipeAmount: CGFloat = 0
     private var didTriggerSwipeDismiss = false
+    private var didTriggerSwipeUp = false
     private static let swipeDismissThreshold: CGFloat = 80
+    private static let swipeUpThreshold: CGFloat = 70
 
     override func updateTrackingAreas() {
         if let trackingAreaReference {
@@ -1487,6 +1962,10 @@ private final class HoverTrackingView: NSView {
             triggerSwipeDismiss()
             return
         }
+        if event.deltaY > 0 {
+            triggerSwipeUp()
+            return
+        }
         super.swipe(with: event)
     }
 
@@ -1497,13 +1976,20 @@ private final class HoverTrackingView: NSView {
         }
 
         let horizontal = normalizedFingerHorizontalDelta(from: event)
-        let vertical = event.scrollingDeltaY
+        let vertical = normalizedFingerVerticalDelta(from: event)
         let isHorizontalSwipe = abs(horizontal) > abs(vertical) * 1.4 && abs(horizontal) > 0.4
+        let isVerticalSwipe = abs(vertical) > abs(horizontal) * 1.4 && abs(vertical) > 0.4
 
         if isHorizontalSwipe {
             horizontalSwipeAmount += horizontal
             if horizontalSwipeAmount < -Self.swipeDismissThreshold {
                 triggerSwipeDismiss()
+                return
+            }
+        } else if allowsScrollWheelSwipeUp && isVerticalSwipe && onSwipeUp != nil {
+            verticalSwipeAmount += vertical
+            if verticalSwipeAmount > Self.swipeUpThreshold {
+                triggerSwipeUp()
                 return
             }
         } else if abs(vertical) > abs(horizontal) {
@@ -1527,15 +2013,30 @@ private final class HoverTrackingView: NSView {
         return event.scrollingDeltaX
     }
 
+    private func normalizedFingerVerticalDelta(from event: NSEvent) -> CGFloat {
+        if event.isDirectionInvertedFromDevice {
+            return -event.scrollingDeltaY
+        }
+        return event.scrollingDeltaY
+    }
+
     private func triggerSwipeDismiss() {
         guard !didTriggerSwipeDismiss else { return }
         didTriggerSwipeDismiss = true
         onSwipeRight?()
     }
 
+    private func triggerSwipeUp() {
+        guard !didTriggerSwipeUp else { return }
+        didTriggerSwipeUp = true
+        onSwipeUp?()
+    }
+
     private func resetSwipeTracking() {
         horizontalSwipeAmount = 0
+        verticalSwipeAmount = 0
         didTriggerSwipeDismiss = false
+        didTriggerSwipeUp = false
     }
 }
 
