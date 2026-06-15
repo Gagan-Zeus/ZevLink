@@ -802,7 +802,7 @@ private final class AndroidNotificationShadeStackController {
             return false
         }
 
-        scrollOffset += vertical
+        scrollOffset -= vertical
         clampScrollOffset()
         reposition(orderFront: false)
         return true
