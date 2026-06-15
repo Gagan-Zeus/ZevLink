@@ -2,6 +2,7 @@ package com.zevclip.sender
 
 import android.content.Context
 import org.json.JSONObject
+import org.json.JSONArray
 import java.io.IOException
 import java.net.ConnectException
 import java.net.HttpURLConnection
@@ -13,26 +14,48 @@ data class AndroidNotificationMirrorPayload(
     val event: String,
     val appName: String,
     val packageName: String,
+    val appIconPngBase64: String?,
     val title: String?,
     val body: String?,
     val subtext: String?,
+    val actions: List<AndroidNotificationMirrorAction>,
     val notificationKey: String?,
     val postedAtMillis: Long
 ) {
     fun toJsonBytes(): ByteArray {
+        val actionArray = JSONArray()
+        actions.forEach { action ->
+            actionArray.put(
+                JSONObject()
+                    .put("id", action.id)
+                    .put("title", action.title)
+                    .put("requiresTextInput", action.requiresTextInput)
+                    .put("inputLabel", action.inputLabel)
+            )
+        }
+
         return JSONObject()
             .put("event", event)
             .put("appName", appName)
             .put("packageName", packageName)
+            .put("appIconPngBase64", appIconPngBase64)
             .put("title", title)
             .put("body", body)
             .put("subtext", subtext)
+            .put("actions", actionArray)
             .put("notificationKey", notificationKey)
             .put("postedAtMillis", postedAtMillis)
             .toString()
             .toByteArray(Charsets.UTF_8)
     }
 }
+
+data class AndroidNotificationMirrorAction(
+    val id: String,
+    val title: String,
+    val requiresTextInput: Boolean,
+    val inputLabel: String?
+)
 
 object AndroidNotificationMirrorSender {
     private const val CONNECT_TIMEOUT_MS = 5_000

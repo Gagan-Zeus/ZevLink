@@ -1,9 +1,18 @@
 package com.zevclip.sender
 
+import android.app.PendingIntent
 import android.app.Notification
+import android.app.RemoteInput
+import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.drawable.Drawable
+import android.os.Bundle
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
+import android.util.Base64
 import android.util.Log
+import java.io.ByteArrayOutputStream
 import java.security.MessageDigest
 import java.util.concurrent.Executors
 
@@ -12,6 +21,7 @@ class AndroidNotificationMirrorService : NotificationListenerService() {
         Thread(runnable, "ZevClipNotificationMirror")
     }
     private val lastSentByKey = mutableMapOf<String, SentNotification>()
+    private val actionIntentsByNotificationKey = mutableMapOf<String, MutableMap<String, MirroredActionIntent>>()
 
     override fun onListenerConnected() {
         super.onListenerConnected()
@@ -102,22 +112,27 @@ class AndroidNotificationMirrorService : NotificationListenerService() {
             event = EVENT_POSTED,
             appName = appName,
             packageName = sbn.packageName,
+            appIconPngBase64 = appIconPngBase64ForPackage(sbn.packageName),
             title = title.takeUnless { it.isNullOrBlank() },
             body = (bigText ?: text).takeUnless { it.isNullOrBlank() },
             subtext = subtext.takeUnless { it.isNullOrBlank() },
+            actions = mirroredActionsFor(notification, sbn.key),
             notificationKey = sbn.key,
             postedAtMillis = sbn.postTime
         )
     }
 
     private fun removedPayload(from: StatusBarNotification): AndroidNotificationMirrorPayload {
+        actionIntentsByNotificationKey.remove(from.key)
         return AndroidNotificationMirrorPayload(
             event = EVENT_REMOVED,
             appName = appNameForPackage(from.packageName),
             packageName = from.packageName,
+            appIconPngBase64 = null,
             title = null,
             body = null,
             subtext = null,
+            actions = emptyList(),
             notificationKey = from.key,
             postedAtMillis = from.postTime
         )
@@ -161,9 +176,6 @@ class AndroidNotificationMirrorService : NotificationListenerService() {
             if (lastSent.signature == signature && now - lastSent.sentAtMillis < DUPLICATE_WINDOW_MS) {
                 return true
             }
-            if (now - lastSent.sentAtMillis < UPDATE_THROTTLE_MS) {
-                return true
-            }
         }
 
         lastSentByKey[key] = SentNotification(signature, now)
@@ -177,6 +189,96 @@ class AndroidNotificationMirrorService : NotificationListenerService() {
         return false
     }
 
+    private fun mirroredActionsFor(
+        notification: Notification,
+        notificationKey: String
+    ): List<AndroidNotificationMirrorAction> {
+        val mappedActions = mutableMapOf<String, MirroredActionIntent>()
+        val actionPayloads = notification.actions
+            ?.mapIndexedNotNull { index, action ->
+                val title = action.title?.toString()?.trim().orEmpty()
+                val actionIntent = action.actionIntent
+                if (title.isBlank() || actionIntent == null) {
+                    return@mapIndexedNotNull null
+                }
+
+                val actionId = "$index-${sha256(title).take(10)}"
+                val remoteInputs = (action.remoteInputs ?: emptyArray()).map { it }.toTypedArray()
+                mappedActions[actionId] = MirroredActionIntent(
+                    actionIntent = actionIntent,
+                    remoteInputs = remoteInputs
+                )
+
+                AndroidNotificationMirrorAction(
+                    id = actionId,
+                    title = title,
+                    requiresTextInput = remoteInputs.any { it.allowFreeFormInput },
+                    inputLabel = remoteInputs.firstOrNull { it.allowFreeFormInput }
+                        ?.label
+                        ?.toString()
+                        ?.trim()
+                        ?.takeUnless { it.isBlank() }
+                )
+            }
+            .orEmpty()
+
+        if (mappedActions.isEmpty()) {
+            actionIntentsByNotificationKey.remove(notificationKey)
+        } else {
+            actionIntentsByNotificationKey[notificationKey] = mappedActions
+        }
+
+        pruneTrackedActions()
+        return actionPayloads
+    }
+
+    private fun performMirroredNotificationAction(
+        notificationKey: String,
+        actionId: String,
+        replyText: String?
+    ): Boolean {
+        val action = actionIntentsByNotificationKey[notificationKey]?.get(actionId) ?: return false
+        return try {
+            val fillInIntent = if (replyText != null && action.remoteInputs.isNotEmpty()) {
+                Intent().also { intent ->
+                    val results = Bundle()
+                    action.remoteInputs
+                        .filter { it.allowFreeFormInput }
+                        .forEach { remoteInput ->
+                            results.putCharSequence(remoteInput.resultKey, replyText)
+                        }
+                    RemoteInput.addResultsToIntent(action.remoteInputs, intent, results)
+                }
+            } else {
+                null
+            }
+
+            action.actionIntent.send(this, 0, fillInIntent)
+            true
+        } catch (error: PendingIntent.CanceledException) {
+            Log.w(TAG, "Android notification action was already cancelled", error)
+            false
+        } catch (error: RuntimeException) {
+            Log.w(TAG, "Could not perform Android notification action", error)
+            false
+        }
+    }
+
+    private fun pruneTrackedActions() {
+        if (actionIntentsByNotificationKey.size <= MAX_TRACKED_NOTIFICATIONS) {
+            return
+        }
+
+        val activeKeys = lastSentByKey.entries
+            .sortedByDescending { it.value.sentAtMillis }
+            .take(MAX_TRACKED_NOTIFICATIONS)
+            .map { it.key }
+            .toSet()
+        actionIntentsByNotificationKey.keys
+            .filter { it !in activeKeys }
+            .forEach { actionIntentsByNotificationKey.remove(it) }
+    }
+
     private fun appNameForPackage(packageName: String): String {
         return try {
             val applicationInfo = packageManager.getApplicationInfo(packageName, 0)
@@ -184,6 +286,38 @@ class AndroidNotificationMirrorService : NotificationListenerService() {
         } catch (_: Exception) {
             packageName
         }
+    }
+
+    private fun appIconPngBase64ForPackage(packageName: String): String? {
+        return try {
+            val drawable = packageManager.getApplicationIcon(packageName)
+            val bitmap = drawable.renderToBitmap(APP_ICON_SIZE_PX)
+            val output = ByteArrayOutputStream()
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)
+            Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP)
+        } catch (error: Exception) {
+            Log.w(TAG, "Could not load icon for $packageName", error)
+            null
+        }
+    }
+
+    private fun Drawable.renderToBitmap(sizePx: Int): Bitmap {
+        val bitmap = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        val sourceWidth = intrinsicWidth.takeIf { it > 0 } ?: sizePx
+        val sourceHeight = intrinsicHeight.takeIf { it > 0 } ?: sizePx
+        val scale = minOf(
+            sizePx.toFloat() / sourceWidth.toFloat(),
+            sizePx.toFloat() / sourceHeight.toFloat()
+        )
+        val drawWidth = (sourceWidth * scale).toInt().coerceAtLeast(1)
+        val drawHeight = (sourceHeight * scale).toInt().coerceAtLeast(1)
+        val left = (sizePx - drawWidth) / 2
+        val top = (sizePx - drawHeight) / 2
+
+        setBounds(left, top, left + drawWidth, top + drawHeight)
+        draw(canvas)
+        return bitmap
     }
 
     private fun sha256(text: String): String {
@@ -197,11 +331,16 @@ class AndroidNotificationMirrorService : NotificationListenerService() {
         val sentAtMillis: Long
     )
 
+    private data class MirroredActionIntent(
+        val actionIntent: PendingIntent,
+        val remoteInputs: Array<RemoteInput>
+    )
+
     companion object {
         private const val TAG = "ZevClipNotifyMirror"
         private const val DUPLICATE_WINDOW_MS = 30_000L
-        private const val UPDATE_THROTTLE_MS = 2_000L
         private const val MAX_TRACKED_NOTIFICATIONS = 100
+        private const val APP_ICON_SIZE_PX = 128
         private const val EVENT_POSTED = "posted"
         private const val EVENT_REMOVED = "removed"
 
@@ -211,6 +350,7 @@ class AndroidNotificationMirrorService : NotificationListenerService() {
         fun cancelMirroredNotification(notificationKey: String): Boolean {
             val service = activeService ?: return false
             return try {
+                service.actionIntentsByNotificationKey.remove(notificationKey)
                 service.cancelNotification(notificationKey)
                 true
             } catch (error: SecurityException) {
@@ -220,6 +360,15 @@ class AndroidNotificationMirrorService : NotificationListenerService() {
                 Log.w(TAG, "Could not cancel Android notification", error)
                 false
             }
+        }
+
+        fun performMirroredNotificationAction(
+            notificationKey: String,
+            actionId: String,
+            replyText: String?
+        ): Boolean {
+            val service = activeService ?: return false
+            return service.performMirroredNotificationAction(notificationKey, actionId, replyText)
         }
     }
 }

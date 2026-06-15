@@ -147,8 +147,16 @@ class AndroidClipboardReceiverService : Service() {
                 ZevClipStatusNotification.update(this)
                 Log.i(TAG, "Received ${text.length} characters from Mac")
             },
-            onNotificationAction = { notificationKey ->
-                AndroidNotificationMirrorService.cancelMirroredNotification(notificationKey)
+            onNotificationAction = { notificationKey, actionId, replyText ->
+                if (actionId.isNullOrBlank()) {
+                    AndroidNotificationMirrorService.cancelMirroredNotification(notificationKey)
+                } else {
+                    AndroidNotificationMirrorService.performMirroredNotificationAction(
+                        notificationKey = notificationKey,
+                        actionId = actionId,
+                        replyText = replyText
+                    )
+                }
             },
             onCallAction = { action, callId ->
                 AndroidCallMirrorService.performCallAction(action, callId)

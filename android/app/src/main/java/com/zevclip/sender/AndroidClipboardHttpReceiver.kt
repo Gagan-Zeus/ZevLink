@@ -27,7 +27,7 @@ class AndroidClipboardHttpReceiver(
     private val onReady: (Int) -> Unit = {},
     private val onFailure: (String) -> Unit = {},
     private val onTextReceived: (String) -> Unit = {},
-    private val onNotificationAction: (String) -> Boolean = { false },
+    private val onNotificationAction: (String, String?, String?) -> Boolean = { _, _, _ -> false },
     private val onCallAction: (String, String?) -> AndroidCallActionResult = { _, _ ->
         AndroidCallActionResult(false, "Android call mirror is unavailable.")
     },
@@ -319,24 +319,38 @@ class AndroidClipboardHttpReceiver(
             return response("400 Bad Request", "Request body must be valid UTF-8 JSON.")
         }
 
-        val notificationKey = try {
+        val parsedAction = try {
             val json = JSONObject(bodyText)
-            if (json.optString("action") != "dismiss") {
+            val action = json.optString("action").trim()
+            if (action != "dismiss" && action != "perform") {
                 return response("400 Bad Request", "Unsupported notification action.")
             }
-            json.optString("notificationKey").trim()
+            ParsedNotificationAction(
+                action = action,
+                notificationKey = json.optString("notificationKey").trim(),
+                actionId = json.optString("actionId").trim().takeUnless { it.isEmpty() },
+                replyText = json.optString("replyText").takeUnless { it.isEmpty() }
+            )
         } catch (_: Exception) {
             return response("400 Bad Request", "Request body must be valid notification action JSON.")
         }
 
-        if (notificationKey.isEmpty()) {
+        if (parsedAction.notificationKey.isEmpty()) {
             return response("400 Bad Request", "notificationKey is required.")
         }
+        if (parsedAction.action == "perform" && parsedAction.actionId.isNullOrBlank()) {
+            return response("400 Bad Request", "actionId is required.")
+        }
 
-        return if (onNotificationAction(notificationKey)) {
-            response("200 OK", "Android notification cancelled.")
+        return if (onNotificationAction(parsedAction.notificationKey, parsedAction.actionId, parsedAction.replyText)) {
+            val message = if (parsedAction.action == "dismiss") {
+                "Android notification cancelled."
+            } else {
+                "Android notification action performed."
+            }
+            response("200 OK", message)
         } else {
-            response("404 Not Found", "Android notification could not be cancelled.")
+            response("404 Not Found", "Android notification action could not be performed.")
         }
     }
 
@@ -444,6 +458,13 @@ class AndroidClipboardHttpReceiver(
     }
 
     private class HTTPFailure(val status: String, override val message: String) : Exception(message)
+
+    private data class ParsedNotificationAction(
+        val action: String,
+        val notificationKey: String,
+        val actionId: String?,
+        val replyText: String?
+    )
 
     companion object {
         const val DEFAULT_PORT = 9877

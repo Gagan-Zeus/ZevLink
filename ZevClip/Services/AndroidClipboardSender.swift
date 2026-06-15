@@ -99,6 +99,56 @@ final class AndroidClipboardSender: ObservableObject {
         }
     }
 
+    func performAndroidNotificationAction(
+        notificationKey: String,
+        actionId: String,
+        replyText: String? = nil,
+        completion: ((Bool, String) -> Void)? = nil
+    ) {
+        let trimmedKey = notificationKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedActionId = actionId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedKey.isEmpty, !trimmedActionId.isEmpty else {
+            completion?(false, "Notification action is missing.")
+            return
+        }
+        guard let endpoint = resolvedEndpoint else {
+            discoverAndroidReceiver()
+            completion?(false, "Rediscovering Android receiver...")
+            return
+        }
+
+        let token = tokenProvider().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !token.isEmpty else {
+            completion?(false, "Pairing token is empty.")
+            return
+        }
+
+        Task { [weak self] in
+            let result = await AndroidClipboardHTTPClient.performNotificationAction(
+                notificationKey: trimmedKey,
+                actionId: trimmedActionId,
+                replyText: replyText,
+                on: endpoint,
+                token: token
+            )
+
+            await MainActor.run {
+                switch result {
+                case .success:
+                    self?.status = "Performed Android notification action from Mac."
+                    completion?(true, "Android notification action sent.")
+                case .failure(let message, let isRetryable):
+                    self?.status = message
+                    completion?(false, message)
+                    if isRetryable {
+                        self?.resolvedEndpoint = nil
+                        self?.discoverAndroidReceiver()
+                    }
+                }
+            }
+        }
+    }
+
     func sendAndroidCallAction(
         action: String,
         callId: String,
@@ -486,6 +536,63 @@ private enum AndroidClipboardHTTPClient {
         } catch {
             return .failure(
                 "Could not dismiss Android notification: \(error.localizedDescription)",
+                isRetryable: true
+            )
+        }
+    }
+
+    static func performNotificationAction(
+        notificationKey: String,
+        actionId: String,
+        replyText: String?,
+        on endpoint: AndroidReceiverEndpoint,
+        token: String
+    ) async -> Result {
+        guard let url = notificationActionURL(for: endpoint) else {
+            return .failure("Android notification action URL is invalid.", isRetryable: false)
+        }
+
+        var body: [String: String] = [
+            "action": "perform",
+            "notificationKey": notificationKey,
+            "actionId": actionId
+        ]
+        if let replyText {
+            body["replyText"] = replyText
+        }
+
+        guard let bodyData = try? JSONSerialization.data(withJSONObject: body) else {
+            return .failure("Could not encode Android notification action.", isRetryable: false)
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 5
+        request.setValue(token, forHTTPHeaderField: "X-ZevClip-Token")
+        request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
+        applyMacBatteryHeaders(to: &request)
+        request.httpBody = bodyData
+
+        do {
+            let (responseBody, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                return .failure("Android notification action returned an invalid response.", isRetryable: true)
+            }
+
+            guard httpResponse.statusCode == 200 else {
+                let bodyText = String(data: responseBody, encoding: .utf8)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let detail = bodyText?.isEmpty == false ? " \(bodyText!)" : ""
+                return .failure(
+                    "Android notification action failed (\(httpResponse.statusCode)).\(detail)",
+                    isRetryable: isRetryableStatusCode(httpResponse.statusCode)
+                )
+            }
+
+            return .success(confirmedDeviceId: httpResponse.value(forHTTPHeaderField: Self.androidDeviceIDHeader))
+        } catch {
+            return .failure(
+                "Could not perform Android notification action: \(error.localizedDescription)",
                 isRetryable: true
             )
         }

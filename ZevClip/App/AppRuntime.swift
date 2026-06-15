@@ -62,6 +62,16 @@ final class ZevClipRuntime {
                 self?.androidClipboardSender.dismissAndroidNotification(notificationKey: notificationKey)
             }
         }
+        MacNotificationPresenter.shared.onNotificationAction = { [weak self] notificationKey, actionId, replyText, completion in
+            Task { @MainActor in
+                self?.androidClipboardSender.performAndroidNotificationAction(
+                    notificationKey: notificationKey,
+                    actionId: actionId,
+                    replyText: replyText,
+                    completion: completion
+                )
+            }
+        }
         MacNotificationPresenter.shared.onCallAction = { [weak self] action, callId, completion in
             Task { @MainActor in
                 self?.androidClipboardSender.sendAndroidCallAction(

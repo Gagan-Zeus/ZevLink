@@ -2,7 +2,8 @@
 set -euo pipefail
 
 MODE="${1:-run}"
-APP_NAME="ZevClip"
+SCHEME_NAME="ZevClip"
+APP_NAME="ZevLink"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="$ROOT_DIR/build"
@@ -13,7 +14,7 @@ pkill -x "$APP_NAME" >/dev/null 2>&1 || true
 
 xcodebuild \
   -project "$ROOT_DIR/ZevClip.xcodeproj" \
-  -scheme "$APP_NAME" \
+  -scheme "$SCHEME_NAME" \
   -configuration Debug \
   -derivedDataPath "$BUILD_DIR" \
   CODE_SIGNING_ALLOWED=NO \
