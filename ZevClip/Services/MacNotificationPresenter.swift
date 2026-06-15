@@ -12,6 +12,7 @@ struct AndroidMirroredNotification: Decodable {
     let actions: [AndroidMirroredNotificationAction]?
     let notificationKey: String?
     let postedAtMillis: Int64?
+    let isMediaNotification: Bool?
 
     var displayTitle: String {
         let trimmedTitle = title?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -27,6 +28,10 @@ struct AndroidMirroredNotification: Decodable {
 
     var isRemoval: Bool {
         event == "removed"
+    }
+
+    var isMediaPinnedNotification: Bool {
+        isMediaNotification == true
     }
 
     var macNotificationIdentifier: String {
@@ -181,6 +186,10 @@ final class MacNotificationPresenter: NSObject, UNUserNotificationCenterDelegate
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.remember(notification)
+            if notification.isMediaPinnedNotification {
+                self.hideVisiblePanel(for: notification)
+                return
+            }
             self.showNotificationPanel(notification)
         }
     }
@@ -294,6 +303,20 @@ final class MacNotificationPresenter: NSObject, UNUserNotificationCenterDelegate
         NSSound(named: "Glass")?.play()
     }
 
+    private func hideVisiblePanel(for notification: AndroidMirroredNotification) {
+        let matchingPanelIds = notificationPanelOrder.filter { panelId in
+            activeNotificationPanels[panelId]?.matches(notification) == true
+        }
+        matchingPanelIds.forEach { panelId in
+            activeNotificationPanels[panelId]?.close()
+            activeNotificationPanels[panelId] = nil
+        }
+        notificationPanelOrder.removeAll { matchingPanelIds.contains($0) }
+        if !matchingPanelIds.isEmpty {
+            repositionNotificationPanels()
+        }
+    }
+
     private func remember(_ notification: AndroidMirroredNotification) {
         guard !notification.isRemoval else { return }
 
@@ -344,9 +367,12 @@ final class MacNotificationPresenter: NSObject, UNUserNotificationCenterDelegate
     }
 
     private func retainedNotificationItems() -> [RetainedAndroidNotification] {
-        retainedNotificationOrder
+        let items = retainedNotificationOrder
             .reversed()
             .compactMap { retainedNotifications[$0] }
+        let mediaItems = items.filter { $0.notification.isMediaPinnedNotification }
+        let otherItems = items.filter { !$0.notification.isMediaPinnedNotification }
+        return mediaItems + otherItems
     }
 
     private func showNotificationShade() {
@@ -865,6 +891,7 @@ private final class AndroidNotificationPanelController: NSObject {
     private var packageName = ""
     private var coalescingTitle = ""
     private var notificationActions: [AndroidMirroredNotificationAction] = []
+    private var isMediaNotification = false
     private var detectedOTPCode: String?
     private var activeReplyAction: AndroidMirroredNotificationAction?
     private var replyKeyMonitor: Any?
@@ -1005,6 +1032,7 @@ private final class AndroidNotificationPanelController: NSObject {
             notificationKeys.insert(incomingKey)
         }
         packageName = notification.packageName
+        isMediaNotification = notification.isMediaPinnedNotification
         fullTitle = Self.singleLine(notification.displayTitle)
         coalescingTitle = fullTitle
         fullBody = Self.singleLine(notification.displayBody)
@@ -1460,7 +1488,7 @@ private final class AndroidNotificationPanelController: NSObject {
         onAction(notificationKey, action.id, nil) { [weak self, weak sender] success, _ in
             DispatchQueue.main.async {
                 sender?.isEnabled = true
-                if success {
+                if success && self?.isMediaNotification != true {
                     self?.close()
                 }
             }

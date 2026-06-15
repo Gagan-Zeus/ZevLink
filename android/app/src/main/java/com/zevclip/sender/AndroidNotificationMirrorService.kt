@@ -26,6 +26,7 @@ class AndroidNotificationMirrorService : NotificationListenerService() {
             isConnected = true,
             status = "Notification mirroring connected."
         )
+        mirrorActiveMediaNotifications()
         Log.i(TAG, "Notification mirror listener connected")
     }
 
@@ -88,7 +89,8 @@ class AndroidNotificationMirrorService : NotificationListenerService() {
         if (notification.flags and Notification.FLAG_GROUP_SUMMARY != 0) {
             return null
         }
-        if (notification.flags and Notification.FLAG_ONGOING_EVENT != 0) {
+        val isMediaNotification = isMediaNotification(notification)
+        if (notification.flags and Notification.FLAG_ONGOING_EVENT != 0 && !isMediaNotification) {
             return null
         }
 
@@ -117,7 +119,8 @@ class AndroidNotificationMirrorService : NotificationListenerService() {
             subtext = subtext.takeUnless { it.isNullOrBlank() },
             actions = mirroredActionsFor(notification, sbn.key),
             notificationKey = sbn.key,
-            postedAtMillis = sbn.postTime
+            postedAtMillis = sbn.postTime,
+            isMediaNotification = isMediaNotification
         )
     }
 
@@ -135,6 +138,30 @@ class AndroidNotificationMirrorService : NotificationListenerService() {
             notificationKey = from.key,
             postedAtMillis = from.postTime
         )
+    }
+
+    private fun mirrorActiveMediaNotifications() {
+        if (!ZevClipPreferences.isClipboardSyncEnabled(this)) {
+            return
+        }
+
+        activeNotifications
+            ?.asSequence()
+            ?.mapNotNull { sbn ->
+                val notification = sbn.notification ?: return@mapNotNull null
+                if (!isMediaNotification(notification)) {
+                    return@mapNotNull null
+                }
+                postedPayload(from = sbn)?.let { payload -> payload to sbn }
+            }
+            ?.filterNot { (payload, sbn) -> shouldSkip(payload, sbn) }
+            ?.forEach { (payload, _) -> send(payload) }
+    }
+
+    private fun isMediaNotification(notification: Notification): Boolean {
+        return notification.category == Notification.CATEGORY_TRANSPORT ||
+            notification.extras.containsKey(Notification.EXTRA_MEDIA_SESSION) ||
+            notification.extras.containsKey("android.mediaSession")
     }
 
     private fun send(payload: AndroidNotificationMirrorPayload) {
@@ -165,7 +192,15 @@ class AndroidNotificationMirrorService : NotificationListenerService() {
                 payload.packageName,
                 payload.title.orEmpty(),
                 payload.body.orEmpty(),
-                payload.subtext.orEmpty()
+                payload.subtext.orEmpty(),
+                payload.actions.joinToString(separator = ",") { action ->
+                    listOf(
+                        action.id,
+                        action.title,
+                        action.requiresTextInput.toString(),
+                        action.inputLabel.orEmpty()
+                    ).joinToString(separator = ":")
+                }
             ).joinToString("|")
         )
         val now = System.currentTimeMillis()
