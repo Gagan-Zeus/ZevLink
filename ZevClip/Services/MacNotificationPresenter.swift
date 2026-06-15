@@ -14,6 +14,10 @@ struct AndroidMirroredNotification: Decodable {
     let notificationKey: String?
     let postedAtMillis: Int64?
     let isMediaNotification: Bool?
+    let mediaDurationMillis: Int64?
+    let mediaPositionMillis: Int64?
+    let mediaIsPlaying: Bool?
+    let mediaCanSeek: Bool?
 
     var displayTitle: String {
         let trimmedTitle = title?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -880,7 +884,12 @@ private final class AndroidNotificationPanelController: NSObject {
     private let bodyLabel = NSTextField(labelWithString: "")
     private let expandButton = NotificationActionButton(title: "", target: nil, action: nil)
     private let actionContainerView = NSView()
+    private let actionContentStack = NSStackView()
+    private let mediaTimelineStack = NSStackView()
+    private let mediaElapsedLabel = NSTextField(labelWithString: "0:00")
     private let actionStack = NSStackView()
+    private let mediaTimelineSlider = NSSlider(value: 0, minValue: 0, maxValue: 1, target: nil, action: nil)
+    private let mediaDurationLabel = NSTextField(labelWithString: "0:00")
     private let replyComposerView = NSStackView()
     private let replyBackButton = NotificationActionButton(title: "", target: nil, action: nil)
     private let replyFieldContainer = NSView()
@@ -899,10 +908,17 @@ private final class AndroidNotificationPanelController: NSObject {
     private var coalescingTitle = ""
     private var notificationActions: [AndroidMirroredNotificationAction] = []
     private var isMediaNotification = false
+    private var mediaDurationMillis: Int64?
+    private var mediaPositionMillis: Int64?
+    private var mediaPositionUpdatedAt: Date?
+    private var mediaIsPlaying = false
+    private var mediaCanSeek = false
+    private var isUpdatingMediaTimelineSlider = false
     private var detectedOTPCode: String?
     private var activeReplyAction: AndroidMirroredNotificationAction?
     private var replyKeyMonitor: Any?
     private var autoCloseTimer: Timer?
+    private var mediaTimelineTimer: Timer?
     private var isClosing = false
     private var isExpanded = false
     private var isHovering = false
@@ -918,12 +934,16 @@ private final class AndroidNotificationPanelController: NSObject {
     private var actionBelowTextConstraint: NSLayoutConstraint?
     private var actionContainerHeightConstraint: NSLayoutConstraint?
     private var replyCursorLeadingConstraint: NSLayoutConstraint?
+    private var mediaTimelineWidthConstraint: NSLayoutConstraint?
+    private var mediaTimelineHeightConstraint: NSLayoutConstraint?
     private weak var trackingContentView: HoverTrackingView?
     private var replyCursorBlinkTimer: Timer?
     private static let textColumnWidth: CGFloat = 240
     private static let collapsedHeight: CGFloat = 72
     private static let hoverActionsHeight: CGFloat = 106
     private static let actionRowHeight: CGFloat = 32
+    private static let mediaTimelineRowHeight: CGFloat = 20
+    private static let mediaTimelineSpacing: CGFloat = 4
     private static let expandedBodyLineLimit = 4
     private static let expandedMaxHeight: CGFloat = 210
     private static let expandedMinHeight: CGFloat = 80
@@ -931,6 +951,7 @@ private final class AndroidNotificationPanelController: NSObject {
     private static let unhoverVisibleDuration: TimeInterval = 3
     private static let hoverAnimationDuration: TimeInterval = 0.32
     private static let copyOTPActionId = "zevlink.copy-otp-code"
+    private static let mediaSeekActionId = "zevlink.media-seek-to"
 
     init(
         notification: AndroidMirroredNotification,
@@ -981,6 +1002,8 @@ private final class AndroidNotificationPanelController: NSObject {
 
     func show(atTopY topY: CGFloat) {
         move(toTopY: topY)
+        updateMediaTimelineSlider()
+        updateMediaTimelineTimer()
         panel.orderFrontRegardless()
         if shouldAutoClose {
             restartAutoCloseTimer(after: Self.defaultVisibleDuration)
@@ -996,6 +1019,8 @@ private final class AndroidNotificationPanelController: NSObject {
     }
 
     func refreshVisibility() {
+        updateMediaTimelineSlider()
+        updateMediaTimelineTimer()
         panel.orderFrontRegardless()
         if shouldAutoClose && !isHovering && activeReplyAction == nil {
             restartAutoCloseTimer(after: Self.defaultVisibleDuration)
@@ -1026,6 +1051,7 @@ private final class AndroidNotificationPanelController: NSObject {
         guard !isClosing else { return }
         isClosing = true
         autoCloseTimer?.invalidate()
+        stopMediaTimelineTimer()
         stopInlineReplyKeyCapture()
         stopReplyCursorBlink()
         panel.close()
@@ -1040,6 +1066,24 @@ private final class AndroidNotificationPanelController: NSObject {
         }
         packageName = notification.packageName
         isMediaNotification = notification.isMediaPinnedNotification
+        if
+            let duration = notification.mediaDurationMillis,
+            duration > 0,
+            let position = notification.mediaPositionMillis,
+            position >= 0
+        {
+            mediaDurationMillis = duration
+            mediaPositionMillis = min(position, duration)
+            mediaPositionUpdatedAt = Date()
+            mediaIsPlaying = notification.mediaIsPlaying == true
+            mediaCanSeek = notification.mediaCanSeek == true
+        } else {
+            mediaDurationMillis = nil
+            mediaPositionMillis = nil
+            mediaPositionUpdatedAt = nil
+            mediaIsPlaying = false
+            mediaCanSeek = false
+        }
         fullTitle = Self.singleLine(notification.displayTitle)
         coalescingTitle = fullTitle
         fullBody = Self.singleLine(notification.displayBody)
@@ -1061,6 +1105,8 @@ private final class AndroidNotificationPanelController: NSObject {
             stopReplyCursorBlink()
         }
         rebuildActionButtons()
+        updateMediaTimelineSlider()
+        updateMediaTimelineTimer()
         hasLongContent = Self.requiresExpansion(
             title: fullTitle,
             body: fullBody,
@@ -1147,6 +1193,47 @@ private final class AndroidNotificationPanelController: NSObject {
         actionStack.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
         actionStack.translatesAutoresizingMaskIntoConstraints = false
 
+        actionContentStack.orientation = .vertical
+        actionContentStack.alignment = .leading
+        actionContentStack.spacing = Self.mediaTimelineSpacing
+        actionContentStack.isHidden = true
+        actionContentStack.alphaValue = 0
+        actionContentStack.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        actionContentStack.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+        actionContentStack.translatesAutoresizingMaskIntoConstraints = false
+
+        mediaTimelineStack.orientation = .horizontal
+        mediaTimelineStack.alignment = .centerY
+        mediaTimelineStack.spacing = 8
+        mediaTimelineStack.translatesAutoresizingMaskIntoConstraints = false
+
+        [mediaElapsedLabel, mediaDurationLabel].forEach { label in
+            label.font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+            label.textColor = .secondaryLabelColor
+            label.lineBreakMode = .byClipping
+            label.maximumNumberOfLines = 1
+            label.cell?.usesSingleLineMode = true
+            label.alignment = .center
+            label.translatesAutoresizingMaskIntoConstraints = false
+            label.widthAnchor.constraint(equalToConstant: 38).isActive = true
+        }
+
+        mediaTimelineSlider.target = self
+        mediaTimelineSlider.action = #selector(seekMediaTimeline(_:))
+        mediaTimelineSlider.isContinuous = false
+        mediaTimelineSlider.controlSize = .small
+        mediaTimelineSlider.isEnabled = false
+        mediaTimelineSlider.translatesAutoresizingMaskIntoConstraints = false
+        mediaTimelineSlider.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        mediaTimelineSlider.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        mediaTimelineStack.addArrangedSubview(mediaElapsedLabel)
+        mediaTimelineStack.addArrangedSubview(mediaTimelineSlider)
+        mediaTimelineStack.addArrangedSubview(mediaDurationLabel)
+        mediaTimelineWidthConstraint = mediaTimelineStack.widthAnchor.constraint(equalToConstant: Self.textColumnWidth)
+        mediaTimelineHeightConstraint = mediaTimelineStack.heightAnchor.constraint(equalToConstant: Self.mediaTimelineRowHeight)
+        mediaTimelineWidthConstraint?.isActive = true
+        mediaTimelineHeightConstraint?.isActive = true
+
         replyFieldContainer.wantsLayer = true
         replyFieldContainer.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.12).cgColor
         replyFieldContainer.layer?.cornerRadius = 14
@@ -1231,7 +1318,7 @@ private final class AndroidNotificationPanelController: NSObject {
         actionContainerView.isHidden = true
         actionContainerView.alphaValue = 0
         actionContainerView.translatesAutoresizingMaskIntoConstraints = false
-        actionContainerView.addSubview(actionStack)
+        actionContainerView.addSubview(actionContentStack)
         actionContainerView.addSubview(replyComposerView)
 
         let textStack = NSStackView(views: [titleLabel, bodyLabel])
@@ -1286,9 +1373,9 @@ private final class AndroidNotificationPanelController: NSObject {
             actionContainerView.bottomAnchor.constraint(lessThanOrEqualTo: contentView.bottomAnchor, constant: -6),
             actionHeight,
 
-            actionStack.leadingAnchor.constraint(equalTo: actionContainerView.leadingAnchor),
-            actionStack.trailingAnchor.constraint(lessThanOrEqualTo: actionContainerView.trailingAnchor),
-            actionStack.centerYAnchor.constraint(equalTo: actionContainerView.centerYAnchor),
+            actionContentStack.leadingAnchor.constraint(equalTo: actionContainerView.leadingAnchor),
+            actionContentStack.trailingAnchor.constraint(lessThanOrEqualTo: actionContainerView.trailingAnchor),
+            actionContentStack.centerYAnchor.constraint(equalTo: actionContainerView.centerYAnchor),
 
             replyTextField.leadingAnchor.constraint(equalTo: replyFieldContainer.leadingAnchor, constant: 12),
             replyTextField.trailingAnchor.constraint(equalTo: replyFieldContainer.trailingAnchor, constant: -10),
@@ -1365,10 +1452,11 @@ private final class AndroidNotificationPanelController: NSObject {
     }
 
     private func applyDisplayState(animated: Bool) {
-        let shouldShowActionRow = detectedOTPCode != nil || !notificationActions.isEmpty || activeReplyAction != nil
+        let shouldShowActionRow = shouldShowMediaTimeline || detectedOTPCode != nil || !notificationActions.isEmpty || activeReplyAction != nil
         let shouldFadeActionsOut = animated && !shouldShowActionRow && !actionContainerView.isHidden
         let keepsActionRowVisible = shouldShowActionRow || shouldFadeActionsOut
-        let actionOffset: CGFloat = keepsActionRowVisible ? -14 : 0
+        let actionContentHeight = currentActionContentHeight()
+        let actionOffset: CGFloat = keepsActionRowVisible ? -max(0, (actionContentHeight / 2) - 2) : 0
 
         trackingContentView?.layoutSubtreeIfNeeded()
 
@@ -1411,7 +1499,7 @@ private final class AndroidNotificationPanelController: NSObject {
         textTopConstraint?.isActive = isExpanded
         textAboveActionsConstraint?.isActive = keepsActionRowVisible
         actionBelowTextConstraint?.isActive = keepsActionRowVisible
-        actionContainerHeightConstraint?.constant = keepsActionRowVisible ? Self.actionRowHeight : 0
+        actionContainerHeightConstraint?.constant = keepsActionRowVisible ? actionContentHeight : 0
         updateExpandButton()
         animateDisplayChanges(
             height:
@@ -1420,19 +1508,32 @@ private final class AndroidNotificationPanelController: NSObject {
                     forTitle: fullTitle,
                     body: fullBody,
                     includesActions: shouldShowActionRow,
+                    actionContentHeight: actionContentHeight,
                     titleFont: titleLabel.font ?? .systemFont(ofSize: 14, weight: .semibold),
                     bodyFont: bodyLabel.font ?? .systemFont(ofSize: 13)
                 )
-                : (shouldShowActionRow ? Self.hoverActionsHeight : Self.collapsedHeight),
+                : (shouldShowActionRow ? Self.collapsedHeight + actionContentHeight + 2 : Self.collapsedHeight),
             actionsVisible: shouldShowActionRow,
             animated: animated
         )
     }
 
     private func rebuildActionButtons() {
+        actionContentStack.arrangedSubviews.forEach { view in
+            actionContentStack.removeArrangedSubview(view)
+            view.removeFromSuperview()
+        }
         actionStack.arrangedSubviews.forEach { view in
             actionStack.removeArrangedSubview(view)
             view.removeFromSuperview()
+        }
+        actionStack.spacing = 10
+
+        if shouldShowMediaTimeline {
+            mediaTimelineSlider.isEnabled = mediaCanSeek
+            mediaTimelineSlider.toolTip = mediaCanSeek ? "Seek Android media" : "Android media timeline"
+            mediaTimelineSlider.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            actionContentStack.addArrangedSubview(mediaTimelineStack)
         }
 
         if detectedOTPCode != nil {
@@ -1460,12 +1561,105 @@ private final class AndroidNotificationPanelController: NSObject {
             button.heightAnchor.constraint(equalToConstant: 24).isActive = true
             actionStack.addArrangedSubview(button)
         }
+        if detectedOTPCode != nil || !notificationActions.isEmpty {
+            actionContentStack.addArrangedSubview(actionStack)
+        }
         actionStack.isHidden = true
         actionStack.alphaValue = 0
+        actionContentStack.isHidden = true
+        actionContentStack.alphaValue = 0
         replyComposerView.isHidden = true
         replyComposerView.alphaValue = 0
         actionContainerView.isHidden = true
         actionContainerView.alphaValue = 0
+    }
+
+    private func currentActionContentHeight() -> CGFloat {
+        if activeReplyAction != nil {
+            return Self.actionRowHeight
+        }
+
+        let showsButtons = detectedOTPCode != nil || !notificationActions.isEmpty
+        switch (shouldShowMediaTimeline, showsButtons) {
+        case (true, true):
+            return Self.mediaTimelineRowHeight + Self.mediaTimelineSpacing + Self.actionRowHeight
+        case (true, false):
+            return Self.mediaTimelineRowHeight
+        case (false, true):
+            return Self.actionRowHeight
+        case (false, false):
+            return 0
+        }
+    }
+
+    private var shouldShowMediaTimeline: Bool {
+        guard isMediaNotification else { return false }
+        return (mediaDurationMillis ?? 0) > 0 && mediaPositionMillis != nil
+    }
+
+    private func updateMediaTimelineSlider() {
+        guard shouldShowMediaTimeline, let duration = mediaDurationMillis else { return }
+        let position = currentMediaPositionMillis()
+        isUpdatingMediaTimelineSlider = true
+        mediaTimelineSlider.minValue = 0
+        mediaTimelineSlider.maxValue = Double(duration)
+        mediaTimelineSlider.doubleValue = Double(position)
+        mediaTimelineSlider.isEnabled = mediaCanSeek
+        mediaElapsedLabel.stringValue = Self.formattedMediaTime(position)
+        mediaDurationLabel.stringValue = Self.formattedMediaTime(duration)
+        isUpdatingMediaTimelineSlider = false
+    }
+
+    private func updateMediaTimelineTimer() {
+        guard shouldShowMediaTimeline, mediaIsPlaying else {
+            stopMediaTimelineTimer()
+            return
+        }
+
+        guard mediaTimelineTimer == nil else { return }
+
+        let timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            self.updateMediaTimelineSlider()
+            if let duration = self.mediaDurationMillis,
+               self.currentMediaPositionMillis() >= duration {
+                self.stopMediaTimelineTimer()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        mediaTimelineTimer = timer
+    }
+
+    private func stopMediaTimelineTimer() {
+        mediaTimelineTimer?.invalidate()
+        mediaTimelineTimer = nil
+    }
+
+    private func currentMediaPositionMillis() -> Int64 {
+        guard let basePosition = mediaPositionMillis else { return 0 }
+        let duration = mediaDurationMillis ?? basePosition
+        guard mediaIsPlaying, let updatedAt = mediaPositionUpdatedAt else {
+            return min(max(basePosition, 0), duration)
+        }
+
+        let elapsedMillis = Int64(Date().timeIntervalSince(updatedAt) * 1000)
+        return min(max(basePosition + elapsedMillis, 0), duration)
+    }
+
+    @objc private func seekMediaTimeline(_ sender: NSSlider) {
+        guard !isUpdatingMediaTimelineSlider, mediaCanSeek else { return }
+        guard let notificationKey, !notificationKey.isEmpty else { return }
+
+        let targetMillis = Int64(sender.doubleValue.rounded())
+        mediaPositionMillis = targetMillis
+        mediaPositionUpdatedAt = Date()
+        onAction(notificationKey, Self.mediaSeekActionId, String(targetMillis)) { [weak self] success, _ in
+            DispatchQueue.main.async {
+                if !success {
+                    self?.updateMediaTimelineSlider()
+                }
+            }
+        }
     }
 
     @objc private func performNotificationAction(_ sender: NSButton) {
@@ -1680,13 +1874,15 @@ private final class AndroidNotificationPanelController: NSObject {
 
         if actionsVisible {
             actionContainerView.isHidden = false
-            actionStack.isHidden = false
+            actionContentStack.isHidden = showsReplyComposer
+            actionStack.isHidden = showsReplyComposer
             replyComposerView.isHidden = false
             if !animated && actionContainerView.alphaValue == 0 {
                 actionContainerView.alphaValue = 1
             }
             if animated && actionContainerView.alphaValue == 0 {
                 actionContainerView.alphaValue = 0
+                actionContentStack.alphaValue = showsReplyComposer ? 0 : 1
                 actionStack.alphaValue = showsReplyComposer ? 0 : 1
                 replyComposerView.alphaValue = showsReplyComposer ? 1 : 0
             }
@@ -1694,6 +1890,7 @@ private final class AndroidNotificationPanelController: NSObject {
 
         let changes = {
             self.actionContainerView.alphaValue = actionsVisible ? 1 : 0
+            self.actionContentStack.alphaValue = actionsVisible && !showsReplyComposer ? 1 : 0
             self.actionStack.alphaValue = actionsVisible && !showsReplyComposer ? 1 : 0
             self.replyComposerView.alphaValue = actionsVisible && showsReplyComposer ? 1 : 0
             self.panel.setFrame(newFrame, display: true, animate: false)
@@ -1705,6 +1902,7 @@ private final class AndroidNotificationPanelController: NSObject {
 
         guard animated else {
             changes()
+            actionContentStack.isHidden = !actionsVisible || showsReplyComposer
             actionStack.isHidden = !actionsVisible || showsReplyComposer
             replyComposerView.isHidden = !actionsVisible || !showsReplyComposer
             actionContainerView.isHidden = !actionsVisible
@@ -1727,11 +1925,13 @@ private final class AndroidNotificationPanelController: NSObject {
             context.allowsImplicitAnimation = true
             context.timingFunction = CAMediaTimingFunction(name: actionsVisible ? .easeOut : .easeIn)
             self.actionContainerView.animator().alphaValue = actionsVisible ? 1 : 0
+            self.actionContentStack.animator().alphaValue = actionsVisible && !showsReplyComposer ? 1 : 0
             self.actionStack.animator().alphaValue = actionsVisible && !showsReplyComposer ? 1 : 0
             self.replyComposerView.animator().alphaValue = actionsVisible && showsReplyComposer ? 1 : 0
         } completionHandler: { [weak self] in
             guard let self else { return }
             if !actionsVisible {
+                self.actionContentStack.isHidden = true
                 self.actionStack.isHidden = true
                 self.replyComposerView.isHidden = true
                 self.actionContainerView.isHidden = true
@@ -1745,6 +1945,7 @@ private final class AndroidNotificationPanelController: NSObject {
                     self.onLayoutChange()
                 }
             } else {
+                self.actionContentStack.isHidden = showsReplyComposer
                 self.actionStack.isHidden = showsReplyComposer
                 self.replyComposerView.isHidden = !showsReplyComposer
             }
@@ -1840,6 +2041,19 @@ private final class AndroidNotificationPanelController: NSObject {
         (text as NSString).size(withAttributes: [.font: font]).width
     }
 
+    private static func formattedMediaTime(_ milliseconds: Int64) -> String {
+        let totalSeconds = max(0, milliseconds / 1000)
+        let hours = totalSeconds / 3600
+        let minutes = (totalSeconds % 3600) / 60
+        let seconds = totalSeconds % 60
+
+        if hours > 0 {
+            return String(format: "%lld:%02lld:%02lld", hours, minutes, seconds)
+        }
+
+        return String(format: "%lld:%02lld", minutes, seconds)
+    }
+
     private static func placeholderString(_ text: String) -> NSAttributedString {
         NSAttributedString(
             string: text,
@@ -1863,6 +2077,7 @@ private final class AndroidNotificationPanelController: NSObject {
         forTitle title: String,
         body: String,
         includesActions: Bool,
+        actionContentHeight: CGFloat,
         titleFont: NSFont,
         bodyFont: NSFont
     ) -> CGFloat {
@@ -1884,7 +2099,7 @@ private final class AndroidNotificationPanelController: NSObject {
         let topPadding: CGFloat = 18
         let bottomPadding: CGFloat = includesActions ? 6 : 0
         let titleBodySpacing: CGFloat = 1
-        let actionHeight: CGFloat = includesActions ? 8 + actionRowHeight : 0
+        let actionHeight: CGFloat = includesActions ? 8 + actionContentHeight : 0
         let contentHeight = topPadding
             + max(ceil(titleRect.height), titleLineHeight)
             + titleBodySpacing

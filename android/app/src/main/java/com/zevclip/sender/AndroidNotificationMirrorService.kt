@@ -3,8 +3,13 @@ package com.zevclip.sender
 import android.app.PendingIntent
 import android.app.Notification
 import android.app.RemoteInput
+import android.media.MediaMetadata
+import android.media.session.MediaController
+import android.media.session.MediaSession
+import android.media.session.PlaybackState
 import android.content.Intent
 import android.os.Bundle
+import android.os.SystemClock
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
@@ -17,6 +22,7 @@ class AndroidNotificationMirrorService : NotificationListenerService() {
     }
     private val lastSentByKey = mutableMapOf<String, SentNotification>()
     private val actionIntentsByNotificationKey = mutableMapOf<String, MutableMap<String, MirroredActionIntent>>()
+    private val mediaSessionTokensByNotificationKey = mutableMapOf<String, MediaSession.Token>()
 
     override fun onListenerConnected() {
         super.onListenerConnected()
@@ -100,6 +106,11 @@ class AndroidNotificationMirrorService : NotificationListenerService() {
         val bigText = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()?.trim()
         val subtext = extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString()?.trim()
         val appName = appNameForPackage(sbn.packageName)
+        val mediaController = if (isMediaNotification) mediaControllerFor(notification) else null
+        val mediaTimeline = mediaController?.timeline()
+        if (isMediaNotification && mediaController != null) {
+            mediaSessionTokensByNotificationKey[sbn.key] = mediaController.sessionToken
+        }
 
         if (title.isNullOrBlank() && text.isNullOrBlank() && bigText.isNullOrBlank()) {
             return null
@@ -121,12 +132,17 @@ class AndroidNotificationMirrorService : NotificationListenerService() {
             actions = mirroredActionsFor(notification, sbn.key),
             notificationKey = sbn.key,
             postedAtMillis = sbn.postTime,
-            isMediaNotification = isMediaNotification
+            isMediaNotification = isMediaNotification,
+            mediaDurationMillis = mediaTimeline?.durationMillis,
+            mediaPositionMillis = mediaTimeline?.positionMillis,
+            mediaIsPlaying = mediaTimeline?.isPlaying,
+            mediaCanSeek = mediaTimeline?.canSeek == true
         )
     }
 
     private fun removedPayload(from: StatusBarNotification): AndroidNotificationMirrorPayload {
         actionIntentsByNotificationKey.remove(from.key)
+        mediaSessionTokensByNotificationKey.remove(from.key)
         return AndroidNotificationMirrorPayload(
             event = EVENT_REMOVED,
             appName = appNameForPackage(from.packageName),
@@ -165,6 +181,47 @@ class AndroidNotificationMirrorService : NotificationListenerService() {
             notification.extras.containsKey("android.mediaSession")
     }
 
+    @Suppress("DEPRECATION")
+    private fun mediaControllerFor(notification: Notification): MediaController? {
+        val token = notification.extras.getParcelable<MediaSession.Token>(Notification.EXTRA_MEDIA_SESSION)
+            ?: notification.extras.getParcelable("android.mediaSession")
+        if (token != null) {
+            return MediaController(this, token)
+        }
+
+        return AndroidNowPlayingReader.activeController(this)
+    }
+
+    private fun MediaController.timeline(): MediaTimeline? {
+        val durationMillis = metadata
+            ?.getLong(MediaMetadata.METADATA_KEY_DURATION)
+            ?.takeIf { it > 0 }
+            ?: return null
+        val state = playbackState ?: return null
+        val positionMillis = state.currentPositionMillis().coerceIn(0L, durationMillis)
+        val isPlaying = state.state == PlaybackState.STATE_PLAYING ||
+            state.state == PlaybackState.STATE_BUFFERING ||
+            state.state == PlaybackState.STATE_CONNECTING
+        val canSeek = state.actions and PlaybackState.ACTION_SEEK_TO != 0L
+
+        return MediaTimeline(
+            durationMillis = durationMillis,
+            positionMillis = positionMillis,
+            isPlaying = isPlaying,
+            canSeek = canSeek
+        )
+    }
+
+    private fun PlaybackState.currentPositionMillis(): Long {
+        val basePosition = position.takeIf { it >= 0 } ?: return 0L
+        if (state != PlaybackState.STATE_PLAYING || playbackSpeed <= 0f) {
+            return basePosition
+        }
+
+        val elapsed = SystemClock.elapsedRealtime() - lastPositionUpdateTime
+        return basePosition + (elapsed * playbackSpeed).toLong()
+    }
+
     private fun send(payload: AndroidNotificationMirrorPayload) {
         networkExecutor.execute {
             val result = AndroidNotificationMirrorSender.sendSavedEndpoint(this, payload)
@@ -195,6 +252,10 @@ class AndroidNotificationMirrorService : NotificationListenerService() {
                 payload.body.orEmpty(),
                 payload.subtext.orEmpty(),
                 payload.notificationImagePngBase64.orEmpty(),
+                payload.mediaDurationMillis?.toString().orEmpty(),
+                payload.mediaPositionMillis?.toString().orEmpty(),
+                payload.mediaIsPlaying?.toString().orEmpty(),
+                payload.mediaCanSeek.toString(),
                 payload.actions.joinToString(separator = ",") { action ->
                     listOf(
                         action.id,
@@ -273,6 +334,10 @@ class AndroidNotificationMirrorService : NotificationListenerService() {
         actionId: String,
         replyText: String?
     ): Boolean {
+        if (actionId == MEDIA_SEEK_ACTION_ID) {
+            return seekMirroredMediaNotification(notificationKey, replyText)
+        }
+
         val action = actionIntentsByNotificationKey[notificationKey]?.get(actionId) ?: return false
         return try {
             val fillInIntent = if (replyText != null && action.remoteInputs.isNotEmpty()) {
@@ -296,6 +361,25 @@ class AndroidNotificationMirrorService : NotificationListenerService() {
             false
         } catch (error: RuntimeException) {
             Log.w(TAG, "Could not perform Android notification action", error)
+            false
+        }
+    }
+
+    private fun seekMirroredMediaNotification(
+        notificationKey: String,
+        positionText: String?
+    ): Boolean {
+        val positionMillis = positionText?.trim()?.toLongOrNull() ?: return false
+        val token = mediaSessionTokensByNotificationKey[notificationKey]
+        val controller = token?.let { MediaController(this, it) }
+            ?: AndroidNowPlayingReader.activeController(this)
+            ?: return false
+
+        return try {
+            controller.transportControls.seekTo(positionMillis.coerceAtLeast(0L))
+            true
+        } catch (error: RuntimeException) {
+            Log.w(TAG, "Could not seek Android media notification", error)
             false
         }
     }
@@ -367,8 +451,16 @@ class AndroidNotificationMirrorService : NotificationListenerService() {
         val remoteInputs: Array<RemoteInput>
     )
 
+    private data class MediaTimeline(
+        val durationMillis: Long,
+        val positionMillis: Long,
+        val isPlaying: Boolean,
+        val canSeek: Boolean
+    )
+
     companion object {
         private const val TAG = "ZevClipNotifyMirror"
+        private const val MEDIA_SEEK_ACTION_ID = "zevlink.media-seek-to"
         private const val DUPLICATE_WINDOW_MS = 30_000L
         private const val MAX_TRACKED_NOTIFICATIONS = 100
         private const val RECENT_SMS_NOTIFICATION_WINDOW_MS = 20_000L

@@ -22,7 +22,11 @@ data class AndroidNotificationMirrorPayload(
     val actions: List<AndroidNotificationMirrorAction>,
     val notificationKey: String?,
     val postedAtMillis: Long,
-    val isMediaNotification: Boolean = false
+    val isMediaNotification: Boolean = false,
+    val mediaDurationMillis: Long? = null,
+    val mediaPositionMillis: Long? = null,
+    val mediaIsPlaying: Boolean? = null,
+    val mediaCanSeek: Boolean = false
 ) {
     fun toJsonBytes(): ByteArray {
         val actionArray = JSONArray()
@@ -49,6 +53,12 @@ data class AndroidNotificationMirrorPayload(
             .put("notificationKey", notificationKey)
             .put("postedAtMillis", postedAtMillis)
             .put("isMediaNotification", isMediaNotification)
+            .apply {
+                mediaDurationMillis?.let { put("mediaDurationMillis", it) }
+                mediaPositionMillis?.let { put("mediaPositionMillis", it) }
+                mediaIsPlaying?.let { put("mediaIsPlaying", it) }
+                put("mediaCanSeek", mediaCanSeek)
+            }
             .toString()
             .toByteArray(Charsets.UTF_8)
     }
