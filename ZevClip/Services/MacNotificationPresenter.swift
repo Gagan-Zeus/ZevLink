@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 import UserNotifications
 
 struct AndroidMirroredNotification: Decodable {
@@ -883,16 +884,13 @@ private final class AndroidNotificationShadeStackController {
 private final class AndroidNotificationPanelController: NSObject {
     private let panel: NotificationInteractionPanel
     private let iconView = NSImageView()
-    private let titleLabel = NSTextField(labelWithString: "")
-    private let bodyLabel = NSTextField(labelWithString: "")
+    private let titleLabel = MarqueeTextField(labelWithString: "")
+    private let bodyLabel = MarqueeTextField(labelWithString: "")
     private let expandButton = NotificationActionButton(title: "", target: nil, action: nil)
     private let actionContainerView = NSView()
     private let actionContentStack = NSStackView()
-    private let mediaTimelineStack = NSStackView()
-    private let mediaElapsedLabel = NSTextField(labelWithString: "0:00")
+    private let mediaTimelineView = MediaTimelineControl()
     private let actionStack = NSStackView()
-    private let mediaTimelineSlider = NSSlider(value: 0, minValue: 0, maxValue: 1, target: nil, action: nil)
-    private let mediaDurationLabel = NSTextField(labelWithString: "0:00")
     private let replyComposerView = NSStackView()
     private let replyBackButton = NotificationActionButton(title: "", target: nil, action: nil)
     private let replyFieldContainer = NSView()
@@ -931,22 +929,33 @@ private final class AndroidNotificationPanelController: NSObject {
     private var fullBody = ""
     private var iconCenterYConstraint: NSLayoutConstraint?
     private var iconTopConstraint: NSLayoutConstraint?
+    private var iconWidthConstraint: NSLayoutConstraint?
+    private var iconHeightConstraint: NSLayoutConstraint?
     private var textCenterYConstraint: NSLayoutConstraint?
     private var textTopConstraint: NSLayoutConstraint?
+    private var textStackWidthConstraint: NSLayoutConstraint?
+    private var textTrailingToExpandConstraint: NSLayoutConstraint?
+    private var textTrailingToContentConstraint: NSLayoutConstraint?
     private var textAboveActionsConstraint: NSLayoutConstraint?
     private var actionBelowTextConstraint: NSLayoutConstraint?
     private var actionContainerHeightConstraint: NSLayoutConstraint?
     private var replyCursorLeadingConstraint: NSLayoutConstraint?
+    private var actionStackWidthConstraint: NSLayoutConstraint?
     private var mediaTimelineWidthConstraint: NSLayoutConstraint?
     private var mediaTimelineHeightConstraint: NSLayoutConstraint?
     private weak var trackingContentView: HoverTrackingView?
     private var replyCursorBlinkTimer: Timer?
     private static let textColumnWidth: CGFloat = 240
+    private static let mediaTextColumnWidth: CGFloat = 186
+    private static let regularIconSize: CGFloat = 40
+    private static let mediaIconSize: CGFloat = 120
     private static let collapsedHeight: CGFloat = 72
+    private static let mediaCollapsedHeight: CGFloat = 154
     private static let hoverActionsHeight: CGFloat = 106
     private static let actionRowHeight: CGFloat = 32
-    private static let mediaTimelineRowHeight: CGFloat = 20
-    private static let mediaTimelineSpacing: CGFloat = 4
+    private static let mediaActionRowHeight: CGFloat = 38
+    private static let mediaTimelineRowHeight: CGFloat = 30
+    private static let mediaTimelineSpacing: CGFloat = 5
     private static let expandedBodyLineLimit = 4
     private static let expandedMaxHeight: CGFloat = 210
     private static let expandedMinHeight: CGFloat = 80
@@ -1065,6 +1074,8 @@ private final class AndroidNotificationPanelController: NSObject {
         isClosing = true
         autoCloseTimer?.invalidate()
         stopMediaTimelineTimer()
+        titleLabel.setMarqueeActive(false)
+        bodyLabel.setMarqueeActive(false)
         stopInlineReplyKeyCapture()
         stopReplyCursorBlink()
         panel.close()
@@ -1124,6 +1135,7 @@ private final class AndroidNotificationPanelController: NSObject {
         rebuildActionButtons()
         updateMediaTimelineSlider()
         updateMediaTimelineTimer()
+        updateMediaMarqueeState()
         hasLongContent = Self.requiresExpansion(
             title: fullTitle,
             body: fullBody,
@@ -1209,6 +1221,7 @@ private final class AndroidNotificationPanelController: NSObject {
         actionStack.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         actionStack.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
         actionStack.translatesAutoresizingMaskIntoConstraints = false
+        actionStackWidthConstraint = actionStack.widthAnchor.constraint(equalToConstant: Self.textColumnWidth)
 
         actionContentStack.orientation = .vertical
         actionContentStack.alignment = .leading
@@ -1219,35 +1232,14 @@ private final class AndroidNotificationPanelController: NSObject {
         actionContentStack.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
         actionContentStack.translatesAutoresizingMaskIntoConstraints = false
 
-        mediaTimelineStack.orientation = .horizontal
-        mediaTimelineStack.alignment = .centerY
-        mediaTimelineStack.spacing = 8
-        mediaTimelineStack.translatesAutoresizingMaskIntoConstraints = false
-
-        [mediaElapsedLabel, mediaDurationLabel].forEach { label in
-            label.font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
-            label.textColor = .secondaryLabelColor
-            label.lineBreakMode = .byClipping
-            label.maximumNumberOfLines = 1
-            label.cell?.usesSingleLineMode = true
-            label.alignment = .center
-            label.translatesAutoresizingMaskIntoConstraints = false
-            label.widthAnchor.constraint(equalToConstant: 38).isActive = true
-        }
-
-        mediaTimelineSlider.target = self
-        mediaTimelineSlider.action = #selector(seekMediaTimeline(_:))
-        mediaTimelineSlider.isContinuous = false
-        mediaTimelineSlider.controlSize = .small
-        mediaTimelineSlider.isEnabled = false
-        mediaTimelineSlider.translatesAutoresizingMaskIntoConstraints = false
-        mediaTimelineSlider.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        mediaTimelineSlider.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        mediaTimelineStack.addArrangedSubview(mediaElapsedLabel)
-        mediaTimelineStack.addArrangedSubview(mediaTimelineSlider)
-        mediaTimelineStack.addArrangedSubview(mediaDurationLabel)
-        mediaTimelineWidthConstraint = mediaTimelineStack.widthAnchor.constraint(equalToConstant: Self.textColumnWidth)
-        mediaTimelineHeightConstraint = mediaTimelineStack.heightAnchor.constraint(equalToConstant: Self.mediaTimelineRowHeight)
+        mediaTimelineView.target = self
+        mediaTimelineView.action = #selector(seekMediaTimeline(_:))
+        mediaTimelineView.isEnabled = false
+        mediaTimelineView.translatesAutoresizingMaskIntoConstraints = false
+        mediaTimelineView.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        mediaTimelineView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        mediaTimelineWidthConstraint = mediaTimelineView.widthAnchor.constraint(equalToConstant: Self.mediaTextColumnWidth)
+        mediaTimelineHeightConstraint = mediaTimelineView.heightAnchor.constraint(equalToConstant: Self.mediaTimelineRowHeight)
         mediaTimelineWidthConstraint?.isActive = true
         mediaTimelineHeightConstraint?.isActive = true
 
@@ -1352,14 +1344,24 @@ private final class AndroidNotificationPanelController: NSObject {
         let iconTop = iconView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 18)
         let textCenterY = textStack.centerYAnchor.constraint(equalTo: contentView.centerYAnchor)
         let textTop = textStack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 18)
+        let iconWidth = iconView.widthAnchor.constraint(equalToConstant: Self.regularIconSize)
+        let iconHeight = iconView.heightAnchor.constraint(equalToConstant: Self.regularIconSize)
+        let textStackWidth = textStack.widthAnchor.constraint(equalToConstant: Self.textColumnWidth)
+        let textTrailingToExpand = textStack.trailingAnchor.constraint(equalTo: expandButton.leadingAnchor, constant: -10)
+        let textTrailingToContent = textStack.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -18)
         let textAboveActions = textStack.bottomAnchor.constraint(lessThanOrEqualTo: actionContainerView.topAnchor, constant: -6)
         let actionBelowText = actionContainerView.topAnchor.constraint(equalTo: textStack.bottomAnchor, constant: 8)
         let actionHeight = actionContainerView.heightAnchor.constraint(equalToConstant: 0)
         let replyCursorLeading = replyCursorView.leadingAnchor.constraint(equalTo: replyFieldContainer.leadingAnchor, constant: 12)
         iconCenterYConstraint = iconCenterY
         iconTopConstraint = iconTop
+        iconWidthConstraint = iconWidth
+        iconHeightConstraint = iconHeight
         textCenterYConstraint = textCenterY
         textTopConstraint = textTop
+        textStackWidthConstraint = textStackWidth
+        textTrailingToExpandConstraint = textTrailingToExpand
+        textTrailingToContentConstraint = textTrailingToContent
         textAboveActionsConstraint = textAboveActions
         actionBelowTextConstraint = actionBelowText
         actionContainerHeightConstraint = actionHeight
@@ -1368,15 +1370,15 @@ private final class AndroidNotificationPanelController: NSObject {
         NSLayoutConstraint.activate([
             iconView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 14),
             iconCenterY,
-            iconView.widthAnchor.constraint(equalToConstant: 40),
-            iconView.heightAnchor.constraint(equalToConstant: 40),
+            iconWidth,
+            iconHeight,
 
             textStack.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 12),
-            textStack.trailingAnchor.constraint(equalTo: expandButton.leadingAnchor, constant: -10),
+            textTrailingToExpand,
             textCenterY,
             textStack.topAnchor.constraint(greaterThanOrEqualTo: contentView.topAnchor, constant: 14),
             textStack.bottomAnchor.constraint(lessThanOrEqualTo: contentView.bottomAnchor, constant: -4),
-            textStack.widthAnchor.constraint(equalToConstant: Self.textColumnWidth),
+            textStackWidth,
             titleLabel.widthAnchor.constraint(equalTo: textStack.widthAnchor),
             bodyLabel.widthAnchor.constraint(equalTo: textStack.widthAnchor),
 
@@ -1473,11 +1475,38 @@ private final class AndroidNotificationPanelController: NSObject {
         let shouldFadeActionsOut = animated && !shouldShowActionRow && !actionContainerView.isHidden
         let keepsActionRowVisible = shouldShowActionRow || shouldFadeActionsOut
         let actionContentHeight = currentActionContentHeight()
-        let actionOffset: CGFloat = keepsActionRowVisible ? -max(0, (actionContentHeight / 2) - 2) : 0
+        let usesTopLayout = isExpanded || isMediaNotification
+        let actionOffset: CGFloat = keepsActionRowVisible && !usesTopLayout ? -max(0, (actionContentHeight / 2) - 2) : 0
+
+        iconWidthConstraint?.constant = isMediaNotification ? Self.mediaIconSize : Self.regularIconSize
+        iconHeightConstraint?.constant = isMediaNotification ? Self.mediaIconSize : Self.regularIconSize
+        iconView.layer?.cornerRadius = isMediaNotification ? 13 : 9
+        textStackWidthConstraint?.constant = isMediaNotification ? Self.mediaTextColumnWidth : Self.textColumnWidth
+        actionStackWidthConstraint?.constant = isMediaNotification ? Self.mediaTextColumnWidth : Self.textColumnWidth
+        mediaTimelineWidthConstraint?.constant = Self.mediaTextColumnWidth
+        iconTopConstraint?.constant = isMediaNotification ? 17 : 18
+        textTopConstraint?.constant = isMediaNotification ? 20 : 18
+        actionBelowTextConstraint?.constant = isMediaNotification ? 10 : 8
+        titleLabel.font = .systemFont(ofSize: isMediaNotification ? 16 : 14, weight: .semibold)
+        bodyLabel.font = .systemFont(ofSize: isMediaNotification ? 14 : 13, weight: .medium)
+        textTrailingToExpandConstraint?.isActive = !isMediaNotification
+        textTrailingToContentConstraint?.isActive = isMediaNotification
 
         trackingContentView?.layoutSubtreeIfNeeded()
 
-        if isExpanded {
+        if isMediaNotification {
+            updateMediaMarqueeState()
+            titleLabel.stringValue = fullTitle
+            titleLabel.lineBreakMode = .byClipping
+            titleLabel.maximumNumberOfLines = 1
+            titleLabel.cell?.usesSingleLineMode = true
+            titleLabel.cell?.wraps = false
+            bodyLabel.stringValue = fullBody
+            bodyLabel.lineBreakMode = .byClipping
+            bodyLabel.maximumNumberOfLines = 1
+            bodyLabel.cell?.usesSingleLineMode = true
+            bodyLabel.cell?.wraps = false
+        } else if isExpanded {
             titleLabel.stringValue = fullTitle
             titleLabel.lineBreakMode = .byWordWrapping
             titleLabel.maximumNumberOfLines = 1
@@ -1507,13 +1536,14 @@ private final class AndroidNotificationPanelController: NSObject {
             bodyLabel.cell?.usesSingleLineMode = true
             bodyLabel.cell?.wraps = false
         }
+        updateMediaMarqueeState()
 
         iconCenterYConstraint?.constant = !isExpanded ? actionOffset : 0
         textCenterYConstraint?.constant = !isExpanded ? actionOffset : 0
-        iconCenterYConstraint?.isActive = !isExpanded
-        textCenterYConstraint?.isActive = !isExpanded
-        iconTopConstraint?.isActive = isExpanded
-        textTopConstraint?.isActive = isExpanded
+        iconCenterYConstraint?.isActive = !usesTopLayout
+        textCenterYConstraint?.isActive = !usesTopLayout
+        iconTopConstraint?.isActive = usesTopLayout
+        textTopConstraint?.isActive = usesTopLayout
         textAboveActionsConstraint?.isActive = keepsActionRowVisible
         actionBelowTextConstraint?.isActive = keepsActionRowVisible
         actionContainerHeightConstraint?.constant = keepsActionRowVisible ? actionContentHeight : 0
@@ -1529,7 +1559,9 @@ private final class AndroidNotificationPanelController: NSObject {
                     titleFont: titleLabel.font ?? .systemFont(ofSize: 14, weight: .semibold),
                     bodyFont: bodyLabel.font ?? .systemFont(ofSize: 13)
                 )
-                : (shouldShowActionRow ? Self.collapsedHeight + actionContentHeight + 2 : Self.collapsedHeight),
+                : (isMediaNotification
+                   ? Self.mediaCollapsedHeight
+                   : (shouldShowActionRow ? Self.collapsedHeight + actionContentHeight + 2 : Self.collapsedHeight)),
             actionsVisible: shouldShowActionRow,
             animated: animated
         )
@@ -1544,14 +1576,9 @@ private final class AndroidNotificationPanelController: NSObject {
             actionStack.removeArrangedSubview(view)
             view.removeFromSuperview()
         }
+        actionStackWidthConstraint?.isActive = false
         actionStack.spacing = 10
-
-        if shouldShowMediaTimeline {
-            mediaTimelineSlider.isEnabled = mediaCanSeek
-            mediaTimelineSlider.toolTip = mediaCanSeek ? "Seek Android media" : "Android media timeline"
-            mediaTimelineSlider.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-            actionContentStack.addArrangedSubview(mediaTimelineStack)
-        }
+        actionStack.distribution = .fill
 
         if detectedOTPCode != nil {
             let button = NotificationActionButton(title: "Copy code", target: self, action: #selector(performNotificationAction(_:)))
@@ -1572,13 +1599,41 @@ private final class AndroidNotificationPanelController: NSObject {
             button.controlSize = .small
             button.font = .systemFont(ofSize: 11, weight: .semibold)
             button.isEnabled = true
-            configureActionButton(button)
+            if isMediaNotification {
+                configureMediaActionButton(button, title: action.cleanTitle)
+            } else {
+                configureActionButton(button)
+            }
             button.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-            button.widthAnchor.constraint(equalToConstant: Self.actionButtonWidth(for: action.cleanTitle, font: button.font)).isActive = true
-            button.heightAnchor.constraint(equalToConstant: 24).isActive = true
+            if isMediaNotification {
+                let buttonSize = Self.mediaActionButtonSize(for: action.cleanTitle)
+                button.widthAnchor.constraint(equalToConstant: buttonSize).isActive = true
+                button.heightAnchor.constraint(equalToConstant: buttonSize).isActive = true
+            } else {
+                button.widthAnchor.constraint(equalToConstant: Self.actionButtonWidth(for: action.cleanTitle, font: button.font)).isActive = true
+                button.heightAnchor.constraint(equalToConstant: 24).isActive = true
+            }
             actionStack.addArrangedSubview(button)
         }
-        if detectedOTPCode != nil || !notificationActions.isEmpty {
+        let showsButtons = detectedOTPCode != nil || !notificationActions.isEmpty
+        if showsButtons {
+            if isMediaNotification {
+                actionStack.spacing = 0
+                actionStack.distribution = .equalSpacing
+                actionStackWidthConstraint?.isActive = true
+            }
+        }
+        if isMediaNotification {
+            if showsButtons {
+                actionContentStack.addArrangedSubview(actionStack)
+            }
+            if shouldShowMediaTimeline {
+                mediaTimelineView.isEnabled = mediaCanSeek
+                mediaTimelineView.toolTip = mediaCanSeek ? "Seek Android media" : "Android media timeline"
+                mediaTimelineView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+                actionContentStack.addArrangedSubview(mediaTimelineView)
+            }
+        } else if showsButtons {
             actionContentStack.addArrangedSubview(actionStack)
         }
         actionStack.isHidden = true
@@ -1597,13 +1652,14 @@ private final class AndroidNotificationPanelController: NSObject {
         }
 
         let showsButtons = detectedOTPCode != nil || !notificationActions.isEmpty
+        let actionRowHeight = isMediaNotification ? Self.mediaActionRowHeight : Self.actionRowHeight
         switch (shouldShowMediaTimeline, showsButtons) {
         case (true, true):
-            return Self.mediaTimelineRowHeight + Self.mediaTimelineSpacing + Self.actionRowHeight
+            return Self.mediaTimelineRowHeight + Self.mediaTimelineSpacing + actionRowHeight
         case (true, false):
             return Self.mediaTimelineRowHeight
         case (false, true):
-            return Self.actionRowHeight
+            return actionRowHeight
         case (false, false):
             return 0
         }
@@ -1618,13 +1674,19 @@ private final class AndroidNotificationPanelController: NSObject {
         guard shouldShowMediaTimeline, let duration = mediaDurationMillis else { return }
         let position = currentMediaPositionMillis()
         isUpdatingMediaTimelineSlider = true
-        mediaTimelineSlider.minValue = 0
-        mediaTimelineSlider.maxValue = Double(duration)
-        mediaTimelineSlider.doubleValue = Double(position)
-        mediaTimelineSlider.isEnabled = mediaCanSeek
-        mediaElapsedLabel.stringValue = Self.formattedMediaTime(position)
-        mediaDurationLabel.stringValue = Self.formattedMediaTime(duration)
+        mediaTimelineView.minimumValue = 0
+        mediaTimelineView.maximumValue = Double(duration)
+        mediaTimelineView.timelineValue = Double(position)
+        mediaTimelineView.isEnabled = mediaCanSeek
+        mediaTimelineView.elapsedText = Self.formattedMediaTime(position)
+        mediaTimelineView.remainingText = "-\(Self.formattedMediaTime(max(duration - position, 0)))"
         isUpdatingMediaTimelineSlider = false
+    }
+
+    private func updateMediaMarqueeState() {
+        let shouldScroll = isMediaNotification && mediaIsPlaying
+        titleLabel.setMarqueeActive(shouldScroll)
+        bodyLabel.setMarqueeActive(shouldScroll)
     }
 
     private func updateMediaTimelineTimer() {
@@ -1664,11 +1726,11 @@ private final class AndroidNotificationPanelController: NSObject {
         return min(max(compensatedPosition, 0), duration)
     }
 
-    @objc private func seekMediaTimeline(_ sender: NSSlider) {
+    @objc private func seekMediaTimeline(_ sender: MediaTimelineControl) {
         guard !isUpdatingMediaTimelineSlider, mediaCanSeek else { return }
         guard let notificationKey, !notificationKey.isEmpty else { return }
 
-        let targetMillis = Int64(sender.doubleValue.rounded())
+        let targetMillis = Int64(sender.timelineValue.rounded())
         mediaPositionMillis = targetMillis
         mediaPositionUpdatedAt = Date()
         onAction(notificationKey, Self.mediaSeekActionId, String(targetMillis)) { [weak self] success, _ in
@@ -1703,15 +1765,42 @@ private final class AndroidNotificationPanelController: NSObject {
             return
         }
 
-        sender.isEnabled = false
+        let previousMediaIsPlaying = mediaIsPlaying
+        let updatedPlaybackOptimistically = applyOptimisticMediaPlaybackState(for: action.cleanTitle)
+        if !isMediaNotification {
+            sender.isEnabled = false
+        }
         onAction(notificationKey, action.id, nil) { [weak self, weak sender] success, _ in
             DispatchQueue.main.async {
                 sender?.isEnabled = true
+                if !success, updatedPlaybackOptimistically {
+                    self?.mediaIsPlaying = previousMediaIsPlaying
+                    self?.updateMediaMarqueeState()
+                    self?.updateMediaTimelineTimer()
+                }
                 if success && self?.isMediaNotification != true {
                     self?.close()
                 }
             }
         }
+    }
+
+    private func applyOptimisticMediaPlaybackState(for title: String) -> Bool {
+        guard isMediaNotification, Self.isPrimaryMediaAction(title) else { return false }
+
+        let normalizedTitle = Self.normalizedMediaActionTitle(title)
+        if normalizedTitle.contains("pause") || normalizedTitle.contains("stop") {
+            mediaIsPlaying = false
+        } else if normalizedTitle.contains("play") || normalizedTitle.contains("resume") {
+            mediaIsPlaying = true
+            mediaPositionUpdatedAt = Date()
+        } else {
+            return false
+        }
+
+        updateMediaMarqueeState()
+        updateMediaTimelineTimer()
+        return true
     }
 
     private func copyDetectedOTPCode(from sender: NSButton) {
@@ -1861,7 +1950,7 @@ private final class AndroidNotificationPanelController: NSObject {
     }
 
     private func updateExpandButton() {
-        expandButton.isHidden = !(hasLongContent && (isHovering || isExpanded))
+        expandButton.isHidden = isMediaNotification || !(hasLongContent && (isHovering || isExpanded))
         if let symbolName = isExpanded ? "chevron.down" : "chevron.right",
            let image = Self.chevronImage(named: symbolName, accessibilityDescription: isExpanded ? "Collapse" : "Expand") {
             expandButton.image = image
@@ -1986,6 +2075,7 @@ private final class AndroidNotificationPanelController: NSObject {
     }
 
     private func configureActionButton(_ button: NSButton) {
+        (button as? NotificationActionButton)?.pressAnimationScale = 1
         button.appearance = NSAppearance(named: .darkAqua)
         button.isBordered = false
         button.wantsLayer = true
@@ -1997,6 +2087,29 @@ private final class AndroidNotificationPanelController: NSObject {
         button.alignment = .center
         button.cell?.alignment = .center
         applyReadableButtonTitle(button.title, to: button)
+    }
+
+    private func configureMediaActionButton(_ button: NSButton, title: String) {
+        (button as? NotificationActionButton)?.pressAnimationScale = Self.isPrimaryMediaAction(title) ? 0.82 : 1
+        button.appearance = NSAppearance(named: .darkAqua)
+        button.isBordered = false
+        button.wantsLayer = true
+        button.layer?.backgroundColor = NSColor.clear.cgColor
+        button.layer?.masksToBounds = false
+        button.focusRingType = .none
+        button.contentTintColor = .white
+        button.imagePosition = .imageOnly
+        button.title = ""
+        button.attributedTitle = NSAttributedString(string: "")
+        button.attributedAlternateTitle = NSAttributedString(string: "")
+        button.toolTip = title
+
+        if let symbolName = Self.mediaActionSymbolName(for: title),
+           let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: title) {
+            button.image = image.withSymbolConfiguration(.init(pointSize: Self.mediaActionSymbolPointSize(for: title), weight: .semibold))
+        } else if let image = NSImage(systemSymbolName: "ellipsis", accessibilityDescription: title) {
+            button.image = image.withSymbolConfiguration(.init(pointSize: 15, weight: .semibold))
+        }
     }
 
     private func applyReadableButtonTitle(_ title: String, to button: NSButton) {
@@ -2019,6 +2132,69 @@ private final class AndroidNotificationPanelController: NSObject {
         let font = font ?? .systemFont(ofSize: 11, weight: .semibold)
         let titleWidth = textWidth(title, font: font)
         return min(max(ceil(titleWidth) + 26, 54), 118)
+    }
+
+    private static func mediaActionButtonSize(for title: String) -> CGFloat {
+        isPrimaryMediaAction(title) ? 38 : 30
+    }
+
+    private static func mediaActionSymbolPointSize(for title: String) -> CGFloat {
+        isPrimaryMediaAction(title) ? 25 : 20
+    }
+
+    private static func isPrimaryMediaAction(_ title: String) -> Bool {
+        let normalizedTitle = normalizedMediaActionTitle(title)
+        return normalizedTitle.contains("play")
+            || normalizedTitle.contains("pause")
+            || normalizedTitle.contains("resume")
+    }
+
+    private static func mediaActionSymbolName(for title: String) -> String? {
+        let normalizedTitle = normalizedMediaActionTitle(title)
+
+        if normalizedTitle.contains("previous") || normalizedTitle.contains("rewind") {
+            return "backward.end.fill"
+        }
+        if normalizedTitle.contains("next") || normalizedTitle.contains("forward") {
+            return "forward.end.fill"
+        }
+        if normalizedTitle.contains("pause") {
+            return "pause.fill"
+        }
+        if normalizedTitle.contains("play") || normalizedTitle.contains("resume") {
+            return "play.fill"
+        }
+        if normalizedTitle.contains("stop") {
+            return "stop.fill"
+        }
+        if normalizedTitle.contains("shuffle") {
+            return "shuffle"
+        }
+        if normalizedTitle.contains("repeat") {
+            return "repeat"
+        }
+        if normalizedTitle.contains("dislike") {
+            return "hand.thumbsdown.fill"
+        }
+        if normalizedTitle.contains("like") || normalizedTitle.contains("favorite") || normalizedTitle.contains("favourite") {
+            return "star.fill"
+        }
+        if normalizedTitle.contains("mute") {
+            return "speaker.slash.fill"
+        }
+        if normalizedTitle.contains("copy") {
+            return "doc.on.doc.fill"
+        }
+
+        return nil
+    }
+
+    private static func normalizedMediaActionTitle(_ title: String) -> String {
+        title
+            .lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
     }
 
     private static func chevronImage(named symbolName: String, accessibilityDescription: String) -> NSImage? {
@@ -2308,9 +2484,240 @@ private class HoverTrackingView: NSView {
     }
 }
 
+private extension Comparable {
+    func clamped(to range: ClosedRange<Self>) -> Self {
+        min(max(self, range.lowerBound), range.upperBound)
+    }
+}
+
+private final class MarqueeTextField: NSTextField {
+    private var marqueeTimer: Timer?
+    private var marqueeOffset: CGFloat = 0
+    private var marqueeActive = false
+    private let marqueeGap: CGFloat = 36
+
+    func setMarqueeActive(_ isActive: Bool) {
+        marqueeActive = isActive
+        if isActive {
+            startMarqueeIfNeeded()
+        } else {
+            stopMarquee()
+        }
+        needsDisplay = true
+    }
+
+    override var stringValue: String {
+        didSet {
+            marqueeOffset = 0
+            if marqueeActive {
+                startMarqueeIfNeeded()
+            }
+            needsDisplay = true
+        }
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window == nil {
+            stopMarquee()
+        } else if marqueeActive {
+            startMarqueeIfNeeded()
+        }
+    }
+
+    override func layout() {
+        super.layout()
+        if marqueeActive {
+            startMarqueeIfNeeded()
+        }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let attributes = textAttributes()
+        let text = stringValue as NSString
+        let textWidth = text.size(withAttributes: attributes).width
+        guard marqueeActive, textWidth > bounds.width, bounds.width > 0 else {
+            super.draw(dirtyRect)
+            return
+        }
+
+        NSGraphicsContext.saveGraphicsState()
+        bounds.clip()
+        let y = max(0, (bounds.height - ceil(font?.pointSize ?? 13)) / 2 - 1)
+        text.draw(at: NSPoint(x: -marqueeOffset, y: y), withAttributes: attributes)
+        text.draw(at: NSPoint(x: textWidth + marqueeGap - marqueeOffset, y: y), withAttributes: attributes)
+        NSGraphicsContext.restoreGraphicsState()
+    }
+
+    private func startMarqueeIfNeeded() {
+        guard window != nil else { return }
+        guard measuredTextWidth() > bounds.width else {
+            stopMarquee(resetOffset: true)
+            return
+        }
+        guard marqueeTimer == nil else { return }
+
+        marqueeTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            let wrapWidth = self.measuredTextWidth() + self.marqueeGap
+            self.marqueeOffset = wrapWidth > 0 ? (self.marqueeOffset + 0.7).truncatingRemainder(dividingBy: wrapWidth) : 0
+            self.needsDisplay = true
+        }
+        if let marqueeTimer {
+            RunLoop.main.add(marqueeTimer, forMode: .common)
+        }
+    }
+
+    private func stopMarquee(resetOffset: Bool = true) {
+        marqueeTimer?.invalidate()
+        marqueeTimer = nil
+        if resetOffset {
+            marqueeOffset = 0
+        }
+    }
+
+    private func measuredTextWidth() -> CGFloat {
+        (stringValue as NSString).size(withAttributes: textAttributes()).width
+    }
+
+    private func textAttributes() -> [NSAttributedString.Key: Any] {
+        [
+            .font: font ?? NSFont.systemFont(ofSize: 13),
+            .foregroundColor: textColor ?? NSColor.labelColor
+        ]
+    }
+}
+
+private final class MediaTimelineControl: NSControl {
+    var minimumValue: Double = 0 { didSet { needsDisplay = true } }
+    var maximumValue: Double = 1 { didSet { needsDisplay = true } }
+    var timelineValue: Double = 0 { didSet { needsDisplay = true } }
+    var elapsedText = "0:00" { didSet { needsDisplay = true } }
+    var remainingText = "-0:00" { didSet { needsDisplay = true } }
+
+    private var trackingAreaReference: NSTrackingArea?
+    private var isHovering = false { didSet { needsDisplay = true } }
+    private var isDragging = false { didSet { needsDisplay = true } }
+
+    override var isFlipped: Bool { true }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func updateTrackingAreas() {
+        if let trackingAreaReference {
+            removeTrackingArea(trackingAreaReference)
+        }
+        let trackingArea = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(trackingArea)
+        trackingAreaReference = trackingArea
+        super.updateTrackingAreas()
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovering = true
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovering = false
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard isEnabled else { return }
+        isDragging = true
+        updateValue(from: event)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard isEnabled else { return }
+        updateValue(from: event)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard isEnabled else { return }
+        updateValue(from: event)
+        isDragging = false
+        sendAction(action, to: target)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+
+        let barHeight: CGFloat = 5
+        let barY: CGFloat = 6
+        let barRect = NSRect(x: 0, y: barY, width: bounds.width, height: barHeight)
+        let progress = CGFloat((timelineValue - minimumValue) / max(maximumValue - minimumValue, 1))
+            .clamped(to: 0...1)
+
+        NSColor.white.withAlphaComponent(0.18).setFill()
+        NSBezierPath(roundedRect: barRect, xRadius: barHeight / 2, yRadius: barHeight / 2).fill()
+
+        let progressRect = NSRect(x: 0, y: barY, width: bounds.width * progress, height: barHeight)
+        NSColor.controlAccentColor.withAlphaComponent(0.85).setFill()
+        NSBezierPath(roundedRect: progressRect, xRadius: barHeight / 2, yRadius: barHeight / 2).fill()
+
+        if isHovering || isDragging {
+            let knobRadius: CGFloat = isDragging ? 6 : 5
+            let knobCenter = NSPoint(x: bounds.width * progress, y: barY + barHeight / 2)
+            NSColor.white.withAlphaComponent(0.94).setFill()
+            NSBezierPath(ovalIn: NSRect(
+                x: knobCenter.x - knobRadius,
+                y: knobCenter.y - knobRadius,
+                width: knobRadius * 2,
+                height: knobRadius * 2
+            )).fill()
+        }
+
+        let labelFont = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+        let labelColor = NSColor.secondaryLabelColor
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: labelFont,
+            .foregroundColor: labelColor
+        ]
+        let labelY: CGFloat = 18
+        (elapsedText as NSString).draw(at: NSPoint(x: 0, y: labelY), withAttributes: attributes)
+        let remainingSize = (remainingText as NSString).size(withAttributes: attributes)
+        (remainingText as NSString).draw(
+            at: NSPoint(x: max(0, bounds.width - remainingSize.width), y: labelY),
+            withAttributes: attributes
+        )
+    }
+
+    private func updateValue(from event: NSEvent) {
+        let location = convert(event.locationInWindow, from: nil)
+        let progress = Double((location.x / max(bounds.width, 1)).clamped(to: 0...1))
+        timelineValue = minimumValue + ((maximumValue - minimumValue) * progress)
+    }
+}
+
 private final class NotificationActionButton: NSButton {
+    var pressAnimationScale: CGFloat = 1
+
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override var canBecomeKeyView: Bool { false }
+
+    override func mouseDown(with event: NSEvent) {
+        guard pressAnimationScale < 1 else {
+            super.mouseDown(with: event)
+            return
+        }
+
+        animatePressScale(pressAnimationScale, duration: 0.08)
+        super.mouseDown(with: event)
+        animatePressScale(1, duration: 0.16)
+    }
+
+    private func animatePressScale(_ scale: CGFloat, duration: TimeInterval) {
+        wantsLayer = true
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = duration
+            context.timingFunction = CAMediaTimingFunction(name: scale < 1 ? .easeOut : .easeInEaseOut)
+            animator().layer?.setAffineTransform(CGAffineTransform(scaleX: scale, y: scale))
+        }
+    }
 }
 
 private final class InlineReplyTextField: NSTextField {
