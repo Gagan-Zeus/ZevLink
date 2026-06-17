@@ -1192,8 +1192,16 @@ private final class AndroidNotificationPanelController: NSObject {
             guard
                 let self,
                 let contentView,
-                self.shouldShowMediaTimeline
+                self.isMediaNotification
             else {
+                return nil
+            }
+
+            if let mediaButton = self.mediaControlButtonHitTarget(at: point, in: contentView) {
+                return mediaButton
+            }
+
+            guard self.shouldShowMediaTimeline else {
                 return nil
             }
 
@@ -2300,15 +2308,35 @@ private final class AndroidNotificationPanelController: NSObject {
         return spacer
     }
 
+    private func mediaControlButtonHitTarget(at point: NSPoint, in contentView: NSView) -> NSButton? {
+        guard isMediaNotification, !mediaControlRowStack.isHidden else { return nil }
+
+        let buttonHitOutset = NSSize(width: 8, height: 6)
+        for case let button as NSButton in mediaControlRowStack.arrangedSubviews {
+            guard
+                !button.isHidden,
+                button.alphaValue > 0.01,
+                button.isEnabled
+            else {
+                continue
+            }
+
+            let buttonPoint = button.convert(point, from: contentView)
+            if button.bounds.insetBy(dx: -buttonHitOutset.width, dy: -buttonHitOutset.height).contains(buttonPoint) {
+                return button
+            }
+        }
+
+        return nil
+    }
+
     private func normalizedMediaActions() -> (
         previous: AndroidMirroredNotificationAction?,
         primary: AndroidMirroredNotificationAction?,
         next: AndroidMirroredNotificationAction?
     ) {
-        let previous = notificationActions.first {
-            let normalized = Self.normalizedMediaActionTitle($0.cleanTitle)
-            return normalized.contains("previous") || normalized.contains("rewind")
-        }
+        let previous = notificationActions.first { Self.isPreviousMediaAction($0.cleanTitle) }
+            ?? notificationActions.first { Self.isRewindMediaAction($0.cleanTitle) }
         let primary = notificationActions.first { Self.isPrimaryMediaAction($0.cleanTitle) }
         let next = notificationActions.first {
             let normalized = Self.normalizedMediaActionTitle($0.cleanTitle)
@@ -2341,7 +2369,7 @@ private final class AndroidNotificationPanelController: NSObject {
 
     private static func mediaActionSymbolName(for title: String) -> String? {
         let normalizedTitle = normalizedMediaActionTitle(title)
-        if normalizedTitle.contains("previous") || normalizedTitle.contains("rewind") {
+        if isPreviousMediaAction(title) || isRewindMediaAction(title) {
             return "backward.fill"
         }
         if normalizedTitle.contains("next") || normalizedTitle.contains("forward") {
@@ -2364,6 +2392,20 @@ private final class AndroidNotificationPanelController: NSObject {
         return normalizedTitle.contains("play")
             || normalizedTitle.contains("pause")
             || normalizedTitle.contains("resume")
+    }
+
+    private static func isPreviousMediaAction(_ title: String) -> Bool {
+        let normalizedTitle = normalizedMediaActionTitle(title)
+        let tokens = Set(normalizedTitle.components(separatedBy: " "))
+        return tokens.contains("previous")
+            || tokens.contains("prev")
+            || normalizedTitle.contains("skip previous")
+            || normalizedTitle.contains("skip to previous")
+    }
+
+    private static func isRewindMediaAction(_ title: String) -> Bool {
+        let normalizedTitle = normalizedMediaActionTitle(title)
+        return normalizedTitle.contains("rewind")
     }
 
     private static func normalizedMediaActionTitle(_ title: String) -> String {
