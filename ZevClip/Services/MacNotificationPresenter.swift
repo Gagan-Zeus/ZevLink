@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import UserNotifications
 
 struct AndroidMirroredNotification: Decodable {
@@ -136,6 +137,7 @@ final class MacNotificationPresenter: NSObject, UNUserNotificationCenterDelegate
     private var notificationShadeClickLocalMonitor: Any?
     private var notificationShadeSwipeAmount: CGFloat = 0
     private var didTriggerNotificationShade = false
+    private var notificationShadeSwipeStartedInTrackpadCorner = false
     private var globalHideSwipeAmount: CGFloat = 0
     private var didTriggerGlobalHide = false
 
@@ -438,6 +440,7 @@ final class MacNotificationPresenter: NSObject, UNUserNotificationCenterDelegate
     }
 
     private func installNotificationShadeGestureMonitor() {
+        TrackpadCornerGestureMonitor.shared.start()
         notificationShadeGlobalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
             DispatchQueue.main.async {
                 self?.handleNotificationShadeGesture(event)
@@ -501,16 +504,19 @@ final class MacNotificationPresenter: NSObject, UNUserNotificationCenterDelegate
         if phase.contains(.began) || phase.contains(.mayBegin) {
             notificationShadeSwipeAmount = 0
             didTriggerNotificationShade = false
+            notificationShadeSwipeStartedInTrackpadCorner = shouldBeginNotificationShadeSwipe(event)
+        } else if notificationShadeSwipeAmount == 0 && !notificationShadeSwipeStartedInTrackpadCorner {
+            notificationShadeSwipeStartedInTrackpadCorner = shouldBeginNotificationShadeSwipe(event)
         }
 
-        guard isPointerInTopRightGestureRegion() else {
+        guard notificationShadeSwipeStartedInTrackpadCorner else {
             notificationShadeSwipeAmount = 0
             return
         }
 
         let vertical = normalizedFingerVerticalDelta(from: event)
         let horizontal = normalizedFingerHorizontalDelta(from: event)
-        let isDownwardSwipe = vertical < 0 && abs(vertical) > abs(horizontal) * 1.25
+        let isDownwardSwipe = vertical < 0 && abs(vertical) > abs(horizontal) * 1.05
 
         if isDownwardSwipe {
             notificationShadeSwipeAmount += abs(vertical)
@@ -527,7 +533,20 @@ final class MacNotificationPresenter: NSObject, UNUserNotificationCenterDelegate
             || event.momentumPhase.contains(.cancelled) {
             notificationShadeSwipeAmount = 0
             didTriggerNotificationShade = false
+            notificationShadeSwipeStartedInTrackpadCorner = false
         }
+    }
+
+    private func shouldBeginNotificationShadeSwipe(_ event: NSEvent) -> Bool {
+        guard event.hasPreciseScrollingDeltas else { return false }
+        guard event.momentumPhase == [] else { return false }
+
+        let trackpadMonitor = TrackpadCornerGestureMonitor.shared
+        if trackpadMonitor.isAvailable {
+            return trackpadMonitor.hasRecentTopRightTouch
+        }
+
+        return isPointerInTopRightGestureRegion()
     }
 
     private func handleGlobalHideGesture(_ event: NSEvent) -> Bool {
@@ -690,7 +709,7 @@ final class MacNotificationPresenter: NSObject, UNUserNotificationCenterDelegate
     private static let callActionReject = "ANDROID_CALL_REJECT"
     private static let callActionSilence = "ANDROID_CALL_SILENCE"
     private static let maximumImageBytes = 512 * 1024
-    private static let notificationShadeSwipeThreshold: CGFloat = 90
+    private static let notificationShadeSwipeThreshold: CGFloat = 58
     private static let globalHideSwipeThreshold: CGFloat = 70
     private static let notificationShadeGestureWidth: CGFloat = 280
     private static let notificationShadeGestureHeight: CGFloat = 170
@@ -3144,6 +3163,155 @@ private final class InlineReplyTextField: NSTextField {
 private final class NotificationInteractionPanel: NSPanel {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
+}
+
+private struct MTTrackpadPoint {
+    var x: Float
+    var y: Float
+}
+
+private struct MTTrackpadVector {
+    var position: MTTrackpadPoint
+    var velocity: MTTrackpadPoint
+}
+
+private struct MTTrackpadTouch {
+    var frame: Int32
+    var timestamp: Double
+    var identifier: Int32
+    var state: Int32
+    var unknown1: Int32
+    var unknown2: Int32
+    var normalized: MTTrackpadVector
+    var size: Float
+    var zero1: Int32
+    var angle: Float
+    var majorAxis: Float
+    var minorAxis: Float
+    var mm: MTTrackpadVector
+    var zero2: (Int32, Int32)
+    var unknown3: Float
+}
+
+private final class TrackpadCornerGestureMonitor {
+    static let shared = TrackpadCornerGestureMonitor()
+
+    private typealias MTDeviceCreateListFunction = @convention(c) () -> Unmanaged<CFArray>?
+    private typealias MTRegisterContactFrameCallbackFunction = @convention(c) (
+        UnsafeMutableRawPointer,
+        MTContactFrameCallback?
+    ) -> Void
+    private typealias MTDeviceStartFunction = @convention(c) (UnsafeMutableRawPointer, Int32) -> Void
+    private typealias MTContactFrameCallback = @convention(c) (
+        Int32,
+        UnsafeMutableRawPointer?,
+        Int32,
+        Double,
+        Int32
+    ) -> Int32
+
+    private let lock = NSLock()
+    private var frameworkHandle: UnsafeMutableRawPointer?
+    private var deviceList: CFArray?
+    private var didStart = false
+    private var activeTopRightTouch = false
+    private var lastTopRightTouchAt = Date.distantPast
+    private var available = false
+
+    private static let topRightCornerMinimumX: Float = 0.82
+    private static let topRightCornerMinimumY: Float = 0.72
+    private static let rightEdgeMinimumX: Float = 0.90
+    private static let topEdgeMinimumY: Float = 0.88
+    private static let recentTouchWindow: TimeInterval = 0.85
+    private static let contactCallback: MTContactFrameCallback = { _, touches, touchCount, _, _ in
+        TrackpadCornerGestureMonitor.shared.handleContactFrame(rawTouches: touches, touchCount: touchCount)
+        return 0
+    }
+
+    var isAvailable: Bool {
+        lock.withLock { available }
+    }
+
+    var hasRecentTopRightTouch: Bool {
+        lock.withLock {
+            activeTopRightTouch || Date().timeIntervalSince(lastTopRightTouchAt) <= Self.recentTouchWindow
+        }
+    }
+
+    func start() {
+        lock.lock()
+        guard !didStart else {
+            lock.unlock()
+            return
+        }
+        didStart = true
+        lock.unlock()
+
+        guard
+            let handle = dlopen(
+                "/System/Library/PrivateFrameworks/MultitouchSupport.framework/MultitouchSupport",
+                RTLD_LAZY
+            ),
+            let createListSymbol = dlsym(handle, "MTDeviceCreateList"),
+            let registerCallbackSymbol = dlsym(handle, "MTRegisterContactFrameCallback"),
+            let startSymbol = dlsym(handle, "MTDeviceStart")
+        else {
+            return
+        }
+
+        let createList = unsafeBitCast(createListSymbol, to: MTDeviceCreateListFunction.self)
+        let registerCallback = unsafeBitCast(registerCallbackSymbol, to: MTRegisterContactFrameCallbackFunction.self)
+        let startDevice = unsafeBitCast(startSymbol, to: MTDeviceStartFunction.self)
+
+        guard let unmanagedDeviceList = createList() else {
+            return
+        }
+
+        let devices = unmanagedDeviceList.takeRetainedValue()
+        let count = CFArrayGetCount(devices)
+        guard count > 0 else {
+            return
+        }
+
+        for index in 0..<count {
+            guard let rawDevice = CFArrayGetValueAtIndex(devices, index) else { continue }
+            let device = UnsafeMutableRawPointer(mutating: rawDevice)
+            registerCallback(device, Self.contactCallback)
+            startDevice(device, 0)
+        }
+
+        lock.withLock {
+            frameworkHandle = handle
+            deviceList = devices
+            available = true
+        }
+    }
+
+    private func handleContactFrame(rawTouches: UnsafeMutableRawPointer?, touchCount: Int32) {
+        guard let rawTouches, touchCount > 0 else {
+            lock.withLock {
+                activeTopRightTouch = false
+            }
+            return
+        }
+
+        let touches = rawTouches.bindMemory(to: MTTrackpadTouch.self, capacity: Int(touchCount))
+        let hasTopRightTouch = (0..<Int(touchCount)).contains { index in
+            let position = touches[index].normalized.position
+            let isInTopRightCorner = position.x >= Self.topRightCornerMinimumX
+                && position.y >= Self.topRightCornerMinimumY
+            let isOnTopRightEdge = position.x >= Self.rightEdgeMinimumX
+                || position.y >= Self.topEdgeMinimumY
+            return isInTopRightCorner && isOnTopRightEdge
+        }
+
+        lock.withLock {
+            activeTopRightTouch = hasTopRightTouch
+            if hasTopRightTouch {
+                lastTopRightTouchAt = Date()
+            }
+        }
+    }
 }
 
 private final class CallControlPanelController: NSObject {
