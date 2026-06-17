@@ -2,7 +2,7 @@
 
 This native Kotlin Android app connects an Android phone to the ZevLink macOS app over the local network.
 
-Current release version: **2.2.0**.
+Current release version: **2.3.0**.
 
 It includes:
 

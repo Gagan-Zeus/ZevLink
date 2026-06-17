@@ -15,8 +15,8 @@ targets:
       path: ZevClip/Info.plist
       properties:
         CFBundleDisplayName: ZevLink
-        CFBundleShortVersionString: "2.1.0"
-        CFBundleVersion: "21"
+        CFBundleShortVersionString: "2.3.0"
+        CFBundleVersion: "23"
         LSApplicationCategoryType: public.app-category.utilities
         LSUIElement: true
         NSBonjourServices:
@@ -28,8 +28,8 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.zevlink.receiver
         PRODUCT_NAME: ZevLink
         SWIFT_VERSION: "5.0"
-        MARKETING_VERSION: "2.1.0"
-        CURRENT_PROJECT_VERSION: "21"
+        MARKETING_VERSION: "2.3.0"
+        CURRENT_PROJECT_VERSION: "23"
         CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
         ENABLE_DEBUG_DYLIB: NO
         ENABLE_HARDENED_RUNTIME: YES
