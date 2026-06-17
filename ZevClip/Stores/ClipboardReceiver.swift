@@ -40,6 +40,7 @@ final class ClipboardReceiver: ObservableObject {
     @Published private(set) var lastMirroredCall: AndroidMirroredCall?
     @Published private(set) var lastMirroredCallAt: Date?
 
+    var isRemoteControlEnabled: (() -> Bool)?
     var onPasteboardWrite: ((String, Int) -> Void)?
     var onAndroidEndpointSeen: ((AndroidReceiverEndpoint) -> Void)?
     var onAndroidNotification: ((AndroidMirroredNotification) -> Void)?
@@ -77,10 +78,13 @@ final class ClipboardReceiver: ObservableObject {
             tokenProvider: { [tokenProvider] in
                 tokenProvider.currentToken()
             },
+            isRemoteControlEnabled: { [weak self] in
+                self?.isRemoteControlEnabled?() ?? false
+            },
             onReady: { [weak self] in
                 Task { @MainActor in
                     self?.status = .running
-                    self?.detailMessage = "Listening for POST /clipboard requests."
+                    self?.detailMessage = "Listening for ZevLink requests."
                 }
             },
             onAdvertisingChanged: { [weak self] isAdvertising in
@@ -115,6 +119,13 @@ final class ClipboardReceiver: ObservableObject {
                 Task { @MainActor in
                     self?.receiveAndroidCall(data)
                 }
+            },
+            onRemoteControl: { [weak self] data in
+                let result = MacRemoteController.handle(data)
+                Task { @MainActor in
+                    self?.detailMessage = result.body
+                }
+                return result
             }
         )
     }
@@ -206,4 +217,199 @@ final class ClipboardReceiver: ObservableObject {
         }
     }
 
+}
+
+struct RemoteControlHTTPResult {
+    let status: String
+    let body: String
+
+    static func success(_ body: String) -> RemoteControlHTTPResult {
+        RemoteControlHTTPResult(status: "200 OK", body: body)
+    }
+
+    static func badRequest(_ body: String) -> RemoteControlHTTPResult {
+        RemoteControlHTTPResult(status: "400 Bad Request", body: body)
+    }
+
+    static func failure(_ body: String) -> RemoteControlHTTPResult {
+        RemoteControlHTTPResult(status: "409 Conflict", body: body)
+    }
+}
+
+private enum MacRemoteController {
+    private struct RemoteRequest: Decodable {
+        let action: Action
+        let url: String?
+    }
+
+    private enum Action: String, Decodable {
+        case lock
+        case sleepDisplay
+        case sleep
+        case restart
+        case shutdown
+        case logout
+        case toggleMute
+        case volumeUp
+        case volumeDown
+        case playPause
+        case nextTrack
+        case previousTrack
+        case openURL
+    }
+
+    static func handle(_ data: Data) -> RemoteControlHTTPResult {
+        do {
+            let request = try JSONDecoder().decode(RemoteRequest.self, from: data)
+            return execute(request)
+        } catch {
+            return .badRequest("Request body must be valid remote-control JSON.")
+        }
+    }
+
+    private static func execute(_ request: RemoteRequest) -> RemoteControlHTTPResult {
+        switch request.action {
+        case .lock:
+            return postKeyboardShortcut(
+                keyCode: 12,
+                flags: [.maskCommand, .maskControl],
+                success: "Mac lock requested."
+            )
+        case .sleepDisplay:
+            return run("/usr/bin/pmset", ["displaysleepnow"], success: "Display sleep requested.")
+        case .sleep:
+            return run("/usr/bin/pmset", ["sleepnow"], success: "Mac sleep requested.")
+        case .restart:
+            return runAppleScript("tell application \"System Events\" to restart", success: "Mac restart requested.")
+        case .shutdown:
+            return runAppleScript("tell application \"System Events\" to shut down", success: "Mac shutdown requested.")
+        case .logout:
+            return postKeyboardShortcut(
+                keyCode: 12,
+                flags: [.maskCommand, .maskAlternate, .maskShift],
+                success: "Mac logout requested."
+            )
+        case .toggleMute:
+            return postSystemKey(7, success: "Mac mute toggled.")
+        case .volumeUp:
+            return postSystemKey(0, success: "Mac volume increased.")
+        case .volumeDown:
+            return postSystemKey(1, success: "Mac volume decreased.")
+        case .playPause:
+            return postSystemKey(16, success: "Mac play/pause requested.")
+        case .nextTrack:
+            return postSystemKey(17, success: "Mac next track requested.")
+        case .previousTrack:
+            return postSystemKey(18, success: "Mac previous track requested.")
+        case .openURL:
+            return openURL(request.url)
+        }
+    }
+
+    private static func openURL(_ value: String?) -> RemoteControlHTTPResult {
+        guard
+            let value = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+            let url = URL(string: value),
+            let scheme = url.scheme?.lowercased(),
+            ["http", "https"].contains(scheme),
+            url.host?.isEmpty == false
+        else {
+            return .badRequest("Open URL requires a valid http or https URL.")
+        }
+
+        return run("/usr/bin/open", [value], success: "Opened URL on Mac.")
+    }
+
+    private static func runAppleScript(_ script: String, success: String) -> RemoteControlHTTPResult {
+        run("/usr/bin/osascript", ["-e", script], success: success)
+    }
+
+    private static func run(
+        _ executablePath: String,
+        _ arguments: [String],
+        success: String
+    ) -> RemoteControlHTTPResult {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executablePath)
+        process.arguments = arguments
+
+        let errorPipe = Pipe()
+        process.standardError = errorPipe
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            return .failure("Could not run Mac command: \(error.localizedDescription)")
+        }
+
+        guard process.terminationStatus == 0 else {
+            let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+            let errorText = String(data: errorData, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return .failure(errorText?.isEmpty == false ? errorText! : "Mac command failed.")
+        }
+
+        return .success(success)
+    }
+
+    private static func postKeyboardShortcut(
+        keyCode: CGKeyCode,
+        flags: CGEventFlags,
+        success: String
+    ) -> RemoteControlHTTPResult {
+        guard
+            postKeyboardEvent(keyCode: keyCode, flags: flags, isDown: true),
+            postKeyboardEvent(keyCode: keyCode, flags: flags, isDown: false)
+        else {
+            return .failure("Could not create Mac keyboard event.")
+        }
+
+        return .success(success)
+    }
+
+    private static func postKeyboardEvent(
+        keyCode: CGKeyCode,
+        flags: CGEventFlags,
+        isDown: Bool
+    ) -> Bool {
+        let source = CGEventSource(stateID: .hidSystemState)
+        guard let event = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: isDown) else {
+            return false
+        }
+
+        event.flags = flags
+        event.post(tap: .cghidEventTap)
+        return true
+    }
+
+    private static func postSystemKey(_ key: Int32, success: String) -> RemoteControlHTTPResult {
+        guard postSystemKeyEvent(key, isDown: true), postSystemKeyEvent(key, isDown: false) else {
+            return .failure("Could not create Mac system key event.")
+        }
+
+        return .success(success)
+    }
+
+    private static func postSystemKeyEvent(_ key: Int32, isDown: Bool) -> Bool {
+        let eventData = (Int(key) << 16) | ((isDown ? 0xA : 0xB) << 8)
+        let event = NSEvent.otherEvent(
+            with: .systemDefined,
+            location: .zero,
+            modifierFlags: NSEvent.ModifierFlags(rawValue: 0xA00),
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            subtype: 8,
+            data1: eventData,
+            data2: -1
+        )
+
+        guard let cgEvent = event?.cgEvent else {
+            return false
+        }
+
+        cgEvent.post(tap: .cghidEventTap)
+        return true
+    }
 }

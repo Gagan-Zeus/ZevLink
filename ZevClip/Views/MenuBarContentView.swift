@@ -48,6 +48,14 @@ struct MenuBarContentView: View {
                 )
             )
 
+            Toggle(
+                "Allow Phone Remote Control",
+                isOn: Binding(
+                    get: { appSettings.remoteControlEnabled },
+                    set: { appSettings.setRemoteControlEnabled($0) }
+                )
+            )
+
             Button("Open Settings…") {
                 openWindow(id: ZevClipApp.settingsWindowID)
                 NSApp.activate(ignoringOtherApps: true)

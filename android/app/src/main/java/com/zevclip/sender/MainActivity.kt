@@ -77,12 +77,15 @@ class MainActivity : Activity() {
     private lateinit var airPlayBroadcastDiscoverButton: Button
     private lateinit var airPlayBroadcastDevicesContainer: LinearLayout
     private lateinit var airPlayBroadcastStartButton: Button
+    private lateinit var remoteStatusText: TextView
+    private lateinit var remoteUrlInput: EditText
     private lateinit var lastAutoStatusText: TextView
     private lateinit var discoveryManager: MacDiscoveryManager
     private lateinit var airPlayReceiverDiscoveryManager: AirPlayReceiverDiscoveryManager
     private lateinit var colors: DynamicPalette
     private var showingSettings = false
     private var showingAirPlayBroadcast = false
+    private var showingMacRemote = false
     private var airPlayBroadcastReceivers: List<AirPlayDiscoveredReceiver> = emptyList()
     private val selectedAirPlayBroadcastReceivers = linkedSetOf<String>()
     private var pendingAirPlayBroadcastTargets: List<AirPlayBroadcastAudioService.TargetSpec> = emptyList()
@@ -306,6 +309,8 @@ class MainActivity : Activity() {
     override fun onBackPressed() {
         if (showingAirPlayBroadcast) {
             showHomePage()
+        } else if (showingMacRemote) {
+            showHomePage()
         } else if (showingSettings) {
             showHomePage()
         } else {
@@ -332,6 +337,7 @@ class MainActivity : Activity() {
         }
         showingSettings = false
         showingAirPlayBroadcast = false
+        showingMacRemote = false
         setContentView(createHomeView())
         refreshSyncStatuses()
     }
@@ -350,6 +356,7 @@ class MainActivity : Activity() {
         }
         showingSettings = true
         showingAirPlayBroadcast = false
+        showingMacRemote = false
         setContentView(createSettingsView())
         refreshSyncStatuses()
     }
@@ -357,8 +364,20 @@ class MainActivity : Activity() {
     private fun showAirPlayBroadcastPage() {
         showingSettings = false
         showingAirPlayBroadcast = true
+        showingMacRemote = false
         setContentView(createAirPlayBroadcastView())
         renderAirPlayBroadcastReceivers()
+        refreshSyncStatuses()
+    }
+
+    private fun showMacRemotePage() {
+        if (::airPlayReceiverDiscoveryManager.isInitialized) {
+            airPlayReceiverDiscoveryManager.stop()
+        }
+        showingSettings = false
+        showingAirPlayBroadcast = false
+        showingMacRemote = true
+        setContentView(createMacRemoteView())
         refreshSyncStatuses()
     }
 
@@ -376,6 +395,19 @@ class MainActivity : Activity() {
 
         content.addView(syncCard(), matchWidth(topMargin = 2))
         content.addView(airPlayCard(), matchWidth(topMargin = 16))
+
+        return scrollPage(content)
+    }
+
+    private fun createMacRemoteView(): View {
+        val content = pageContent()
+
+        content.addView(headerRow(
+            title = getString(R.string.mac_remote_title),
+            action = tonalButton(getString(R.string.back)) { showHomePage() }
+        ))
+
+        content.addView(remoteCard(), matchWidth(topMargin = 18))
 
         return scrollPage(content)
     }
@@ -1387,6 +1419,168 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun remoteCard(): LinearLayout {
+        return card(colors.surface).apply {
+            addView(textView(getString(R.string.mac_remote_description), 15f, colors.muted).apply {
+                setPadding(0, 0, 0, dp(12))
+                setLineSpacing(0f, 1.06f)
+            })
+
+            remoteStatusText = textView(getString(R.string.mac_remote_ready), 15f, colors.muted).apply {
+                setPadding(0, 0, 0, dp(12))
+            }
+            addView(remoteStatusText, matchWidth())
+
+            addView(buttonRow(
+                primaryButton(getString(R.string.remote_lock)) {
+                    sendRemoteAction("lock", getString(R.string.remote_lock))
+                },
+                tonalButton(getString(R.string.remote_sleep)) {
+                    sendRemoteAction("sleep", getString(R.string.remote_sleep))
+                },
+                quietButton(getString(R.string.remote_restart)) {
+                    confirmRemoteAction(
+                        action = "restart",
+                        label = getString(R.string.remote_restart),
+                        message = getString(R.string.remote_restart_confirm)
+                    )
+                }
+            ), matchWidth(topMargin = 10))
+
+            addView(buttonRow(
+                quietButton(getString(R.string.remote_shutdown)) {
+                    confirmRemoteAction(
+                        action = "shutdown",
+                        label = getString(R.string.remote_shutdown),
+                        message = getString(R.string.remote_shutdown_confirm)
+                    )
+                },
+                quietButton(getString(R.string.remote_logout)) {
+                    confirmRemoteAction(
+                        action = "logout",
+                        label = getString(R.string.remote_logout),
+                        message = getString(R.string.remote_logout_confirm)
+                    )
+                }
+            ), matchWidth(topMargin = 10))
+
+            addView(textView(getString(R.string.remote_audio_controls), 14f, colors.muted).apply {
+                setPadding(0, dp(16), 0, dp(8))
+                setTypeface(typeface, Typeface.BOLD)
+            })
+
+            addView(buttonRow(
+                tonalButton(getString(R.string.remote_mute)) {
+                    sendRemoteAction("toggleMute", getString(R.string.remote_mute))
+                },
+                tonalButton(getString(R.string.remote_volume_down)) {
+                    sendRemoteAction("volumeDown", getString(R.string.remote_volume_down))
+                },
+                tonalButton(getString(R.string.remote_volume_up)) {
+                    sendRemoteAction("volumeUp", getString(R.string.remote_volume_up))
+                }
+            ), matchWidth())
+
+            addView(buttonRow(
+                quietButton(getString(R.string.remote_previous)) {
+                    sendRemoteAction("previousTrack", getString(R.string.remote_previous))
+                },
+                quietButton(getString(R.string.remote_play_pause)) {
+                    sendRemoteAction("playPause", getString(R.string.remote_play_pause))
+                },
+                quietButton(getString(R.string.remote_next)) {
+                    sendRemoteAction("nextTrack", getString(R.string.remote_next))
+                }
+            ), matchWidth(topMargin = 10))
+
+            remoteUrlInput = styledEditText().apply {
+                hint = getString(R.string.remote_url_hint)
+                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+                isSingleLine = true
+            }
+            addView(remoteUrlInput, matchWidth(topMargin = 16))
+
+            addView(primaryButton(getString(R.string.remote_open_url)) {
+                sendRemoteAction(
+                    action = "openURL",
+                    label = getString(R.string.remote_open_url),
+                    url = remoteUrlInput.text.toString()
+                )
+            }, matchWidth(topMargin = 10))
+        }
+    }
+
+    private fun confirmRemoteAction(action: String, label: String, message: String) {
+        AlertDialog.Builder(this)
+            .setTitle(label)
+            .setMessage(message)
+            .setPositiveButton(label) { _, _ ->
+                sendRemoteAction(action, label)
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun sendRemoteAction(action: String, label: String, url: String? = null) {
+        val endpoint = ZevClipPreferences.endpoint(this)
+        val token = ZevClipPreferences.pairingToken(this)
+
+        if (endpoint == null) {
+            updateRemoteStatus(getString(R.string.remote_pairing_needed), colors.error)
+            discoveryManager.discover()
+            return
+        }
+
+        if (token.isEmpty()) {
+            updateRemoteStatus(getString(R.string.remote_pairing_needed), colors.error)
+            return
+        }
+
+        if (action == "openURL" && url.isNullOrBlank()) {
+            updateRemoteStatus(getString(R.string.remote_url_needed), colors.error)
+            remoteUrlInput.requestFocus()
+            return
+        }
+
+        updateRemoteStatus(getString(R.string.remote_sending, label), colors.muted)
+        thread(name = "ZevClipMacRemote") {
+            val result = MacRemoteSender.send(
+                context = applicationContext,
+                ipAddress = endpoint.ipAddress,
+                port = endpoint.port,
+                action = action,
+                pairingToken = token,
+                url = url
+            )
+
+            runOnUiThread {
+                when (result) {
+                    is SendResult.Success -> {
+                        if (action == "openURL" && ::remoteUrlInput.isInitialized) {
+                            remoteUrlInput.text.clear()
+                        }
+                        updateRemoteStatus(result.message, colors.success)
+                    }
+                    is SendResult.Failure -> {
+                        updateRemoteStatus(result.message, colors.error)
+                        if (result.retryableWithDiscovery) {
+                            discoveryManager.discover()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun updateRemoteStatus(message: String, color: Int) {
+        if (::remoteStatusText.isInitialized) {
+            remoteStatusText.setTextColor(color)
+            remoteStatusText.text = message
+        } else {
+            showPageStatus(message, color)
+        }
+    }
+
     private fun scheduleAccessibilityRechecks() {
         listOf(750L, 2_000L, 4_000L).forEach { delayMs ->
             mainHandler.postDelayed({
@@ -1580,14 +1774,10 @@ class MainActivity : Activity() {
             addView(cardTitle(getString(R.string.clipboard_sync_title)).apply {
                 textSize = 24f
             })
-            addView(textView(getString(R.string.clipboard_sync_description), 15f, colors.muted).apply {
-                setPadding(0, dp(6), 0, dp(12))
-                setLineSpacing(0f, 1.06f)
-            }, matchWidth())
 
             statusText = textView(getString(R.string.ready), 18f, colors.primary).apply {
                 setTypeface(typeface, Typeface.BOLD)
-                setPadding(0, 0, 0, dp(16))
+                setPadding(0, dp(10), 0, dp(16))
             }
             addView(statusText, matchWidth())
 
@@ -1598,6 +1788,10 @@ class MainActivity : Activity() {
             addView(actionRow)
             startClipboardSyncButton = actionRow.getChildAt(0) as Button
             stopClipboardSyncButton = actionRow.getChildAt(1) as Button
+
+            addView(tonalButton(getString(R.string.open_mac_remote)) {
+                showMacRemotePage()
+            }, matchWidth(topMargin = 10))
         }
     }
 
@@ -1710,6 +1904,19 @@ class MainActivity : Activity() {
             addView(second, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
                 leftMargin = dp(10)
             })
+        }
+    }
+
+    private fun buttonRow(vararg buttons: Button): LinearLayout {
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            buttons.forEachIndexed { index, button ->
+                addView(button, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                    if (index > 0) {
+                        leftMargin = dp(10)
+                    }
+                })
+            }
         }
     }
 

@@ -49,6 +49,9 @@ final class ZevClipRuntime {
         receiver.onAndroidCall = { call in
             MacNotificationPresenter.shared.show(call)
         }
+        receiver.isRemoteControlEnabled = {
+            AppSettings.savedRemoteControlEnabled()
+        }
         MacNotificationPresenter.shared.onDismiss = { [weak self] notificationKey in
             Task { @MainActor in
                 self?.androidClipboardSender.dismissAndroidNotification(notificationKey: notificationKey)

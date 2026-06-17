@@ -7,11 +7,13 @@ final class AppSettings: ObservableObject {
         static let migratedFromLegacyBundleId = "migratedFromLegacyBundleId"
         static let launchAtLoginEnabled = "launchAtLoginEnabled"
         static let launchAtLoginRegisteredPath = "launchAtLoginRegisteredPath"
+        static let remoteControlEnabled = "remoteControlEnabled"
         static let showMenuBarIcon = "showMenuBarIcon"
     }
 
     @Published private(set) var launchAtLoginEnabled: Bool
     @Published private(set) var launchAtLoginStatus: String
+    @Published private(set) var remoteControlEnabled: Bool
     @Published private(set) var showMenuBarIcon: Bool
 
     init() {
@@ -31,6 +33,7 @@ final class AppSettings: ObservableObject {
         launchAtLoginStatus = installedPathIsRegistered
             ? "Launch at Login is enabled."
             : Self.statusMessage(for: status)
+        remoteControlEnabled = UserDefaults.standard.bool(forKey: DefaultsKey.remoteControlEnabled)
         showMenuBarIcon = UserDefaults.standard.object(
             forKey: DefaultsKey.showMenuBarIcon
         ) as? Bool ?? true
@@ -46,6 +49,16 @@ final class AppSettings: ObservableObject {
         UserDefaults.standard.set(isVisible, forKey: DefaultsKey.showMenuBarIcon)
         showMenuBarIcon = isVisible
     }
+
+    func setRemoteControlEnabled(_ isEnabled: Bool) {
+        UserDefaults.standard.set(isEnabled, forKey: DefaultsKey.remoteControlEnabled)
+        remoteControlEnabled = isEnabled
+    }
+
+    nonisolated static func savedRemoteControlEnabled() -> Bool {
+        UserDefaults.standard.bool(forKey: DefaultsKey.remoteControlEnabled)
+    }
+
 
     func setLaunchAtLoginEnabled(_ isEnabled: Bool) {
         UserDefaults.standard.set(isEnabled, forKey: DefaultsKey.launchAtLoginEnabled)
@@ -173,6 +186,7 @@ final class AppSettings: ObservableObject {
             for key in [
                 DefaultsKey.launchAtLoginEnabled,
                 DefaultsKey.launchAtLoginRegisteredPath,
+                DefaultsKey.remoteControlEnabled,
                 DefaultsKey.showMenuBarIcon
             ] where defaults.object(forKey: key) == nil {
                 defaults.set(legacyDomain[key], forKey: key)

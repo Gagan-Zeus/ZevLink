@@ -12,13 +12,15 @@ final class ClipboardHTTPServer {
         serviceType: String,
         deviceId: String,
         tokenProvider: @escaping () -> String,
+        isRemoteControlEnabled: @escaping () -> Bool,
         onReady: @escaping () -> Void,
         onAdvertisingChanged: @escaping (Bool) -> Void,
         onFailure: @escaping (String) -> Void,
         onAndroidEndpointSeen: @escaping (AndroidReceiverEndpoint) -> Void,
         onText: @escaping (String) -> Void,
         onAndroidNotification: @escaping (Data) -> Void,
-        onAndroidCall: @escaping (Data) -> Void
+        onAndroidCall: @escaping (Data) -> Void,
+        onRemoteControl: @escaping (Data) -> RemoteControlHTTPResult
     ) {
         queue.async { [weak self] in
             self?.startOnQueue(
@@ -27,13 +29,15 @@ final class ClipboardHTTPServer {
                 serviceType: serviceType,
                 deviceId: deviceId,
                 tokenProvider: tokenProvider,
+                isRemoteControlEnabled: isRemoteControlEnabled,
                 onReady: onReady,
                 onAdvertisingChanged: onAdvertisingChanged,
                 onFailure: onFailure,
                 onAndroidEndpointSeen: onAndroidEndpointSeen,
                 onText: onText,
                 onAndroidNotification: onAndroidNotification,
-                onAndroidCall: onAndroidCall
+                onAndroidCall: onAndroidCall,
+                onRemoteControl: onRemoteControl
             )
         }
     }
@@ -57,13 +61,15 @@ final class ClipboardHTTPServer {
         serviceType: String,
         deviceId: String,
         tokenProvider: @escaping () -> String,
+        isRemoteControlEnabled: @escaping () -> Bool,
         onReady: @escaping () -> Void,
         onAdvertisingChanged: @escaping (Bool) -> Void,
         onFailure: @escaping (String) -> Void,
         onAndroidEndpointSeen: @escaping (AndroidReceiverEndpoint) -> Void,
         onText: @escaping (String) -> Void,
         onAndroidNotification: @escaping (Data) -> Void,
-        onAndroidCall: @escaping (Data) -> Void
+        onAndroidCall: @escaping (Data) -> Void,
+        onRemoteControl: @escaping (Data) -> RemoteControlHTTPResult
     ) {
         guard listener == nil else { return }
         guard let networkPort = NWEndpoint.Port(rawValue: port) else {
@@ -121,10 +127,12 @@ final class ClipboardHTTPServer {
                 self?.accept(
                     connection,
                     tokenProvider: tokenProvider,
+                    isRemoteControlEnabled: isRemoteControlEnabled,
                     onAndroidEndpointSeen: onAndroidEndpointSeen,
                     onText: onText,
                     onAndroidNotification: onAndroidNotification,
-                    onAndroidCall: onAndroidCall
+                    onAndroidCall: onAndroidCall,
+                    onRemoteControl: onRemoteControl
                 )
             }
 
@@ -139,20 +147,24 @@ final class ClipboardHTTPServer {
     private func accept(
         _ connection: NWConnection,
         tokenProvider: @escaping () -> String,
+        isRemoteControlEnabled: @escaping () -> Bool,
         onAndroidEndpointSeen: @escaping (AndroidReceiverEndpoint) -> Void,
         onText: @escaping (String) -> Void,
         onAndroidNotification: @escaping (Data) -> Void,
-        onAndroidCall: @escaping (Data) -> Void
+        onAndroidCall: @escaping (Data) -> Void,
+        onRemoteControl: @escaping (Data) -> RemoteControlHTTPResult
     ) {
         let id = ObjectIdentifier(connection)
         let httpConnection = HTTPConnection(
             connection: connection,
             queue: queue,
             tokenProvider: tokenProvider,
+            isRemoteControlEnabled: isRemoteControlEnabled,
             onAndroidEndpointSeen: onAndroidEndpointSeen,
             onText: onText,
             onAndroidNotification: onAndroidNotification,
             onAndroidCall: onAndroidCall,
+            onRemoteControl: onRemoteControl,
             onClose: { [weak self] in
                 self?.connections[id] = nil
             }
@@ -178,10 +190,12 @@ private final class HTTPConnection {
     private let connection: NWConnection
     private let queue: DispatchQueue
     private let tokenProvider: () -> String
+    private let isRemoteControlEnabled: () -> Bool
     private let onAndroidEndpointSeen: (AndroidReceiverEndpoint) -> Void
     private let onText: (String) -> Void
     private let onAndroidNotification: (Data) -> Void
     private let onAndroidCall: (Data) -> Void
+    private let onRemoteControl: (Data) -> RemoteControlHTTPResult
     private let onClose: () -> Void
 
     private var buffer = Data()
@@ -195,19 +209,23 @@ private final class HTTPConnection {
         connection: NWConnection,
         queue: DispatchQueue,
         tokenProvider: @escaping () -> String,
+        isRemoteControlEnabled: @escaping () -> Bool,
         onAndroidEndpointSeen: @escaping (AndroidReceiverEndpoint) -> Void,
         onText: @escaping (String) -> Void,
         onAndroidNotification: @escaping (Data) -> Void,
         onAndroidCall: @escaping (Data) -> Void,
+        onRemoteControl: @escaping (Data) -> RemoteControlHTTPResult,
         onClose: @escaping () -> Void
     ) {
         self.connection = connection
         self.queue = queue
         self.tokenProvider = tokenProvider
+        self.isRemoteControlEnabled = isRemoteControlEnabled
         self.onAndroidEndpointSeen = onAndroidEndpointSeen
         self.onText = onText
         self.onAndroidNotification = onAndroidNotification
         self.onAndroidCall = onAndroidCall
+        self.onRemoteControl = onRemoteControl
         self.onClose = onClose
     }
 
@@ -308,6 +326,15 @@ private final class HTTPConnection {
         case "/android-presence":
             respond(status: "200 OK", body: "Android presence updated.")
 
+        case "/remote":
+            guard isRemoteControlEnabled() else {
+                respond(status: "403 Forbidden", body: "Phone remote control is disabled on this Mac.")
+                return true
+            }
+
+            let result = onRemoteControl(bodyData)
+            respond(status: result.status, body: result.body)
+
         default:
             respond(status: "404 Not Found", body: "Unknown path.")
         }
@@ -352,7 +379,8 @@ private final class HTTPConnection {
         guard path == "/clipboard" ||
             path == "/android-notification" ||
             path == "/android-call" ||
-            path == "/android-presence"
+            path == "/android-presence" ||
+            path == "/remote"
         else {
             respond(status: "404 Not Found", body: "Unknown path.")
             return true

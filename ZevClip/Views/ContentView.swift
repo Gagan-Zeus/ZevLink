@@ -159,12 +159,24 @@ struct ContentView: View {
                 Text(appSettings.launchAtLoginStatus)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                Toggle(
+                    "Allow phone remote control",
+                    isOn: Binding(
+                        get: { appSettings.remoteControlEnabled },
+                        set: { appSettings.setRemoteControlEnabled($0) }
+                    )
+                )
+
+                Text("Lets your paired Android phone lock, sleep, restart, shut down, adjust volume, control media, and open URLs on this Mac.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Spacer(minLength: 0)
         }
         .padding(24)
-        .frame(minWidth: 500, minHeight: 560)
+        .frame(minWidth: 500, minHeight: 620)
     }
 
     private var macStatusText: String {
