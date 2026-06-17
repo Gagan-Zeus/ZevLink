@@ -49,14 +49,6 @@ final class ZevClipRuntime {
         receiver.onAndroidCall = { call in
             MacNotificationPresenter.shared.show(call)
         }
-        receiver.onAndroidNowPlaying = { payload in
-            MacNowPlayingController.shared.update(from: payload)
-        }
-        MacNowPlayingController.shared.start { [weak self] action in
-            Task { @MainActor in
-                self?.androidClipboardSender.sendAndroidMediaCommand(action: action)
-            }
-        }
         MacNotificationPresenter.shared.onDismiss = { [weak self] notificationKey in
             Task { @MainActor in
                 self?.androidClipboardSender.dismissAndroidNotification(notificationKey: notificationKey)

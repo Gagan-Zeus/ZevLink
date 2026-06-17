@@ -25,7 +25,6 @@ class AirPlayAudioCaptureService : Service() {
     private var audioRecord: AudioRecord? = null
     private var localPlaybackSilencer: LocalPlaybackSilencer? = null
     private var dacpControlServer: AirPlayDacpControlServer? = null
-    private var nowPlayingSender: AndroidNowPlayingSender? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -99,8 +98,6 @@ class AirPlayAudioCaptureService : Service() {
                 val record = AirPlayPlaybackCapture.createAudioRecord(projection)
                 audioRecord = record
                 record.startRecording()
-                val metadataSender = AndroidNowPlayingSender(this)
-                nowPlayingSender = metadataSender
                 updateStatus(getString(R.string.airplay_streaming_live))
 
                 val target = AirPlayTarget(
@@ -123,11 +120,7 @@ class AirPlayAudioCaptureService : Service() {
                     client.playPcmPackets(
                         source = AudioRecordPacketSource(record, running),
                         status = { status -> updateStatus(status) },
-                        metadataProvider = {
-                            AndroidNowPlayingReader.current(this).also { metadata ->
-                                metadataSender.sendIfChanged(metadata)
-                            }
-                        },
+                        metadataProvider = null,
                         publishMetadataToAirPlay = false
                     )
                 }
@@ -144,8 +137,6 @@ class AirPlayAudioCaptureService : Service() {
 
     private fun stopCapture() {
         if (!running.getAndSet(false)) {
-            runCatching { nowPlayingSender?.stop() }
-            nowPlayingSender = null
             runCatching { dacpControlServer?.close() }
             dacpControlServer = null
             runCatching { localPlaybackSilencer?.close() }
@@ -158,8 +149,6 @@ class AirPlayAudioCaptureService : Service() {
         audioRecord = null
         runCatching { localPlaybackSilencer?.close() }
         localPlaybackSilencer = null
-        runCatching { nowPlayingSender?.stop() }
-        nowPlayingSender = null
         runCatching { dacpControlServer?.close() }
         dacpControlServer = null
         runCatching { mediaProjection?.stop() }
