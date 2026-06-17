@@ -56,6 +56,12 @@
     <string name="remote_url_needed">Enter a URL to open on the Mac.</string>
     <string name="remote_pairing_needed">Pair or reconnect your Mac first.</string>
     <string name="remote_sending">Sending %1$s…</string>
+    <string name="remote_lock_done">Mac locked.</string>
+    <string name="remote_sleep_display_done">Mac display sleeping.</string>
+    <string name="remote_sleep_done">Mac sleeping.</string>
+    <string name="remote_restart_done">Mac restarting.</string>
+    <string name="remote_shutdown_done">Mac shutting down.</string>
+    <string name="remote_logout_done">Mac logging out.</string>
     <string name="remote_restart_confirm">Restart the Mac now? Unsaved work in apps may be lost.</string>
     <string name="remote_shutdown_confirm">Shut down the Mac now? Unsaved work in apps may be lost.</string>
     <string name="remote_logout_confirm">Log out of the Mac now? Unsaved work in apps may be lost.</string>

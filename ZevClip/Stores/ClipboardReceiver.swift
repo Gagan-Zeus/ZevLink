@@ -273,21 +273,21 @@ private enum MacRemoteController {
             return postKeyboardShortcut(
                 keyCode: 12,
                 flags: [.maskCommand, .maskControl],
-                success: "Mac lock requested."
+                success: "Mac locked."
             )
         case .sleepDisplay:
-            return run("/usr/bin/pmset", ["displaysleepnow"], success: "Display sleep requested.")
+            return run("/usr/bin/pmset", ["displaysleepnow"], success: "Mac display sleeping.")
         case .sleep:
-            return run("/usr/bin/pmset", ["sleepnow"], success: "Mac sleep requested.")
+            return run("/usr/bin/pmset", ["sleepnow"], success: "Mac sleeping.")
         case .restart:
-            return runAppleScript("tell application \"System Events\" to restart", success: "Mac restart requested.")
+            return runAppleScript("tell application \"System Events\" to restart", success: "Mac restarting.")
         case .shutdown:
-            return runAppleScript("tell application \"System Events\" to shut down", success: "Mac shutdown requested.")
+            return runAppleScript("tell application \"System Events\" to shut down", success: "Mac shutting down.")
         case .logout:
             return postKeyboardShortcut(
                 keyCode: 12,
                 flags: [.maskCommand, .maskAlternate, .maskShift],
-                success: "Mac logout requested."
+                success: "Mac logging out."
             )
         case .toggleMute:
             return postSystemKey(7, success: "Mac mute toggled.")
@@ -296,11 +296,11 @@ private enum MacRemoteController {
         case .volumeDown:
             return postSystemKey(1, success: "Mac volume decreased.")
         case .playPause:
-            return postSystemKey(16, success: "Mac play/pause requested.")
+            return postSystemKey(16, success: "Mac play/pause sent.")
         case .nextTrack:
-            return postSystemKey(17, success: "Mac next track requested.")
+            return postSystemKey(17, success: "Mac next track sent.")
         case .previousTrack:
-            return postSystemKey(18, success: "Mac previous track requested.")
+            return postSystemKey(18, success: "Mac previous track sent.")
         case .openURL:
             return openURL(request.url)
         }

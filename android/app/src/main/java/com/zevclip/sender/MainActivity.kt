@@ -1542,6 +1542,7 @@ class MainActivity : Activity() {
             return
         }
 
+        val connectionDropFeedback = remoteConnectionDropFeedback(action)
         updateRemoteStatus(getString(R.string.remote_sending, label), colors.muted)
         thread(name = "ZevClipMacRemote") {
             val result = MacRemoteSender.send(
@@ -1562,13 +1563,29 @@ class MainActivity : Activity() {
                         updateRemoteStatus(result.message, colors.success)
                     }
                     is SendResult.Failure -> {
-                        updateRemoteStatus(result.message, colors.error)
+                        if (result.retryableWithDiscovery && connectionDropFeedback != null) {
+                            updateRemoteStatus(connectionDropFeedback, colors.success)
+                        } else {
+                            updateRemoteStatus(result.message, colors.error)
+                        }
                         if (result.retryableWithDiscovery) {
                             discoveryManager.discover()
                         }
                     }
                 }
             }
+        }
+    }
+
+    private fun remoteConnectionDropFeedback(action: String): String? {
+        return when (action) {
+            "lock" -> getString(R.string.remote_lock_done)
+            "sleepDisplay" -> getString(R.string.remote_sleep_display_done)
+            "sleep" -> getString(R.string.remote_sleep_done)
+            "restart" -> getString(R.string.remote_restart_done)
+            "shutdown" -> getString(R.string.remote_shutdown_done)
+            "logout" -> getString(R.string.remote_logout_done)
+            else -> null
         }
     }
 
