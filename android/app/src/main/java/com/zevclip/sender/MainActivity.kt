@@ -1798,13 +1798,15 @@ class MainActivity : Activity() {
             }
             addView(statusText, matchWidth())
 
-            val actionRow = horizontalButtons(
-                primaryButton(getString(R.string.start_clipboard_sync)) { startClipboardSync() },
-                quietButton(getString(R.string.stop_clipboard_sync)) { stopClipboardSync() }
-            )
-            addView(actionRow)
-            startClipboardSyncButton = actionRow.getChildAt(0) as Button
-            stopClipboardSyncButton = actionRow.getChildAt(1) as Button
+            startClipboardSyncButton = primaryButton(getString(R.string.start_clipboard_sync)) {
+                startClipboardSync()
+            }
+            addView(startClipboardSyncButton, matchWidth())
+
+            stopClipboardSyncButton = quietButton(getString(R.string.stop_clipboard_sync)) {
+                stopClipboardSync()
+            }
+            addView(stopClipboardSyncButton, matchWidth())
 
             addView(tonalButton(getString(R.string.open_mac_remote)) {
                 showMacRemotePage()
