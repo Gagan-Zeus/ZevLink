@@ -40,6 +40,7 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import com.google.mlkit.vision.barcode.common.Barcode
@@ -479,6 +480,25 @@ class MainActivity : Activity() {
                 setPadding(0, dp(8), 0, 0)
             }
             addView(pairingStatusText, matchWidth())
+        }, matchWidth(topMargin = 16))
+
+        content.addView(card(colors.surface).apply {
+            addView(cardTitle(getString(R.string.file_transfer_settings_title)))
+            addView(textView(getString(R.string.file_transfer_settings_description), 14f, colors.muted).apply {
+                setPadding(0, dp(6), 0, dp(10))
+                setLineSpacing(0f, 1.06f)
+            })
+
+            addView(Switch(this@MainActivity).apply {
+                text = getString(R.string.file_transfer_auto_accept)
+                textSize = 16f
+                setTextColor(colors.text)
+                isChecked = ZevClipPreferences.isFileTransferAutoAcceptEnabled(this@MainActivity)
+                setPadding(0, dp(6), 0, dp(6))
+                setOnCheckedChangeListener { _, isChecked ->
+                    ZevClipPreferences.setFileTransferAutoAcceptEnabled(this@MainActivity, isChecked)
+                }
+            }, matchWidth())
         }, matchWidth(topMargin = 16))
 
         content.addView(card(colors.surface).apply {

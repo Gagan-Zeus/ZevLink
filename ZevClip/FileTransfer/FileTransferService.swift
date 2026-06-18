@@ -117,7 +117,8 @@ final class FileTransferService: ObservableObject {
                     senderDeviceId: DeviceIdentityStore.loadOrCreateDeviceId(),
                     senderName: Host.current().localizedName ?? "Mac",
                     sources: sources,
-                    requestedStreamCount: 4
+                    requestedStreamCount: 8,
+                    includeFileHashes: false
                 )
                 await self.updateOutgoing(
                     title: "Sending to Android",
@@ -163,8 +164,8 @@ final class FileTransferService: ObservableObject {
         let manifest = try JSONDecoder().decode(FileTransferManifest.self, from: body)
         let response = try receiver.accept(
             manifest: manifest,
-            requestedStreamCount: 4,
-            receiverMaximumStreams: 4
+            requestedStreamCount: manifest.requestedStreamCount,
+            receiverMaximumStreams: ZevLinkTransferProtocol.maxStreamCount
         )
         stateLock.lock()
         incomingProgress[manifest.transferId] = IncomingProgress(

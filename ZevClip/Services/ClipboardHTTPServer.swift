@@ -289,7 +289,11 @@ private final class HTTPConnection {
             }
 
             if isComplete {
-                self.respond(status: "400 Bad Request", body: "Incomplete HTTP request.")
+                if self.buffer.isEmpty {
+                    self.finish()
+                } else {
+                    self.respond(status: "400 Bad Request", body: "Incomplete HTTP request.")
+                }
             } else {
                 self.receiveMoreData()
             }
@@ -506,7 +510,7 @@ private final class HTTPConnection {
             "HTTP/1.1 \(status)",
             "Content-Type: \(contentType)",
             "Content-Length: \(bodyData.count)",
-            "Connection: close",
+            "Connection: keep-alive",
             "",
             ""
         ].joined(separator: "\r\n")
@@ -514,10 +518,33 @@ private final class HTTPConnection {
         var response = Data(header.utf8)
         response.append(bodyData)
 
-        connection.send(content: response, completion: .contentProcessed { [weak self] _ in
-            self?.connection.cancel()
-            self?.finish()
+        connection.send(content: response, completion: .contentProcessed { [weak self] error in
+            guard let self else { return }
+            if error != nil {
+                self.connection.cancel()
+                self.finish()
+                return
+            }
+            self.prepareForNextRequest()
         })
+    }
+
+    private func prepareForNextRequest() {
+        guard let consumedLength = expectedRequestLength, consumedLength <= buffer.count else {
+            connection.cancel()
+            finish()
+            return
+        }
+        buffer.removeSubrange(0..<consumedLength)
+        expectedRequestLength = nil
+        headerEndIndex = nil
+        requestPath = nil
+        requestHeaders = [:]
+        responseStarted = false
+
+        if !processRequestIfPossible() {
+            receiveMoreData()
+        }
     }
 
     private func finish() {

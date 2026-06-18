@@ -14,10 +14,12 @@ import com.zevclip.sender.filetransfer.FileTransferReceiver
 import com.zevclip.sender.filetransfer.AndroidPublicDownloadsPublisher
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.InputStream
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.SocketException
+import java.net.SocketTimeoutException
 import java.nio.ByteBuffer
 import java.nio.charset.CodingErrorAction
 import java.util.Locale
@@ -110,8 +112,13 @@ class AndroidClipboardHttpReceiver(
             val input = client.getInputStream()
             val output = client.getOutputStream()
 
+            while (!client.isClosed) {
             val headerBytes = try {
                 readHeaders(input)
+            } catch (_: SocketTimeoutException) {
+                return
+            } catch (_: SocketException) {
+                return
             } catch (error: HTTPFailure) {
                 output.write(response(error.status, error.message).toByteArray(Charsets.UTF_8))
                 return
@@ -142,7 +149,8 @@ class AndroidClipboardHttpReceiver(
 
             if (requestParts[0] == "GET" && requestParts[1] == STATUS_PATH) {
                 output.write(statusResponse().toByteArray(Charsets.UTF_8))
-                return
+                output.flush()
+                continue
             }
 
             if (requestParts[0] != "POST") {
@@ -172,6 +180,15 @@ class AndroidClipboardHttpReceiver(
                 return
             }
 
+            if (requestParts[1] == TRANSFER_CHUNK_PATH) {
+                output.write(
+                    handleFileTransferChunk(headers, input, contentLength)
+                        .toByteArray(Charsets.UTF_8)
+                )
+                output.flush()
+                continue
+            }
+
             val body = try {
                 readExactly(input, contentLength)
             } catch (error: HTTPFailure) {
@@ -181,22 +198,26 @@ class AndroidClipboardHttpReceiver(
 
             if (requestParts[1] == NOTIFICATION_ACTION_PATH) {
                 output.write(handleNotificationAction(body).toByteArray(Charsets.UTF_8))
-                return
+                output.flush()
+                continue
             }
 
             if (requestParts[1] == CALL_ACTION_PATH) {
                 output.write(handleCallAction(body).toByteArray(Charsets.UTF_8))
-                return
+                output.flush()
+                continue
             }
 
             if (requestParts[1] == MEDIA_CONTROL_PATH) {
                 output.write(handleMediaControlAction(body).toByteArray(Charsets.UTF_8))
-                return
+                output.flush()
+                continue
             }
 
             if (requestParts[1].startsWith(TRANSFER_PREFIX)) {
                 output.write(handleFileTransfer(requestParts[1], headers, body).toByteArray(Charsets.UTF_8))
-                return
+                output.flush()
+                continue
             }
 
             val text = try {
@@ -222,6 +243,8 @@ class AndroidClipboardHttpReceiver(
                     )
                 ).toByteArray(Charsets.UTF_8)
             )
+            output.flush()
+            }
         }
     }
 
@@ -428,11 +451,17 @@ class AndroidClipboardHttpReceiver(
         return try {
             when (path) {
                 TRANSFER_OFFER_PATH -> {
+                    if (!ZevClipPreferences.isFileTransferAutoAcceptEnabled(appContext)) {
+                        return response(
+                            "403 Forbidden",
+                            "Incoming file transfers are disabled in ZevLink settings."
+                        )
+                    }
                     val manifest = FileTransferJson.manifestFromJson(JSONObject(String(body, Charsets.UTF_8)))
                     val offer = fileTransferReceiver.accept(
                         manifest = manifest,
-                        requestedStreamCount = 4,
-                        receiverMaximumStreams = 4
+                        requestedStreamCount = manifest.requestedStreamCount,
+                        receiverMaximumStreams = com.zevclip.sender.filetransfer.ZevLinkTransferProtocol.MAX_STREAM_COUNT
                     )
                     response(
                         status = "200 OK",
@@ -465,7 +494,7 @@ class AndroidClipboardHttpReceiver(
                 }
                 TRANSFER_COMPLETE_PATH -> {
                     val transferId = transferId(headers, body)
-                    val completed = fileTransferReceiver.complete(transferId)
+                    val completed = fileTransferReceiver.complete(transferId, verifyFileHashes = false)
                     val published = AndroidPublicDownloadsPublisher.publish(appContext, completed)
                     response(
                         status = "200 OK",
@@ -485,6 +514,32 @@ class AndroidClipboardHttpReceiver(
             }
         } catch (error: Exception) {
             Log.w(TAG, "File transfer request failed", error)
+            response("400 Bad Request", error.message ?: "File transfer failed.")
+        }
+    }
+
+    private fun handleFileTransferChunk(
+        headers: Map<String, String>,
+        inputStream: InputStream,
+        contentLength: Int
+    ): String {
+        return try {
+            val transferId = requiredHeader(headers, "x-zevlink-transfer-id")
+            val fileId = requiredHeader(headers, "x-zevlink-file-id")
+            val chunkIndex = requiredHeader(headers, "x-zevlink-chunk-index").toLong()
+            val chunkHash = headers["x-zevlink-chunk-sha256"]?.takeUnless { it.isBlank() }
+            fileTransferReceiver.writeChunkStream(
+                transferId = transferId,
+                fileId = fileId,
+                chunkIndex = chunkIndex,
+                inputStream = inputStream,
+                contentLength = contentLength.toLong(),
+                chunkSha256 = chunkHash,
+                activeStreamCount = 8
+            )
+            response("200 OK", "Chunk accepted.")
+        } catch (error: Exception) {
+            Log.w(TAG, "Streaming file chunk failed", error)
             response("400 Bad Request", error.message ?: "File transfer failed.")
         }
     }
@@ -533,7 +588,7 @@ class AndroidClipboardHttpReceiver(
             "HTTP/1.1 $status",
             "Content-Type: $contentType",
             "Content-Length: ${bodyBytes.size}",
-            "Connection: close"
+            "Connection: keep-alive"
         )
         extraHeaders.forEach { (name, value) ->
             if (name.isNotBlank() && value.isNotBlank()) {

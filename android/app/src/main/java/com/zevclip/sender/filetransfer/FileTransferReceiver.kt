@@ -1,6 +1,7 @@
 package com.zevclip.sender.filetransfer
 
 import java.io.File
+import java.io.InputStream
 import java.io.RandomAccessFile
 import java.security.MessageDigest
 import java.util.UUID
@@ -12,7 +13,8 @@ class FileTransferReceiver(
     data class CompletedFile(
         val fileId: String,
         val file: File,
-        val sha256: String
+        val sha256: String,
+        val expectedSha256: String?
     )
 
     data class CompletionResult(
@@ -27,7 +29,8 @@ class FileTransferReceiver(
         val destinationRoot: File,
         val resumeToken: String,
         val stateMachine: FileTransferStateMachine,
-        val verifiedChunksByFileId: MutableMap<String, MutableSet<Long>>
+        val verifiedChunksByFileId: MutableMap<String, MutableSet<Long>>,
+        val lock: Any = Any()
     )
 
     private val sessionsByTransferId = mutableMapOf<String, Session>()
@@ -88,7 +91,6 @@ class FileTransferReceiver(
         }
     }
 
-    @Synchronized
     fun writeChunk(
         transferId: String,
         fileId: String,
@@ -100,8 +102,10 @@ class FileTransferReceiver(
         val session = session(transferId)
         val entry = session.manifest.fileEntries.firstOrNull { it.fileId == fileId }
             ?: error("File not found.")
-        if (session.verifiedChunksByFileId[fileId]?.contains(chunkIndex) == true) {
-            return
+        synchronized(session.lock) {
+            if (session.verifiedChunksByFileId[fileId]?.contains(chunkIndex) == true) {
+                return
+            }
         }
         val size = entry.size ?: error("Directory entries cannot receive chunks.")
         val range = ZevLinkTransferProtocol.byteRangeForChunk(size, chunkIndex)
@@ -112,19 +116,61 @@ class FileTransferReceiver(
 
         positionedWrite(File(session.tempRoot, entry.relativePath), range.startOffset, data)
 
-        val verifiedChunks = session.verifiedChunksByFileId.getValue(fileId)
-        if (verifiedChunks.add(chunkIndex)) {
-            if (session.stateMachine.state == FileTransferState.ACCEPTED ||
-                session.stateMachine.state == FileTransferState.INTERRUPTED
-            ) {
-                session.stateMachine.markChunkRequestStarted(activeStreamCount)
+        synchronized(session.lock) {
+            val verifiedChunks = session.verifiedChunksByFileId.getValue(fileId)
+            if (verifiedChunks.add(chunkIndex)) {
+                if (session.stateMachine.state == FileTransferState.ACCEPTED ||
+                    session.stateMachine.state == FileTransferState.INTERRUPTED
+                ) {
+                    session.stateMachine.markChunkRequestStarted(activeStreamCount)
+                }
+                session.stateMachine.markChunkVerified(range.length)
             }
-            session.stateMachine.markChunkVerified(range.length)
+        }
+    }
+
+    fun writeChunkStream(
+        transferId: String,
+        fileId: String,
+        chunkIndex: Long,
+        inputStream: InputStream,
+        contentLength: Long,
+        chunkSha256: String? = null,
+        activeStreamCount: Int = 1
+    ) {
+        val session = session(transferId)
+        val entry = session.manifest.fileEntries.firstOrNull { it.fileId == fileId }
+            ?: error("File not found.")
+        val size = entry.size ?: error("Directory entries cannot receive chunks.")
+        val range = ZevLinkTransferProtocol.byteRangeForChunk(size, chunkIndex)
+        require(contentLength == range.length) { "Chunk size does not match byte range." }
+
+        val actualChunkSha256 = positionedWrite(
+            file = File(session.tempRoot, entry.relativePath),
+            offset = range.startOffset,
+            inputStream = inputStream,
+            length = range.length,
+            computeSha256 = chunkSha256 != null
+        )
+        chunkSha256?.let { expected ->
+            require(expected == actualChunkSha256) { "Chunk SHA-256 mismatch." }
+        }
+
+        synchronized(session.lock) {
+            val verifiedChunks = session.verifiedChunksByFileId.getValue(fileId)
+            if (verifiedChunks.add(chunkIndex)) {
+                if (session.stateMachine.state == FileTransferState.ACCEPTED ||
+                    session.stateMachine.state == FileTransferState.INTERRUPTED
+                ) {
+                    session.stateMachine.markChunkRequestStarted(activeStreamCount)
+                }
+                session.stateMachine.markChunkVerified(range.length)
+            }
         }
     }
 
     @Synchronized
-    fun complete(transferId: String): CompletionResult {
+    fun complete(transferId: String, verifyFileHashes: Boolean = true): CompletionResult {
         val session = session(transferId)
         val completedFiles = session.manifest.fileEntries.map { entry ->
             val expectedChunks = ZevLinkTransferProtocol.chunkCount(entry.size ?: 0L)
@@ -132,14 +178,17 @@ class FileTransferReceiver(
             require(verifiedChunks.size.toLong() == expectedChunks) { "Transfer is missing chunks." }
 
             val tempFile = File(session.tempRoot, entry.relativePath)
-            val actualSha256 = sha256Hex(tempFile)
-            entry.sha256?.let { expected ->
-                require(expected == actualSha256) { "File SHA-256 mismatch." }
+            val actualSha256 = if (verifyFileHashes) sha256Hex(tempFile) else null
+            if (actualSha256 != null) {
+                entry.sha256?.let { expected ->
+                    require(expected == actualSha256) { "File SHA-256 mismatch." }
+                }
             }
             CompletedFile(
                 fileId = entry.fileId,
                 file = File(session.destinationRoot, entry.relativePath),
-                sha256 = actualSha256
+                sha256 = actualSha256 ?: entry.sha256.orEmpty(),
+                expectedSha256 = entry.sha256
             )
         }
 
@@ -163,6 +212,7 @@ class FileTransferReceiver(
         sessionsByTransferId.remove(transferId)?.tempRoot?.deleteRecursively()
     }
 
+    @Synchronized
     private fun session(transferId: String): Session {
         return sessionsByTransferId[transferId] ?: error("Transfer was not found.")
     }
@@ -192,6 +242,29 @@ class FileTransferReceiver(
                 }
             }
         }
+    }
+
+    private fun positionedWrite(
+        file: File,
+        offset: Long,
+        inputStream: InputStream,
+        length: Long,
+        computeSha256: Boolean
+    ): String? {
+        val digest = if (computeSha256) MessageDigest.getInstance("SHA-256") else null
+        RandomAccessFile(file, "rw").use { randomAccessFile ->
+            randomAccessFile.seek(offset)
+            val buffer = ByteArray(1024 * 1024)
+            var remaining = length
+            while (remaining > 0L) {
+                val read = inputStream.read(buffer, 0, minOf(buffer.size.toLong(), remaining).toInt())
+                require(read > 0) { "Unexpected EOF while receiving chunk." }
+                randomAccessFile.write(buffer, 0, read)
+                digest?.update(buffer, 0, read)
+                remaining -= read
+            }
+        }
+        return digest?.digest()?.joinToString("") { "%02x".format(it) }
     }
 
     private fun uniqueDestinationRoot(rawName: String): File {
@@ -236,7 +309,7 @@ class FileTransferReceiver(
         fun sha256Hex(file: File): String {
             val digest = MessageDigest.getInstance("SHA-256")
             file.inputStream().use { input ->
-                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                val buffer = ByteArray(1024 * 1024)
                 while (true) {
                     val read = input.read(buffer)
                     if (read <= 0) break

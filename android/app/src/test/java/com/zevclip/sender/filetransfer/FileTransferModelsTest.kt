@@ -20,7 +20,11 @@ class FileTransferModelsTest {
 
         assertEquals(ZevLinkTransferProtocol.CHUNK_SIZE_BYTES, range.startOffset)
         assertEquals(ZevLinkTransferProtocol.CHUNK_SIZE_BYTES + 7, range.endOffsetExclusive)
-        assertEquals("bytes 4194304-4194310/4194311", range.contentRangeHeader(4194311))
+        val fileSize = ZevLinkTransferProtocol.CHUNK_SIZE_BYTES + 7
+        assertEquals(
+            "bytes ${ZevLinkTransferProtocol.CHUNK_SIZE_BYTES}-${fileSize - 1}/$fileSize",
+            range.contentRangeHeader(fileSize)
+        )
     }
 
     @Test
@@ -94,4 +98,3 @@ class FileTransferModelsTest {
         assertFalse(TransferChunkRange(0, 2).overlaps(TransferChunkRange(2, 3)))
     }
 }
-

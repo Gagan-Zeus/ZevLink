@@ -18,6 +18,7 @@ enum AndroidFileTransferHTTPClient {
         guard (200..<300).contains(response.statusCode) else {
             throw FileTransferHTTPClientError.server("Android rejected offer (\(response.statusCode)).")
         }
+        let offer = try JSONDecoder().decode(FileTransferOfferResponse.self, from: response.body)
 
         let rangesData = try await postJSON(
             path: "/transfer/ranges",
@@ -29,38 +30,63 @@ enum AndroidFileTransferHTTPClient {
         let verifiedRanges = (try? JSONDecoder().decode([TransferVerifiedFileRanges].self, from: rangesData)) ?? []
 
         let sourceByFileId = Dictionary(uniqueKeysWithValues: sources.map { ($0.fileId, $0) })
-        var sentBytes = Int64(0)
-        try await withThrowingTaskGroup(of: Int64.self) { group in
-            var active = 0
-            var work: [(FileTransferLocalFileSource, Int64)] = []
-            for entry in manifest.fileEntries {
-                guard let source = sourceByFileId[entry.fileId] else { continue }
-                let verified = verifiedRanges.first(where: { $0.fileId == entry.fileId })
-                for chunkIndex in 0..<entry.chunkCount where verified?.isChunkVerified(chunkIndex) != true {
-                    work.append((source, chunkIndex))
-                }
-            }
-
-            var iterator = work.makeIterator()
-            func scheduleNext() {
-                guard active < 4, let next = iterator.next() else { return }
-                active += 1
-                group.addTask {
-                    try Task.checkCancellation()
-                    let payload = try FileTransferMacSender().readChunk(source: next.0, chunkIndex: next.1)
-                    try await postChunk(payload, endpoint: endpoint, token: token, transferId: manifest.transferId)
-                    return payload.byteRange.length
-                }
-            }
-
-            for _ in 0..<4 { scheduleNext() }
-            while let completed = try await group.next() {
-                active -= 1
-                sentBytes += completed
-                progress(sentBytes)
-                scheduleNext()
+        var work: [(FileTransferLocalFileSource, Int64)] = []
+        for entry in manifest.fileEntries {
+            guard let source = sourceByFileId[entry.fileId] else { continue }
+            let verified = verifiedRanges.first(where: { $0.fileId == entry.fileId })
+            for chunkIndex in 0..<entry.chunkCount where verified?.isChunkVerified(chunkIndex) != true {
+                work.append((source, chunkIndex))
             }
         }
+
+        var sentBytes = Int64(0)
+        var samples: [FileTransferStreamBenchmarkSample] = []
+        let candidates = FileTransferAdaptiveStreamSelector.candidates.filter { $0 <= offer.streamCount }
+        for streamCount in candidates {
+            let sampleCount = min(work.count, streamCount * 2)
+            guard sampleCount >= streamCount else { break }
+            let sampleWork = Array(work.prefix(sampleCount))
+            work.removeFirst(sampleCount)
+            let startedAt = CFAbsoluteTimeGetCurrent()
+            let bytes = try await upload(
+                sampleWork,
+                streamCount: streamCount,
+                endpoint: endpoint,
+                token: token,
+                transferId: manifest.transferId,
+                onChunkComplete: {
+                    sentBytes += $0
+                    progress(sentBytes)
+                }
+            )
+            samples.append(
+                FileTransferStreamBenchmarkSample(
+                    streamCount: streamCount,
+                    bytes: bytes,
+                    duration: CFAbsoluteTimeGetCurrent() - startedAt
+                )
+            )
+        }
+
+        let selectedStreamCount = min(
+            offer.streamCount,
+            FileTransferAdaptiveStreamSelector().chooseBestStreamCount(from: samples)
+        )
+        let benchmarkSummary = samples.map {
+            "\($0.streamCount)=\(String(format: "%.1f", $0.bytesPerSecond / 1_000_000)) MB/s"
+        }.joined(separator: ", ")
+        NSLog("ZevLink stream benchmark [%@], selected %d", benchmarkSummary, selectedStreamCount)
+        _ = try await upload(
+            work,
+            streamCount: selectedStreamCount,
+            endpoint: endpoint,
+            token: token,
+            transferId: manifest.transferId,
+            onChunkComplete: {
+                sentBytes += $0
+                progress(sentBytes)
+            }
+        )
 
         let completeResponse = try await postJSON(
             path: "/transfer/complete",
@@ -72,6 +98,45 @@ enum AndroidFileTransferHTTPClient {
         guard (200..<300).contains(completeResponse.statusCode) else {
             throw FileTransferHTTPClientError.server("Android could not complete transfer (\(completeResponse.statusCode)).")
         }
+    }
+
+    private static func upload(
+        _ work: [(FileTransferLocalFileSource, Int64)],
+        streamCount: Int,
+        endpoint: AndroidReceiverEndpoint,
+        token: String,
+        transferId: String,
+        onChunkComplete: (Int64) -> Void
+    ) async throws -> Int64 {
+        var transferredBytes = Int64(0)
+        try await withThrowingTaskGroup(of: Int64.self) { group in
+            var active = 0
+            var iterator = work.makeIterator()
+
+            func scheduleNext() {
+                guard active < streamCount, let next = iterator.next() else { return }
+                active += 1
+                group.addTask {
+                    try Task.checkCancellation()
+                    let payload = try FileTransferMacSender().readChunk(
+                        source: next.0,
+                        chunkIndex: next.1,
+                        includeHash: true
+                    )
+                    try await postChunk(payload, endpoint: endpoint, token: token, transferId: transferId)
+                    return payload.byteRange.length
+                }
+            }
+
+            for _ in 0..<streamCount { scheduleNext() }
+            while let completed = try await group.next() {
+                active -= 1
+                transferredBytes += completed
+                onChunkComplete(completed)
+                scheduleNext()
+            }
+        }
+        return transferredBytes
     }
 
     private static func postJSON(
@@ -100,7 +165,9 @@ enum AndroidFileTransferHTTPClient {
         var request = try request(path: "/transfer/chunk", endpoint: endpoint, token: token, transferId: transferId)
         request.setValue(payload.fileId, forHTTPHeaderField: "X-ZevLink-File-Id")
         request.setValue(String(payload.chunkIndex), forHTTPHeaderField: "X-ZevLink-Chunk-Index")
-        request.setValue(payload.sha256, forHTTPHeaderField: "X-ZevLink-Chunk-SHA256")
+        if !payload.sha256.isEmpty {
+            request.setValue(payload.sha256, forHTTPHeaderField: "X-ZevLink-Chunk-SHA256")
+        }
         request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
         request.httpBody = payload.data
         let (_, response) = try await URLSession.shared.data(for: request)

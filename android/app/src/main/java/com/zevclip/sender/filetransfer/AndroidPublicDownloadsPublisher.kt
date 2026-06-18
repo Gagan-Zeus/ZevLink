@@ -8,6 +8,7 @@ import android.os.Environment
 import android.provider.MediaStore
 import java.io.File
 import java.net.URLConnection
+import java.security.MessageDigest
 
 object AndroidPublicDownloadsPublisher {
     data class PublishedTransfer(
@@ -31,8 +32,7 @@ object AndroidPublicDownloadsPublisher {
         completion: FileTransferReceiver.CompletionResult
     ): PublishedTransfer {
         val resolver = context.contentResolver
-        val senderDirectory = sanitizePathComponent(completion.destinationRoot.name)
-        val publicRoot = "${Environment.DIRECTORY_DOWNLOADS}/ZevLink Transfers/$senderDirectory"
+        val publicRoot = Environment.DIRECTORY_DOWNLOADS
         val inserted = mutableListOf<Uri>()
 
         try {
@@ -63,9 +63,7 @@ object AndroidPublicDownloadsPublisher {
                     ?: error("Android could not create $displayName in public Downloads.")
                 inserted += uri
                 resolver.openOutputStream(uri, "w")?.use { output ->
-                    completedFile.file.inputStream().use { input ->
-                        input.copyTo(output, bufferSize = 1024 * 1024)
-                    }
+                    copyAndVerify(completedFile.file, output, completedFile.expectedSha256)
                 } ?: error("Android could not open $displayName in public Downloads.")
             }
 
@@ -79,7 +77,7 @@ object AndroidPublicDownloadsPublisher {
             }
             completion.destinationRoot.deleteRecursively()
             return PublishedTransfer(
-                publicDirectory = "/storage/emulated/0/$publicRoot",
+                publicDirectory = "/storage/emulated/0/${Environment.DIRECTORY_DOWNLOADS}",
                 fileUris = inserted
             )
         } catch (error: Exception) {
@@ -92,19 +90,17 @@ object AndroidPublicDownloadsPublisher {
     private fun publishLegacy(
         completion: FileTransferReceiver.CompletionResult
     ): PublishedTransfer {
-        val senderDirectory = sanitizePathComponent(completion.destinationRoot.name)
-        val publicRoot = File(
-            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-            "ZevLink Transfers/$senderDirectory"
-        )
+        val publicRoot = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
         check(publicRoot.mkdirs() || publicRoot.isDirectory) {
             "Android could not create ${publicRoot.absolutePath}."
         }
         completion.files.forEach { completedFile ->
             val relativePath = completedFile.file.relativeTo(completion.destinationRoot).invariantSeparatorsPath
-            val destination = File(publicRoot, relativePath)
+            val destination = uniqueDestinationFile(File(publicRoot, relativePath))
             destination.parentFile?.mkdirs()
-            completedFile.file.copyTo(destination, overwrite = false)
+            destination.outputStream().use { output ->
+                copyAndVerify(completedFile.file, output, completedFile.expectedSha256)
+            }
         }
         completion.destinationRoot.deleteRecursively()
         return PublishedTransfer(
@@ -119,5 +115,47 @@ object AndroidPublicDownloadsPublisher {
             .trim()
             .ifBlank { "Transfer" }
             .take(ZevLinkTransferProtocol.MAX_DISPLAY_NAME_SCALARS)
+    }
+
+    private fun uniqueDestinationFile(requested: File): File {
+        if (!requested.exists()) return requested
+
+        val extension = requested.extension
+        val baseName = requested.nameWithoutExtension
+        var suffix = 2
+        var candidate: File
+        do {
+            val name = if (extension.isEmpty()) {
+                "$baseName $suffix"
+            } else {
+                "$baseName $suffix.$extension"
+            }
+            candidate = File(requested.parentFile, name)
+            suffix += 1
+        } while (candidate.exists())
+        return candidate
+    }
+
+    private fun copyAndVerify(
+        source: File,
+        output: java.io.OutputStream,
+        expectedSha256: String?
+    ) {
+        val digest = expectedSha256?.let { MessageDigest.getInstance("SHA-256") }
+        source.inputStream().use { input ->
+            val buffer = ByteArray(1024 * 1024)
+            while (true) {
+                val read = input.read(buffer)
+                if (read <= 0) break
+                output.write(buffer, 0, read)
+                digest?.update(buffer, 0, read)
+            }
+        }
+        expectedSha256?.let { expected ->
+            val actualSha256 = checkNotNull(digest)
+                .digest()
+                .joinToString("") { "%02x".format(it) }
+            require(expected == actualSha256) { "File SHA-256 mismatch." }
+        }
     }
 }

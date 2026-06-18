@@ -79,8 +79,7 @@ final class FileTransferReceiver {
     private var sessionsByTransferId: [String: Session] = [:]
 
     init(
-        downloadsRoot: URL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first!
-            .appendingPathComponent("ZevLink Transfers", isDirectory: true),
+        downloadsRoot: URL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first!,
         fileManager: FileManager = .default
     ) {
         self.downloadsRoot = downloadsRoot
@@ -97,7 +96,7 @@ final class FileTransferReceiver {
             receiverMaximum: receiverMaximumStreams
         )
         let resumeToken = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
-        let finalRoot = try uniqueDestinationRoot(for: manifest)
+        let finalRoot = downloadsRoot
         let tempRoot = downloadsRoot
             .appendingPathComponent(".partial", isDirectory: true)
             .appendingPathComponent("\(manifest.transferId)-\(resumeToken)", isDirectory: true)
@@ -182,7 +181,7 @@ final class FileTransferReceiver {
 
     func complete(transferId: String) throws -> FileTransferCompletionResult {
         let session = try session(for: transferId)
-        var completedFiles: [FileTransferCompletedFile] = []
+        var verifiedFiles: [(entry: FileTransferEntry, tempURL: URL, sha256: String)] = []
 
         for entry in session.manifest.fileEntries {
             guard let expectedSize = entry.size else {
@@ -199,21 +198,33 @@ final class FileTransferReceiver {
             if let expectedSHA256 = entry.sha256, expectedSHA256 != actualSHA256 {
                 throw FileTransferReceiverError.hashMismatch
             }
+            verifiedFiles.append((entry, tempURL, actualSHA256))
+        }
+
+        var completedFiles: [FileTransferCompletedFile] = []
+        for verifiedFile in verifiedFiles {
+            let destinationURL = uniqueDestinationURL(
+                for: session.finalRoot.appendingPathComponent(
+                    verifiedFile.entry.relativePath,
+                    isDirectory: false
+                )
+            )
+            try fileManager.createDirectory(
+                at: destinationURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try fileManager.moveItem(at: verifiedFile.tempURL, to: destinationURL)
             completedFiles.append(
                 FileTransferCompletedFile(
-                    fileId: entry.fileId,
-                    url: session.finalRoot.appendingPathComponent(entry.relativePath, isDirectory: false),
-                    sha256: actualSHA256
+                    fileId: verifiedFile.entry.fileId,
+                    url: destinationURL,
+                    sha256: verifiedFile.sha256
                 )
             )
         }
 
         try markVerifyingAndComplete(transferId: transferId)
-        try fileManager.createDirectory(
-            at: session.finalRoot.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-        try fileManager.moveItem(at: session.tempRoot, to: session.finalRoot)
+        try? fileManager.removeItem(at: session.tempRoot)
 
         lock.lock()
         sessionsByTransferId.removeValue(forKey: transferId)
@@ -281,21 +292,24 @@ final class FileTransferReceiver {
         }
     }
 
-    private func uniqueDestinationRoot(for manifest: FileTransferManifest) throws -> URL {
-        let baseName = sanitizedName(manifest.senderName.isEmpty ? manifest.transferId : manifest.senderName)
-        var candidate = downloadsRoot.appendingPathComponent(baseName, isDirectory: true)
-        var suffix = 2
-        while fileManager.fileExists(atPath: candidate.path) {
-            candidate = downloadsRoot.appendingPathComponent("\(baseName) \(suffix)", isDirectory: true)
-            suffix += 1
+    private func uniqueDestinationURL(for requestedURL: URL) -> URL {
+        guard fileManager.fileExists(atPath: requestedURL.path) else {
+            return requestedURL
         }
-        return candidate
-    }
 
-    private func sanitizedName(_ name: String) -> String {
-        let illegal = CharacterSet(charactersIn: "/:\\\0").union(.newlines)
-        let cleaned = name.components(separatedBy: illegal).joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
-        return cleaned.isEmpty ? "Transfer" : cleaned
+        let fileExtension = requestedURL.pathExtension
+        let baseName = requestedURL.deletingPathExtension().lastPathComponent
+        let parent = requestedURL.deletingLastPathComponent()
+        var suffix = 2
+        var candidate: URL
+        repeat {
+            let name = fileExtension.isEmpty
+                ? "\(baseName) \(suffix)"
+                : "\(baseName) \(suffix).\(fileExtension)"
+            candidate = parent.appendingPathComponent(name, isDirectory: false)
+            suffix += 1
+        } while fileManager.fileExists(atPath: candidate.path)
+        return candidate
     }
 
     private func fileURL(for entry: FileTransferEntry, root: URL) -> URL {

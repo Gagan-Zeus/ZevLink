@@ -33,6 +33,28 @@ class FileTransferSenderTest {
     }
 
     @Test
+    fun canStreamChunkWithoutComputingAChunkHash() {
+        val root = Files.createTempDirectory("zevlink-sender-no-hash-test")
+        try {
+            val file = root.resolve("payload.bin").toFile()
+            file.writeBytes(ByteArray(1024) { it.toByte() })
+
+            val output = ByteArrayOutputStream()
+            val hash = FileTransferAndroidSender().streamChunk(
+                source = TestFileTransferSource(file),
+                chunkIndex = 0,
+                outputStream = output,
+                computeSha256 = false
+            )
+
+            assertEquals(1024, output.size())
+            assertEquals("", hash)
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
     fun choosesFastestMeasuredStreamCount() {
         val selector = FileTransferAdaptiveStreamSelector()
         val selected = selector.chooseBestStreamCount(

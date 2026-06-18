@@ -123,28 +123,27 @@ class FileTransferAndroidSender {
         source: FileTransferSource,
         chunkIndex: Long,
         outputStream: OutputStream,
-        bufferSize: Int = 256 * 1024
+        bufferSize: Int = 1024 * 1024,
+        computeSha256: Boolean = true
     ): String {
         val range = ZevLinkTransferProtocol.byteRangeForChunk(source.size, chunkIndex)
-        val digest = MessageDigest.getInstance("SHA-256")
+        val digest = if (computeSha256) MessageDigest.getInstance("SHA-256") else null
         source.openChannel().use { opened ->
             opened.channel.position(range.startOffset)
-            val buffer = ByteBuffer.allocateDirect(bufferSize)
+            val bytes = ByteArray(bufferSize)
+            val buffer = ByteBuffer.wrap(bytes)
             var remaining = range.length
             while (remaining > 0L) {
                 buffer.clear()
                 buffer.limit(minOf(buffer.capacity().toLong(), remaining).toInt())
                 val read = opened.channel.read(buffer)
                 require(read >= 0) { "Unexpected EOF while reading ${source.displayName}." }
-                buffer.flip()
-                val bytes = ByteArray(read)
-                buffer.get(bytes)
-                digest.update(bytes)
-                outputStream.write(bytes)
+                digest?.update(bytes, 0, read)
+                outputStream.write(bytes, 0, read)
                 remaining -= read
             }
         }
-        return digest.digest().joinToString("") { "%02x".format(it) }
+        return digest?.digest()?.joinToString("") { "%02x".format(it) }.orEmpty()
     }
 
     fun sha256Hex(source: FileTransferSource, bufferSize: Int = 1024 * 1024): String {

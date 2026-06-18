@@ -5,6 +5,9 @@
     <string name="screen_description">Connect your Android phone and Mac for clipboard sync, AirPlay, notifications, and calls.</string>
     <string name="settings_title">Settings</string>
     <string name="settings_description">Pair your Mac, manage permissions, and add the clipboard tile.</string>
+    <string name="file_transfer_settings_title">File Transfers</string>
+    <string name="file_transfer_settings_description">Control whether your paired Mac can start sending files to this phone.</string>
+    <string name="file_transfer_auto_accept">Accept incoming file transfers automatically</string>
     <string name="done">Done</string>
     <string name="back">Back</string>
     <string name="clipboard_sync_title">Device Controls</string>

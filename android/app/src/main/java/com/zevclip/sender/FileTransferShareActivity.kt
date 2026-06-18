@@ -90,7 +90,7 @@ class FileTransferShareActivity : Activity() {
                     senderDeviceId = ZevClipPreferences.androidDeviceId(this),
                     senderName = android.os.Build.MODEL ?: "Android",
                     sources = sources,
-                    requestedStreamCount = 4
+                    requestedStreamCount = 8
                 )
                 runOnUiThread {
                     progressBar.progress = 0

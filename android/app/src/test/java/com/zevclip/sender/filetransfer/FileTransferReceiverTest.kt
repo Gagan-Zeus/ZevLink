@@ -69,6 +69,31 @@ class FileTransferReceiverTest {
         }
     }
 
+    @Test
+    fun streamsChunkDirectlyIntoPositionedFile() {
+        val root = Files.createTempDirectory("zevlink-transfer-stream-test")
+        try {
+            val bytes = ByteArray(1024 * 1024 + 17) { (it % 239).toByte() }
+            val manifest = manifestFor(bytes)
+            val receiver = FileTransferReceiver(root.toFile())
+            receiver.accept(manifest)
+
+            receiver.writeChunkStream(
+                transferId = manifest.transferId,
+                fileId = "file-1",
+                chunkIndex = 0,
+                inputStream = bytes.inputStream(),
+                contentLength = bytes.size.toLong(),
+                chunkSha256 = FileTransferReceiver.sha256Hex(bytes)
+            )
+
+            val result = receiver.complete(manifest.transferId)
+            assertArrayEquals(bytes, result.files.single().file.readBytes())
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
     private fun manifestFor(bytes: ByteArray): FileTransferManifest {
         return FileTransferManifest(
             transferId = "transfer-1",

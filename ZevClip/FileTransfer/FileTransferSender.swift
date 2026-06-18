@@ -89,9 +89,10 @@ final class FileTransferMacSender {
         senderDeviceId: String,
         senderName: String,
         sources: [FileTransferLocalFileSource],
-        requestedStreamCount: Int
+        requestedStreamCount: Int,
+        includeFileHashes: Bool = true
     ) throws -> FileTransferManifest {
-        let entries = try sources.map { try $0.entry() }
+        let entries = try sources.map { try $0.entry(includeHash: includeFileHashes) }
         return try FileTransferManifest(
             transferId: transferId,
             senderDeviceId: senderDeviceId,
@@ -105,7 +106,11 @@ final class FileTransferMacSender {
         )
     }
 
-    func readChunk(source: FileTransferLocalFileSource, chunkIndex: Int64) throws -> FileTransferChunkPayload {
+    func readChunk(
+        source: FileTransferLocalFileSource,
+        chunkIndex: Int64,
+        includeHash: Bool = true
+    ) throws -> FileTransferChunkPayload {
         let fileSize = source.size
         let range = try ZevLinkTransferProtocol.byteRangeForChunk(fileSize: fileSize, chunkIndex: chunkIndex)
         let fileDescriptor = open(source.url.path, O_RDONLY)
@@ -139,7 +144,7 @@ final class FileTransferMacSender {
             chunkIndex: chunkIndex,
             byteRange: range,
             data: data,
-            sha256: FileTransferReceiver.sha256Hex(data: data)
+            sha256: includeHash ? FileTransferReceiver.sha256Hex(data: data) : ""
         )
     }
 }
