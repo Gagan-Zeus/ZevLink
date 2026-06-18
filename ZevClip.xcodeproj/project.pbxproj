@@ -23,6 +23,14 @@
 		B8CA797C763F040EDE0356DE /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 320BFAD0195F6C551F287AC0 /* ContentView.swift */; };
 		C405F78AD025A73FDB6198B8 /* ZevClipApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7AA610A696A5F3C375689D0B /* ZevClipApp.swift */; };
 		EA1F0F348E2F6935D2662676 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C1243D8396B04479B723679A /* Assets.xcassets */; };
+		F1A2B3C4D5E6F708192A3B4C /* FileTransferModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A2B3C4D5E6F708192A3B4E /* FileTransferModels.swift */; };
+		F1A2B3C4D5E6F708192A3B57 /* FileTransferService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A2B3C4D5E6F708192A3B5A /* FileTransferService.swift */; };
+		F1A2B3C4D5E6F708192A3B58 /* AndroidFileTransferHTTPClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A2B3C4D5E6F708192A3B5B /* AndroidFileTransferHTTPClient.swift */; };
+		F1A2B3C4D5E6F708192A3B59 /* MacFileTransferServiceProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A2B3C4D5E6F708192A3B5C /* MacFileTransferServiceProvider.swift */; };
+		F1A2B3C4D5E6F708192A3B53 /* FileTransferReceiver.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A2B3C4D5E6F708192A3B55 /* FileTransferReceiver.swift */; };
+		F1A2B3C4D5E6F708192A3B51 /* FileTransferSecurity.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A2B3C4D5E6F708192A3B52 /* FileTransferSecurity.swift */; };
+		F1A2B3C4D5E6F708192A3B54 /* FileTransferSender.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A2B3C4D5E6F708192A3B56 /* FileTransferSender.swift */; };
+		F1A2B3C4D5E6F708192A3B4D /* FileTransferStateMachine.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A2B3C4D5E6F708192A3B4F /* FileTransferStateMachine.swift */; };
 		F35C75705FE3D682B27E4964 /* AndroidClipboardSender.swift in Sources */ = {isa = PBXBuildFile; fileRef = 216D04B84726F014340F6DE2 /* AndroidClipboardSender.swift */; };
 		F720DDC4973512A61918258B /* ClipboardHTTPServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BAF94C62FB5C5E506492DFD /* ClipboardHTTPServer.swift */; };
 /* End PBXBuildFile section */
@@ -48,6 +56,14 @@
 		D349EA03D0A76DC6B676F25E /* PairingTokenKeychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingTokenKeychain.swift; sourceTree = "<group>"; };
 		DC212D4E76DE1F008110B141 /* AppRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRuntime.swift; sourceTree = "<group>"; };
 		E4B8AB008D584F12EAE87B57 /* MacBatteryStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacBatteryStatus.swift; sourceTree = "<group>"; };
+		F1A2B3C4D5E6F708192A3B4E /* FileTransferModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTransferModels.swift; sourceTree = "<group>"; };
+		F1A2B3C4D5E6F708192A3B5A /* FileTransferService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTransferService.swift; sourceTree = "<group>"; };
+		F1A2B3C4D5E6F708192A3B5B /* AndroidFileTransferHTTPClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AndroidFileTransferHTTPClient.swift; sourceTree = "<group>"; };
+		F1A2B3C4D5E6F708192A3B5C /* MacFileTransferServiceProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacFileTransferServiceProvider.swift; sourceTree = "<group>"; };
+		F1A2B3C4D5E6F708192A3B55 /* FileTransferReceiver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTransferReceiver.swift; sourceTree = "<group>"; };
+		F1A2B3C4D5E6F708192A3B56 /* FileTransferSender.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTransferSender.swift; sourceTree = "<group>"; };
+		F1A2B3C4D5E6F708192A3B4F /* FileTransferStateMachine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTransferStateMachine.swift; sourceTree = "<group>"; };
+		F1A2B3C4D5E6F708192A3B52 /* FileTransferSecurity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTransferSecurity.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -76,6 +92,7 @@
 				C1243D8396B04479B723679A /* Assets.xcassets */,
 				4AFF2250F5F626D53C0BE6CF /* Info.plist */,
 				5A0371B9E8F1A7DF113C8B94 /* App */,
+				F1A2B3C4D5E6F708192A3B50 /* FileTransfer */,
 				F02D8D283B2206D4FCADBA05 /* Services */,
 				66DE4E9CF14E575465868B29 /* Stores */,
 				EDBF2194EC3EFD010F57AC2C /* Support */,
@@ -93,6 +110,21 @@
 				9F80D315D93BC2EBAB672C9A /* DeviceIdentityStore.swift */,
 			);
 			path = Stores;
+			sourceTree = "<group>";
+		};
+		F1A2B3C4D5E6F708192A3B50 /* FileTransfer */ = {
+			isa = PBXGroup;
+			children = (
+				F1A2B3C4D5E6F708192A3B5B /* AndroidFileTransferHTTPClient.swift */,
+				F1A2B3C4D5E6F708192A3B4E /* FileTransferModels.swift */,
+				F1A2B3C4D5E6F708192A3B55 /* FileTransferReceiver.swift */,
+				F1A2B3C4D5E6F708192A3B52 /* FileTransferSecurity.swift */,
+				F1A2B3C4D5E6F708192A3B56 /* FileTransferSender.swift */,
+				F1A2B3C4D5E6F708192A3B5A /* FileTransferService.swift */,
+				F1A2B3C4D5E6F708192A3B4F /* FileTransferStateMachine.swift */,
+				F1A2B3C4D5E6F708192A3B5C /* MacFileTransferServiceProvider.swift */,
+			);
+			path = FileTransfer;
 			sourceTree = "<group>";
 		};
 		7D82C13FDCFC5D24E396E126 = {
@@ -207,6 +239,14 @@
 				5B2A64EEB803EC30746CA86F /* ClipboardReceiver.swift in Sources */,
 				B8CA797C763F040EDE0356DE /* ContentView.swift in Sources */,
 				AEE8CDAB4F0D66EBEDD57F6F /* DeviceIdentityStore.swift in Sources */,
+				F1A2B3C4D5E6F708192A3B58 /* AndroidFileTransferHTTPClient.swift in Sources */,
+				F1A2B3C4D5E6F708192A3B4C /* FileTransferModels.swift in Sources */,
+				F1A2B3C4D5E6F708192A3B53 /* FileTransferReceiver.swift in Sources */,
+				F1A2B3C4D5E6F708192A3B51 /* FileTransferSecurity.swift in Sources */,
+				F1A2B3C4D5E6F708192A3B54 /* FileTransferSender.swift in Sources */,
+				F1A2B3C4D5E6F708192A3B57 /* FileTransferService.swift in Sources */,
+				F1A2B3C4D5E6F708192A3B4D /* FileTransferStateMachine.swift in Sources */,
+				F1A2B3C4D5E6F708192A3B59 /* MacFileTransferServiceProvider.swift in Sources */,
 				003C797EAA8C8B95F5BC210B /* LocalNetworkHost.swift in Sources */,
 				65DDFB57E7BE037B327EB2FD /* MacBatteryStatus.swift in Sources */,
 				86592C60E6753F38F8F1A5CA /* MacClipboardWatcher.swift in Sources */,

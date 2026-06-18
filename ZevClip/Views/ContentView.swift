@@ -4,6 +4,7 @@ struct ContentView: View {
     @ObservedObject var receiver: ClipboardReceiver
     @ObservedObject var macClipboardWatcher: MacClipboardWatcher
     @ObservedObject var androidClipboardSender: AndroidClipboardSender
+    @ObservedObject var fileTransferService: FileTransferService
     @ObservedObject var appSettings: AppSettings
 
     private var isSyncRunning: Bool {
@@ -101,6 +102,37 @@ struct ContentView: View {
             Divider()
 
             VStack(alignment: .leading, spacing: 12) {
+                Text("File Transfer")
+                    .font(.headline)
+
+                Text(fileTransferService.displayState.title)
+                    .font(.subheadline.weight(.semibold))
+                Text(fileTransferService.displayState.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+
+                ProgressView(value: fileTransferService.displayState.progress)
+
+                HStack {
+                    Text(transferSpeedText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text(transferETAText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if fileTransferService.displayState.canCancel {
+                        Button("Cancel") {
+                            fileTransferService.cancelActiveTransfer()
+                        }
+                    }
+                }
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 12) {
                 Text("Pair Android")
                     .font(.headline)
 
@@ -111,6 +143,7 @@ struct ContentView: View {
                     PairingQRCodeView(
                         token: receiver.pairingToken,
                         deviceId: receiver.deviceId,
+                        transferCertificateSHA256: receiver.transferCertificateSHA256,
                         showsDetails: false
                     )
                     .frame(width: 244, height: 244)
@@ -171,12 +204,49 @@ struct ContentView: View {
                 Text("Lets your paired Android phone lock, sleep, restart, shut down, adjust volume, control media, and open URLs on this Mac.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                Toggle(
+                    "Accept incoming file transfers automatically",
+                    isOn: Binding(
+                        get: { appSettings.fileTransferAutoAccept },
+                        set: { appSettings.setFileTransferAutoAccept($0) }
+                    )
+                )
+
+                Toggle(
+                    "Save received files to Downloads",
+                    isOn: Binding(
+                        get: { appSettings.fileTransferSaveToDownloads },
+                        set: { appSettings.setFileTransferSaveToDownloads($0) }
+                    )
+                )
+
+                Toggle(
+                    "Skip already verified chunks on resume",
+                    isOn: Binding(
+                        get: { appSettings.fileTransferChunkDeduplication },
+                        set: { appSettings.setFileTransferChunkDeduplication($0) }
+                    )
+                )
             }
 
             Spacer(minLength: 0)
         }
         .padding(24)
         .frame(minWidth: 500, minHeight: 620)
+    }
+
+    private var transferSpeedText: String {
+        let speed = Int64(fileTransferService.displayState.speedBytesPerSecond)
+        guard speed > 0 else { return "Speed: -" }
+        return "Speed: \(ByteCountFormatter.string(fromByteCount: speed, countStyle: .file))/s"
+    }
+
+    private var transferETAText: String {
+        guard let eta = fileTransferService.displayState.etaSeconds, eta.isFinite else {
+            return "ETA: -"
+        }
+        return "ETA: \(Int(eta.rounded()))s"
     }
 
     private var macStatusText: String {

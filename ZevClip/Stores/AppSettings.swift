@@ -9,12 +9,18 @@ final class AppSettings: ObservableObject {
         static let launchAtLoginRegisteredPath = "launchAtLoginRegisteredPath"
         static let remoteControlEnabled = "remoteControlEnabled"
         static let showMenuBarIcon = "showMenuBarIcon"
+        static let fileTransferAutoAccept = "fileTransferAutoAccept"
+        static let fileTransferSaveToDownloads = "fileTransferSaveToDownloads"
+        static let fileTransferChunkDeduplication = "fileTransferChunkDeduplication"
     }
 
     @Published private(set) var launchAtLoginEnabled: Bool
     @Published private(set) var launchAtLoginStatus: String
     @Published private(set) var remoteControlEnabled: Bool
     @Published private(set) var showMenuBarIcon: Bool
+    @Published private(set) var fileTransferAutoAccept: Bool
+    @Published private(set) var fileTransferSaveToDownloads: Bool
+    @Published private(set) var fileTransferChunkDeduplication: Bool
 
     init() {
         Self.migrateLegacyDefaultsIfNeeded()
@@ -37,6 +43,15 @@ final class AppSettings: ObservableObject {
         showMenuBarIcon = UserDefaults.standard.object(
             forKey: DefaultsKey.showMenuBarIcon
         ) as? Bool ?? true
+        fileTransferAutoAccept = UserDefaults.standard.object(
+            forKey: DefaultsKey.fileTransferAutoAccept
+        ) as? Bool ?? true
+        fileTransferSaveToDownloads = UserDefaults.standard.object(
+            forKey: DefaultsKey.fileTransferSaveToDownloads
+        ) as? Bool ?? true
+        fileTransferChunkDeduplication = UserDefaults.standard.object(
+            forKey: DefaultsKey.fileTransferChunkDeduplication
+        ) as? Bool ?? true
 
         if launchAtLoginEnabled && !installedPathIsRegistered {
             Task { @MainActor [weak self] in
@@ -53,6 +68,29 @@ final class AppSettings: ObservableObject {
     func setRemoteControlEnabled(_ isEnabled: Bool) {
         UserDefaults.standard.set(isEnabled, forKey: DefaultsKey.remoteControlEnabled)
         remoteControlEnabled = isEnabled
+    }
+
+    func setFileTransferAutoAccept(_ isEnabled: Bool) {
+        UserDefaults.standard.set(isEnabled, forKey: DefaultsKey.fileTransferAutoAccept)
+        fileTransferAutoAccept = isEnabled
+        ZevClipRuntime.shared.fileTransferService.updateSettings(
+            autoAcceptIncoming: isEnabled,
+            saveIncomingToDownloads: fileTransferSaveToDownloads
+        )
+    }
+
+    func setFileTransferSaveToDownloads(_ isEnabled: Bool) {
+        UserDefaults.standard.set(isEnabled, forKey: DefaultsKey.fileTransferSaveToDownloads)
+        fileTransferSaveToDownloads = isEnabled
+        ZevClipRuntime.shared.fileTransferService.updateSettings(
+            autoAcceptIncoming: fileTransferAutoAccept,
+            saveIncomingToDownloads: isEnabled
+        )
+    }
+
+    func setFileTransferChunkDeduplication(_ isEnabled: Bool) {
+        UserDefaults.standard.set(isEnabled, forKey: DefaultsKey.fileTransferChunkDeduplication)
+        fileTransferChunkDeduplication = isEnabled
     }
 
     nonisolated static func savedRemoteControlEnabled() -> Bool {
@@ -187,7 +225,10 @@ final class AppSettings: ObservableObject {
                 DefaultsKey.launchAtLoginEnabled,
                 DefaultsKey.launchAtLoginRegisteredPath,
                 DefaultsKey.remoteControlEnabled,
-                DefaultsKey.showMenuBarIcon
+                DefaultsKey.showMenuBarIcon,
+                DefaultsKey.fileTransferAutoAccept,
+                DefaultsKey.fileTransferSaveToDownloads,
+                DefaultsKey.fileTransferChunkDeduplication
             ] where defaults.object(forKey: key) == nil {
                 defaults.set(legacyDomain[key], forKey: key)
             }

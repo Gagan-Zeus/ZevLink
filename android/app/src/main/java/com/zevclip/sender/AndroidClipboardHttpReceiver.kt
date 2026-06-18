@@ -3,12 +3,17 @@ package com.zevclip.sender
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.os.Environment
 import android.os.BatteryManager
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import org.json.JSONObject
+import com.zevclip.sender.filetransfer.FileTransferJson
+import com.zevclip.sender.filetransfer.FileTransferReceiver
+import com.zevclip.sender.filetransfer.AndroidPublicDownloadsPublisher
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
@@ -41,6 +46,9 @@ class AndroidClipboardHttpReceiver(
     private val connectionExecutor = Executors.newCachedThreadPool { runnable ->
         Thread(runnable, "ZevClipAndroidReceiverClient")
     }
+    private val fileTransferReceiver = FileTransferReceiver(
+        File(appContext.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: appContext.filesDir, "ZevLink Transfers")
+    )
 
     @Volatile private var serverSocket: ServerSocket? = null
 
@@ -146,7 +154,8 @@ class AndroidClipboardHttpReceiver(
                 requestParts[1] != CLIPBOARD_PATH &&
                 requestParts[1] != NOTIFICATION_ACTION_PATH &&
                 requestParts[1] != CALL_ACTION_PATH &&
-                requestParts[1] != MEDIA_CONTROL_PATH
+                requestParts[1] != MEDIA_CONTROL_PATH &&
+                !requestParts[1].startsWith(TRANSFER_PREFIX)
             ) {
                 output.write(response("404 Not Found", "Unknown path.").toByteArray(Charsets.UTF_8))
                 return
@@ -159,7 +168,7 @@ class AndroidClipboardHttpReceiver(
             }
 
             if (contentLength > MAX_BODY_LENGTH) {
-                output.write(response("413 Content Too Large", "Clipboard text is limited to 1 MB.").toByteArray(Charsets.UTF_8))
+                output.write(response("413 Content Too Large", "Request body is too large.").toByteArray(Charsets.UTF_8))
                 return
             }
 
@@ -182,6 +191,11 @@ class AndroidClipboardHttpReceiver(
 
             if (requestParts[1] == MEDIA_CONTROL_PATH) {
                 output.write(handleMediaControlAction(body).toByteArray(Charsets.UTF_8))
+                return
+            }
+
+            if (requestParts[1].startsWith(TRANSFER_PREFIX)) {
+                output.write(handleFileTransfer(requestParts[1], headers, body).toByteArray(Charsets.UTF_8))
                 return
             }
 
@@ -410,6 +424,80 @@ class AndroidClipboardHttpReceiver(
         }
     }
 
+    private fun handleFileTransfer(path: String, headers: Map<String, String>, body: ByteArray): String {
+        return try {
+            when (path) {
+                TRANSFER_OFFER_PATH -> {
+                    val manifest = FileTransferJson.manifestFromJson(JSONObject(String(body, Charsets.UTF_8)))
+                    val offer = fileTransferReceiver.accept(
+                        manifest = manifest,
+                        requestedStreamCount = 4,
+                        receiverMaximumStreams = 4
+                    )
+                    response(
+                        status = "200 OK",
+                        body = FileTransferJson.offerResponseToJson(offer).toString(),
+                        contentType = "application/json; charset=utf-8"
+                    )
+                }
+                TRANSFER_RANGES_PATH -> {
+                    val transferId = transferId(headers, body)
+                    response(
+                        status = "200 OK",
+                        body = FileTransferJson.rangesToJson(fileTransferReceiver.verifiedRanges(transferId)).toString(),
+                        contentType = "application/json; charset=utf-8"
+                    )
+                }
+                TRANSFER_CHUNK_PATH -> {
+                    val transferId = requiredHeader(headers, "x-zevlink-transfer-id")
+                    val fileId = requiredHeader(headers, "x-zevlink-file-id")
+                    val chunkIndex = requiredHeader(headers, "x-zevlink-chunk-index").toLong()
+                    val chunkHash = headers["x-zevlink-chunk-sha256"]?.takeUnless { it.isBlank() }
+                    fileTransferReceiver.writeChunk(
+                        transferId = transferId,
+                        fileId = fileId,
+                        chunkIndex = chunkIndex,
+                        data = body,
+                        chunkSha256 = chunkHash,
+                        activeStreamCount = 4
+                    )
+                    response("200 OK", "Chunk accepted.")
+                }
+                TRANSFER_COMPLETE_PATH -> {
+                    val transferId = transferId(headers, body)
+                    val completed = fileTransferReceiver.complete(transferId)
+                    val published = AndroidPublicDownloadsPublisher.publish(appContext, completed)
+                    response(
+                        status = "200 OK",
+                        body = JSONObject()
+                            .put("transferId", completed.transferId)
+                            .put("destination", published.publicDirectory)
+                            .put("publishedFileCount", published.fileUris.size)
+                            .toString(),
+                        contentType = "application/json; charset=utf-8"
+                    )
+                }
+                TRANSFER_CANCEL_PATH -> {
+                    fileTransferReceiver.cancel(transferId(headers, body))
+                    response("200 OK", "Transfer cancelled.")
+                }
+                else -> response("404 Not Found", "Unknown transfer path.")
+            }
+        } catch (error: Exception) {
+            Log.w(TAG, "File transfer request failed", error)
+            response("400 Bad Request", error.message ?: "File transfer failed.")
+        }
+    }
+
+    private fun transferId(headers: Map<String, String>, body: ByteArray): String {
+        return headers["x-zevlink-transfer-id"]?.takeUnless { it.isBlank() }
+            ?: FileTransferJson.transferIdFromJson(body)
+    }
+
+    private fun requiredHeader(headers: Map<String, String>, name: String): String {
+        return headers[name]?.takeUnless { it.isBlank() } ?: error("$name is required.")
+    }
+
     private fun currentBatteryPercentage(): Int? {
         val batteryManager = appContext.getSystemService(BatteryManager::class.java)
         val percentage = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
@@ -473,6 +561,12 @@ class AndroidClipboardHttpReceiver(
         const val NOTIFICATION_ACTION_PATH = "/notification-action"
         const val CALL_ACTION_PATH = "/call-action"
         const val MEDIA_CONTROL_PATH = "/media-control"
+        const val TRANSFER_PREFIX = "/transfer/"
+        const val TRANSFER_OFFER_PATH = "/transfer/offer"
+        const val TRANSFER_RANGES_PATH = "/transfer/ranges"
+        const val TRANSFER_CHUNK_PATH = "/transfer/chunk"
+        const val TRANSFER_COMPLETE_PATH = "/transfer/complete"
+        const val TRANSFER_CANCEL_PATH = "/transfer/cancel"
 
         private const val TAG = "ZevClipAndroidReceiver"
         private const val TOKEN_HEADER = "x-zevclip-token"
@@ -485,7 +579,7 @@ class AndroidClipboardHttpReceiver(
         private const val CLIPBOARD_LABEL = "ZevLink"
         private const val HEADER_END = "\r\n\r\n"
         private const val MAX_HEADER_LENGTH = 16_384
-        private const val MAX_BODY_LENGTH = 1_048_576
+        private const val MAX_BODY_LENGTH = 20 * 1024 * 1024
         private const val READ_TIMEOUT_MS = 8_000
         private const val CLIPBOARD_WRITE_TIMEOUT_MS = 2_000L
     }

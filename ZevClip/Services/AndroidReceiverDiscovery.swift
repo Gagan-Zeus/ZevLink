@@ -5,6 +5,7 @@ struct AndroidReceiverEndpoint: Equatable {
     let name: String
     let deviceId: String?
     let batteryPercentage: Int?
+    let transferCertificateSHA256: String?
     let host: String
     let port: Int
 
@@ -18,6 +19,7 @@ struct AndroidReceiverEndpoint: Equatable {
             name: name,
             deviceId: deviceId,
             batteryPercentage: batteryPercentage,
+            transferCertificateSHA256: transferCertificateSHA256,
             host: host,
             port: port
         )
@@ -181,6 +183,7 @@ final class AndroidReceiverDiscovery: NSObject {
             name: service.name,
             deviceId: normalizedDeviceId(deviceId(from: service)),
             batteryPercentage: batteryPercentage(from: service),
+            transferCertificateSHA256: transferCertificateFingerprint(from: service),
             host: host,
             port: service.port
         )
@@ -259,6 +262,22 @@ final class AndroidReceiverDiscovery: NSObject {
         return percentage
     }
 
+    private func transferCertificateFingerprint(from service: NetService) -> String? {
+        guard let data = service.txtRecordData() else { return nil }
+        let txtRecord = NetService.dictionary(fromTXTRecord: data)
+        guard
+            let certData = txtRecord[Self.transferCertificateTXTKey],
+            let fingerprint = String(data: certData, encoding: .utf8),
+            FileTransferCertificates.isValidFingerprint(fingerprint)
+        else {
+            return nil
+        }
+
+        return fingerprint
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+    }
+
     private func normalizedDeviceId(_ value: String?) -> String? {
         let normalizedValue = value?
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -293,6 +312,7 @@ final class AndroidReceiverDiscovery: NSObject {
     private static let serviceDomain = "local."
     private static let deviceIdTXTKey = "deviceId"
     private static let batteryPercentageTXTKey = "battery"
+    private static let transferCertificateTXTKey = "transferCert"
     private static let discoveryTimeout: TimeInterval = 8
     private static let resolveTimeout: TimeInterval = 5
     private static let selectionDelay: TimeInterval = 1.2

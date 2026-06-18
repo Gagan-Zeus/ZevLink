@@ -6,6 +6,7 @@ import SwiftUI
 struct PairingQRCodeView: View {
     let token: String
     let deviceId: String
+    let transferCertificateSHA256: String
     var showsDetails = true
 
     @State private var hosts = LocalNetworkHost.currentPairingHosts()
@@ -46,6 +47,15 @@ struct PairingQRCodeView: View {
                                 .font(.system(.caption, design: .monospaced))
                                 .textSelection(.enabled)
                                 .lineLimit(2)
+                        }
+
+                        if !transferCertificateSHA256.isEmpty {
+                            LabeledContent("Transfer Cert") {
+                                Text(transferCertificateSHA256)
+                                    .font(.system(.caption, design: .monospaced))
+                                    .textSelection(.enabled)
+                                    .lineLimit(2)
+                            }
                         }
 
                         Button("Refresh Host") {
@@ -100,7 +110,8 @@ struct PairingQRCodeView: View {
             "host": currentHost,
             "hosts": hosts,
             "port": Int(ClipboardReceiver.port),
-            "token": token
+            "token": token,
+            "transferCert": transferCertificateSHA256
         ]
 
         return try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])

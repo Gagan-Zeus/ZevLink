@@ -35,7 +35,7 @@ class AirPlayRtspClientTest {
             val request = server.awaitRequests(1).first()
             assertEquals("GET /info RTSP/1.0", request.statusLine)
             assertEquals("1", request.headers["cseq"])
-            assertTrue(request.headers["user-agent"]?.contains("ZevClip") == true)
+            assertTrue(request.headers["user-agent"]?.contains("ZevLink") == true)
             assertEquals("3", request.headers["x-apple-hkp"])
         }
     }

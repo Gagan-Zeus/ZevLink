@@ -11,6 +11,7 @@ final class ClipboardHTTPServer {
         serviceName: String,
         serviceType: String,
         deviceId: String,
+        transferCertificateSHA256: String,
         tokenProvider: @escaping () -> String,
         isRemoteControlEnabled: @escaping () -> Bool,
         onReady: @escaping () -> Void,
@@ -20,6 +21,7 @@ final class ClipboardHTTPServer {
         onText: @escaping (String) -> Void,
         onAndroidNotification: @escaping (Data) -> Void,
         onAndroidCall: @escaping (Data) -> Void,
+        onFileTransferRequest: @escaping (String, [String: String], Data) -> FileTransferHTTPResponse,
         onRemoteControl: @escaping (Data) -> RemoteControlHTTPResult
     ) {
         queue.async { [weak self] in
@@ -28,6 +30,7 @@ final class ClipboardHTTPServer {
                 serviceName: serviceName,
                 serviceType: serviceType,
                 deviceId: deviceId,
+                transferCertificateSHA256: transferCertificateSHA256,
                 tokenProvider: tokenProvider,
                 isRemoteControlEnabled: isRemoteControlEnabled,
                 onReady: onReady,
@@ -37,6 +40,7 @@ final class ClipboardHTTPServer {
                 onText: onText,
                 onAndroidNotification: onAndroidNotification,
                 onAndroidCall: onAndroidCall,
+                onFileTransferRequest: onFileTransferRequest,
                 onRemoteControl: onRemoteControl
             )
         }
@@ -60,6 +64,7 @@ final class ClipboardHTTPServer {
         serviceName: String,
         serviceType: String,
         deviceId: String,
+        transferCertificateSHA256: String,
         tokenProvider: @escaping () -> String,
         isRemoteControlEnabled: @escaping () -> Bool,
         onReady: @escaping () -> Void,
@@ -69,6 +74,7 @@ final class ClipboardHTTPServer {
         onText: @escaping (String) -> Void,
         onAndroidNotification: @escaping (Data) -> Void,
         onAndroidCall: @escaping (Data) -> Void,
+        onFileTransferRequest: @escaping (String, [String: String], Data) -> FileTransferHTTPResponse,
         onRemoteControl: @escaping (Data) -> RemoteControlHTTPResult
     ) {
         guard listener == nil else { return }
@@ -79,7 +85,15 @@ final class ClipboardHTTPServer {
 
         do {
             let newListener = try NWListener(using: .tcp, on: networkPort)
-            let txtRecord = NWTXTRecord(["deviceId": deviceId])
+            var txtValues = [
+                "deviceId": deviceId,
+                "transferVersions": String(ZevLinkTransferProtocol.version),
+                "transferCapabilities": "chunks-16m,parallel-8,resume-ranges,ipv6,ipv4"
+            ]
+            if !transferCertificateSHA256.isEmpty {
+                txtValues["transferCert"] = transferCertificateSHA256
+            }
+            let txtRecord = NWTXTRecord(txtValues)
             newListener.service = NWListener.Service(
                 name: serviceName,
                 type: serviceType,
@@ -132,6 +146,7 @@ final class ClipboardHTTPServer {
                     onText: onText,
                     onAndroidNotification: onAndroidNotification,
                     onAndroidCall: onAndroidCall,
+                    onFileTransferRequest: onFileTransferRequest,
                     onRemoteControl: onRemoteControl
                 )
             }
@@ -152,6 +167,7 @@ final class ClipboardHTTPServer {
         onText: @escaping (String) -> Void,
         onAndroidNotification: @escaping (Data) -> Void,
         onAndroidCall: @escaping (Data) -> Void,
+        onFileTransferRequest: @escaping (String, [String: String], Data) -> FileTransferHTTPResponse,
         onRemoteControl: @escaping (Data) -> RemoteControlHTTPResult
     ) {
         let id = ObjectIdentifier(connection)
@@ -164,6 +180,7 @@ final class ClipboardHTTPServer {
             onText: onText,
             onAndroidNotification: onAndroidNotification,
             onAndroidCall: onAndroidCall,
+            onFileTransferRequest: onFileTransferRequest,
             onRemoteControl: onRemoteControl,
             onClose: { [weak self] in
                 self?.connections[id] = nil
@@ -184,7 +201,7 @@ final class ClipboardHTTPServer {
 }
 
 private final class HTTPConnection {
-    private static let maximumBodyLength = 1_048_576
+    private static let maximumBodyLength = 20 * 1024 * 1024
     private static let maximumHeaderLength = 16_384
 
     private let connection: NWConnection
@@ -195,6 +212,7 @@ private final class HTTPConnection {
     private let onText: (String) -> Void
     private let onAndroidNotification: (Data) -> Void
     private let onAndroidCall: (Data) -> Void
+    private let onFileTransferRequest: (String, [String: String], Data) -> FileTransferHTTPResponse
     private let onRemoteControl: (Data) -> RemoteControlHTTPResult
     private let onClose: () -> Void
 
@@ -214,6 +232,7 @@ private final class HTTPConnection {
         onText: @escaping (String) -> Void,
         onAndroidNotification: @escaping (Data) -> Void,
         onAndroidCall: @escaping (Data) -> Void,
+        onFileTransferRequest: @escaping (String, [String: String], Data) -> FileTransferHTTPResponse,
         onRemoteControl: @escaping (Data) -> RemoteControlHTTPResult,
         onClose: @escaping () -> Void
     ) {
@@ -225,6 +244,7 @@ private final class HTTPConnection {
         self.onText = onText
         self.onAndroidNotification = onAndroidNotification
         self.onAndroidCall = onAndroidCall
+        self.onFileTransferRequest = onFileTransferRequest
         self.onRemoteControl = onRemoteControl
         self.onClose = onClose
     }
@@ -326,6 +346,10 @@ private final class HTTPConnection {
         case "/android-presence":
             respond(status: "200 OK", body: "Android presence updated.")
 
+        case .some(let path) where path.hasPrefix("/transfer/"):
+            let response = onFileTransferRequest(path, requestHeaders, bodyData)
+            respond(status: response.status, contentType: response.contentType, bodyData: response.body)
+
         case "/remote":
             guard isRemoteControlEnabled() else {
                 respond(status: "403 Forbidden", body: "Phone remote control is disabled on this Mac.")
@@ -380,6 +404,7 @@ private final class HTTPConnection {
             path == "/android-notification" ||
             path == "/android-call" ||
             path == "/android-presence" ||
+            path.hasPrefix("/transfer/") ||
             path == "/remote"
         else {
             respond(status: "404 Not Found", body: "Unknown path.")
@@ -415,7 +440,7 @@ private final class HTTPConnection {
         }
 
         guard contentLength <= Self.maximumBodyLength else {
-            respond(status: "413 Content Too Large", body: "Clipboard text is limited to 1 MB.")
+            respond(status: "413 Content Too Large", body: "Request body is too large.")
             return true
         }
 
@@ -446,11 +471,14 @@ private final class HTTPConnection {
         let batteryPercentage = requestHeaders["x-zevclip-android-battery"]
             .flatMap(Int.init)
             .flatMap { (0...100).contains($0) ? $0 : nil }
+        let transferCertificateSHA256 = requestHeaders["x-zevlink-transfer-cert"]
+            .flatMap { FileTransferCertificates.isValidFingerprint($0) ? $0.lowercased() : nil }
 
         return AndroidReceiverEndpoint(
             name: name,
             deviceId: deviceId,
             batteryPercentage: batteryPercentage,
+            transferCertificateSHA256: transferCertificateSHA256,
             host: host,
             port: port
         )
@@ -467,13 +495,16 @@ private final class HTTPConnection {
     }
 
     private func respond(status: String, body: String) {
+        respond(status: status, contentType: "text/plain; charset=utf-8", bodyData: Data(body.utf8))
+    }
+
+    private func respond(status: String, contentType: String, bodyData: Data) {
         guard !responseStarted else { return }
         responseStarted = true
 
-        let bodyData = Data(body.utf8)
         let header = [
             "HTTP/1.1 \(status)",
-            "Content-Type: text/plain; charset=utf-8",
+            "Content-Type: \(contentType)",
             "Content-Length: \(bodyData.count)",
             "Connection: close",
             "",

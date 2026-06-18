@@ -3,11 +3,13 @@ import AppKit
 @main
 final class ZevClipApp: NSObject, NSApplicationDelegate {
     static let settingsWindowID = "settings"
+    private static let servicesProvider = MacFileTransferServiceProvider()
 
     static func main() {
         let app = NSApplication.shared
         let delegate = ZevClipApp()
         app.delegate = delegate
+        app.servicesProvider = servicesProvider
         app.setActivationPolicy(.accessory)
         app.finishLaunching()
 

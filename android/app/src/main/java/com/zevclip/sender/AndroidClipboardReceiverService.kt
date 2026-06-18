@@ -15,6 +15,8 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.util.Log
+import com.zevclip.sender.filetransfer.FileTransferIdentityStore
+import com.zevclip.sender.filetransfer.ZevLinkTransferProtocol
 import java.text.DateFormat
 import java.util.Date
 import kotlin.concurrent.thread
@@ -199,11 +201,19 @@ class AndroidClipboardReceiverService : Service() {
         }
 
         val androidDeviceId = ZevClipPreferences.androidDeviceId(this)
+        val transferCertificateFingerprint = runCatching {
+            FileTransferIdentityStore.loadOrCreate(this).certificateSha256
+        }.getOrNull()
         val serviceInfo = NsdServiceInfo().apply {
             serviceName = SERVICE_NAME
             serviceType = SERVICE_TYPE
             this.port = port
             setAttribute(TXT_DEVICE_ID, androidDeviceId)
+            setAttribute(TXT_TRANSFER_VERSIONS, ZevLinkTransferProtocol.VERSION.toString())
+            setAttribute(TXT_TRANSFER_CAPABILITIES, TRANSFER_CAPABILITIES)
+            transferCertificateFingerprint?.let { fingerprint ->
+                setAttribute(TXT_TRANSFER_CERT, fingerprint)
+            }
             currentBatteryPercentage()?.let { percentage ->
                 setAttribute(TXT_BATTERY_PERCENTAGE, percentage.toString())
             }
@@ -429,6 +439,10 @@ class AndroidClipboardReceiverService : Service() {
         private const val TAG = "ZevClipAndroidReceiver"
         private const val TXT_DEVICE_ID = "deviceId"
         private const val TXT_BATTERY_PERCENTAGE = "battery"
+        private const val TXT_TRANSFER_VERSIONS = "transferVersions"
+        private const val TXT_TRANSFER_CERT = "transferCert"
+        private const val TXT_TRANSFER_CAPABILITIES = "transferCapabilities"
+        private const val TRANSFER_CAPABILITIES = "chunks-16m,parallel-8,resume-ranges,ipv6,ipv4"
         private const val NETWORK_REFRESH_DELAY_MS = 2_500L
         private const val NSD_REREGISTER_DELAY_MS = 1_200L
         private const val ADVERTISING_HEALTH_REFRESH_MS = 60_000L

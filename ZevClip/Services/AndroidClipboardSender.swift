@@ -46,7 +46,10 @@ final class AndroidClipboardSender: ObservableObject {
         discovery = nil
         isDiscovering = false
         resolvedEndpoint = endpoint
-        saveConfirmedAndroidIdentity(endpoint.deviceId)
+        saveConfirmedAndroidIdentity(
+            endpoint.deviceId,
+            transferCertificateSHA256: endpoint.transferCertificateSHA256
+        )
         status = "Connected to Android receiver at \(endpoint.displayAddress)."
         refreshAndroidStatus()
         sendPendingChangeIfPossible()
@@ -313,7 +316,10 @@ final class AndroidClipboardSender: ObservableObject {
             lastSentText = change.text
             lastSentAt = Date()
             resolvedEndpoint = endpoint
-            saveConfirmedAndroidIdentity(confirmedDeviceId ?? endpoint.deviceId)
+            saveConfirmedAndroidIdentity(
+                confirmedDeviceId ?? endpoint.deviceId,
+                transferCertificateSHA256: endpoint.transferCertificateSHA256
+            )
             status = "Sent \(change.text.utf8.count) UTF-8 bytes to Android."
 
         case .failure(let message, let isRetryable):
@@ -371,7 +377,10 @@ final class AndroidClipboardSender: ObservableObject {
                 batteryPercentage ?? endpoint.batteryPercentage
             )
             resolvedEndpoint = updatedEndpoint
-            saveConfirmedAndroidIdentity(confirmedDeviceId ?? endpoint.deviceId)
+            saveConfirmedAndroidIdentity(
+                confirmedDeviceId ?? endpoint.deviceId,
+                transferCertificateSHA256: endpoint.transferCertificateSHA256
+            )
 
         case .failure(let message, let isRetryable):
             status = message
@@ -382,9 +391,18 @@ final class AndroidClipboardSender: ObservableObject {
         }
     }
 
-    private func saveConfirmedAndroidIdentity(_ deviceId: String?) {
+    private func saveConfirmedAndroidIdentity(
+        _ deviceId: String?,
+        transferCertificateSHA256: String?
+    ) {
         guard let deviceId else { return }
         AndroidReceiverIdentityStore.savePairedDeviceId(deviceId)
+        if let transferCertificateSHA256 {
+            try? FileTransferPeerPinStore.savePinnedCertificateSHA256(
+                transferCertificateSHA256,
+                peerDeviceId: deviceId
+            )
+        }
         pairedDeviceId = AndroidReceiverIdentityStore.pairedDeviceId()
     }
 

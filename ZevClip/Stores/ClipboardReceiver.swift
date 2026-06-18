@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import Foundation
 
 @MainActor
@@ -33,6 +34,8 @@ final class ClipboardReceiver: ObservableObject {
     @Published private(set) var pairingToken = ""
     @Published private(set) var pairingStatus = "Pairing token is not loaded."
     @Published private(set) var deviceId = ""
+    @Published private(set) var transferCertificateSHA256 = ""
+    @Published private(set) var transferIdentityStatus = "Transfer identity is not loaded."
     @Published private(set) var lastReceivedText: String?
     @Published private(set) var lastReceivedAt: Date?
     @Published private(set) var lastMirroredNotification: AndroidMirroredNotification?
@@ -45,6 +48,7 @@ final class ClipboardReceiver: ObservableObject {
     var onAndroidEndpointSeen: ((AndroidReceiverEndpoint) -> Void)?
     var onAndroidNotification: ((AndroidMirroredNotification) -> Void)?
     var onAndroidCall: ((AndroidMirroredCall) -> Void)?
+    var onFileTransferRequest: ((String, [String: String], Data) -> FileTransferHTTPResponse)?
 
     private let server = ClipboardHTTPServer()
     private let tokenProvider = PairingTokenProvider(token: "")
@@ -52,6 +56,7 @@ final class ClipboardReceiver: ObservableObject {
     init() {
         deviceId = DeviceIdentityStore.loadOrCreateDeviceId()
         loadPairingToken()
+        loadTransferIdentity()
         startServer()
     }
 
@@ -75,6 +80,7 @@ final class ClipboardReceiver: ObservableObject {
             serviceName: Self.serviceName,
             serviceType: Self.serviceType,
             deviceId: deviceId,
+            transferCertificateSHA256: transferCertificateSHA256,
             tokenProvider: { [tokenProvider] in
                 tokenProvider.currentToken()
             },
@@ -119,6 +125,10 @@ final class ClipboardReceiver: ObservableObject {
                 Task { @MainActor in
                     self?.receiveAndroidCall(data)
                 }
+            },
+            onFileTransferRequest: { [weak self] path, headers, body in
+                self?.onFileTransferRequest?(path, headers, body) ??
+                    FileTransferHTTPResponse(status: "503 Service Unavailable", text: "File transfer service is unavailable.")
             },
             onRemoteControl: { [weak self] data in
                 let result = MacRemoteController.handle(data)
@@ -171,6 +181,18 @@ final class ClipboardReceiver: ObservableObject {
         pairingToken = token
         pairingStatus = status
         tokenProvider.updateToken(token)
+    }
+
+    private func loadTransferIdentity() {
+        do {
+            let identity = try FileTransferIdentityStore.loadOrCreate(deviceId: deviceId)
+            transferCertificateSHA256 = identity.certificateSHA256
+            transferIdentityStatus = "Transfer identity loaded from Keychain."
+        } catch {
+            transferCertificateSHA256 = ""
+            transferIdentityStatus = error.localizedDescription
+            detailMessage = error.localizedDescription
+        }
     }
 
     private func receive(_ text: String) {
@@ -358,6 +380,10 @@ private enum MacRemoteController {
         flags: CGEventFlags,
         success: String
     ) -> RemoteControlHTTPResult {
+        guard requestAccessibilityAccessIfNeeded() else {
+            return accessibilityPermissionFailure()
+        }
+
         guard
             postKeyboardEvent(keyCode: keyCode, flags: flags, isDown: true),
             postKeyboardEvent(keyCode: keyCode, flags: flags, isDown: false)
@@ -384,6 +410,10 @@ private enum MacRemoteController {
     }
 
     private static func postSystemKey(_ key: Int32, success: String) -> RemoteControlHTTPResult {
+        guard requestAccessibilityAccessIfNeeded() else {
+            return accessibilityPermissionFailure()
+        }
+
         guard postSystemKeyEvent(key, isDown: true), postSystemKeyEvent(key, isDown: false) else {
             return .failure("Could not create Mac system key event.")
         }
@@ -411,5 +441,19 @@ private enum MacRemoteController {
 
         cgEvent.post(tap: .cghidEventTap)
         return true
+    }
+
+    private static func requestAccessibilityAccessIfNeeded() -> Bool {
+        guard !AXIsProcessTrusted() else { return true }
+
+        let promptKey = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
+        return AXIsProcessTrustedWithOptions([promptKey: true] as CFDictionary)
+    }
+
+    private static func accessibilityPermissionFailure() -> RemoteControlHTTPResult {
+        .failure(
+            "Accessibility permission is required for Mac keyboard and media controls. " +
+            "Enable ZevLink in System Settings > Privacy & Security > Accessibility."
+        )
     }
 }

@@ -9,7 +9,8 @@ data class PairingQrPayload(
     val host: String,
     val hosts: List<String>,
     val port: Int,
-    val token: String
+    val token: String,
+    val transferCert: String?
 ) {
     companion object {
         fun parse(rawValue: String): Result<PairingQrPayload> {
@@ -29,6 +30,10 @@ data class PairingQrPayload(
                 }.filter { it.isNotEmpty() }.distinct()
                 val port = json.optInt("port", -1)
                 val token = json.optString("token").trim()
+                val transferCert = json.optString("transferCert")
+                    .trim()
+                    .lowercase()
+                    .takeIf { it.isNotEmpty() }
 
                 when {
                     name.isEmpty() ->
@@ -39,8 +44,10 @@ data class PairingQrPayload(
                         Result.failure(IllegalArgumentException("QR pairing data has an invalid port."))
                     token.isEmpty() ->
                         Result.failure(IllegalArgumentException("QR pairing data is missing a token."))
+                    transferCert != null && !com.zevclip.sender.filetransfer.FileTransferCertificates.isValidFingerprint(transferCert) ->
+                        Result.failure(IllegalArgumentException("QR pairing data has an invalid transfer certificate fingerprint."))
                     else ->
-                        Result.success(PairingQrPayload(name, deviceId, host, hosts, port, token))
+                        Result.success(PairingQrPayload(name, deviceId, host, hosts, port, token, transferCert))
                 }
             } catch (_: JSONException) {
                 Result.failure(IllegalArgumentException("QR code is not valid ZevLink JSON."))

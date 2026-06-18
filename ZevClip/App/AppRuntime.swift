@@ -8,6 +8,7 @@ final class ZevClipRuntime {
 
     let receiver = ClipboardReceiver()
     let macClipboardWatcher = MacClipboardWatcher()
+    let fileTransferService = FileTransferService()
     lazy var androidClipboardSender = AndroidClipboardSender(
         tokenProvider: { [weak self] in
             self?.receiver.pairingToken ?? ""
@@ -49,9 +50,17 @@ final class ZevClipRuntime {
         receiver.onAndroidCall = { call in
             MacNotificationPresenter.shared.show(call)
         }
+        receiver.onFileTransferRequest = { [weak self] path, headers, body in
+            self?.fileTransferService.handleIncomingRequest(path: path, headers: headers, body: body) ??
+                FileTransferHTTPResponse(status: "503 Service Unavailable", text: "File transfer service is unavailable.")
+        }
         receiver.isRemoteControlEnabled = {
             AppSettings.savedRemoteControlEnabled()
         }
+        fileTransferService.updateSettings(
+            autoAcceptIncoming: appSettings.fileTransferAutoAccept,
+            saveIncomingToDownloads: appSettings.fileTransferSaveToDownloads
+        )
         MacNotificationPresenter.shared.onDismiss = { [weak self] notificationKey in
             Task { @MainActor in
                 self?.androidClipboardSender.dismissAndroidNotification(notificationKey: notificationKey)
@@ -135,6 +144,7 @@ private final class SettingsWindowController {
                 receiver: receiver,
                 macClipboardWatcher: macClipboardWatcher,
                 androidClipboardSender: androidClipboardSender,
+                fileTransferService: ZevClipRuntime.shared.fileTransferService,
                 appSettings: appSettings
             )
         )

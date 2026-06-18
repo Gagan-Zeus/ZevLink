@@ -50,6 +50,23 @@
             android:theme="@style/Theme.ZevClip" />
 
         <activity
+            android:name=".FileTransferShareActivity"
+            android:exported="true"
+            android:label="Send to Mac"
+            android:theme="@style/Theme.ZevClip">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+        </activity>
+
+        <activity
             android:name=".AirPlayCaptureActivity"
             android:documentLaunchMode="never"
             android:excludeFromRecents="true"

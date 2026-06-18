@@ -48,6 +48,7 @@ import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import com.zevclip.sender.airplay.AirPlayIdentityStore
 import com.zevclip.sender.airplay.AirPlayPairSetupClient
 import com.zevclip.sender.airplay.AirPlayTarget
+import com.zevclip.sender.filetransfer.FileTransferPeerPinStore
 import java.text.DateFormat
 import java.util.Date
 import java.util.Locale
@@ -619,6 +620,7 @@ class MainActivity : Activity() {
                         ZevClipPreferences.saveEndpoint(this, selectedHost, payload.port.toString())
                         ZevClipPreferences.savePairingToken(this, payload.token)
                         ZevClipPreferences.saveDeviceId(this, payload.deviceId)
+                        FileTransferPeerPinStore.savePinnedMacCertificateSha256(this, payload.transferCert)
                         ZevClipPreferences.setClipboardSyncEnabled(this, true)
                         AndroidClipboardReceiverService.start(this)
                         ZevClipPreferences.setDiscoveryStatus(
