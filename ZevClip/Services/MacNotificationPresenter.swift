@@ -121,10 +121,12 @@ final class MacNotificationPresenter: NSObject, UNUserNotificationCenterDelegate
     var onDismiss: ((String) -> Void)?
     var onNotificationAction: ((String, String, String?, @escaping (Bool, String) -> Void) -> Void)?
     var onCallAction: ((String, String, @escaping (Bool, String) -> Void) -> Void)?
+    var onFileTransferCancel: ((String) -> Void)?
 
     private let center = UNUserNotificationCenter.current()
     private var authorizationRequested = false
     private var activeCallPanel: CallControlPanelController?
+    private var activeFileTransferPanels: [String: FileTransferPanelController] = [:]
     private var activeNotificationPanels: [String: AndroidNotificationPanelController] = [:]
     private var notificationPanelOrder: [String] = []
     private var notificationPanelSerial = 0
@@ -272,6 +274,83 @@ final class MacNotificationPresenter: NSObject, UNUserNotificationCenterDelegate
         }
         activeCallPanel = panel
         panel.show()
+    }
+
+    func showFileTransferActive(
+        transferId: String,
+        fileName: String,
+        status: String,
+        transferredBytes: Int64,
+        totalBytes: Int64
+    ) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            let panel = self.fileTransferPanel(for: transferId)
+            panel.updateActive(
+                fileName: fileName,
+                status: status,
+                transferredBytes: transferredBytes,
+                totalBytes: totalBytes
+            )
+            panel.show()
+        }
+    }
+
+    func showFileTransferSent(
+        transferId: String,
+        fileName: String
+    ) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            let panel = self.fileTransferPanel(for: transferId)
+            panel.updateSent(fileName: fileName)
+            panel.show()
+        }
+    }
+
+    func showFileTransferReceived(
+        transferId: String,
+        fileName: String,
+        fileURLs: [URL]
+    ) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            let panel = self.fileTransferPanel(for: transferId)
+            panel.updateReceived(fileName: fileName, fileURLs: fileURLs)
+            panel.show()
+        }
+    }
+
+    func clearFileTransfer(transferId: String) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let panel = self.activeFileTransferPanels[transferId] else { return }
+            self.activeFileTransferPanels[transferId] = nil
+            panel.close(notify: false)
+        }
+    }
+
+    private func fileTransferPanel(for transferId: String) -> FileTransferPanelController {
+        if let panel = activeFileTransferPanels[transferId] {
+            return panel
+        }
+
+        let panel = FileTransferPanelController(
+            transferId: transferId,
+            onCancel: { [weak self] transferId in
+                self?.onFileTransferCancel?(transferId)
+            },
+            onCopy: { urls in
+                Self.copyFileTransferURLs(urls)
+            },
+            onShowInFinder: { urls in
+                Self.showFileTransferURLsInFinder(urls)
+            },
+            onClose: { [weak self] transferId in
+                self?.activeFileTransferPanels[transferId] = nil
+            }
+        )
+        activeFileTransferPanels[transferId] = panel
+        return panel
     }
 
     private func showNotificationPanel(_ notification: AndroidMirroredNotification) {
@@ -722,6 +801,18 @@ final class MacNotificationPresenter: NSObject, UNUserNotificationCenterDelegate
         }
 
         return image(fromBase64Png: notification.appIconPngBase64)
+    }
+
+    private static func copyFileTransferURLs(_ urls: [URL]) {
+        guard !urls.isEmpty else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.writeObjects(urls as [NSURL])
+    }
+
+    private static func showFileTransferURLsInFinder(_ urls: [URL]) {
+        guard !urls.isEmpty else { return }
+        NSWorkspace.shared.activateFileViewerSelecting(urls)
     }
 
     private static func image(fromBase64Png encodedImage: String?) -> NSImage? {
@@ -3311,6 +3402,290 @@ private final class TrackpadCornerGestureMonitor {
                 lastTopRightTouchAt = Date()
             }
         }
+    }
+}
+
+private final class FileTransferPanelController: NSObject {
+    private enum State {
+        case active
+        case sent
+        case received
+    }
+
+    private let transferId: String
+    private let panel: NotificationInteractionPanel
+    private let iconView = NSImageView()
+    private let titleLabel = NSTextField(labelWithString: "")
+    private let statusLabel = NSTextField(labelWithString: "")
+    private let detailLabel = NSTextField(labelWithString: "")
+    private let progressIndicator = NSProgressIndicator()
+    private let cancelButton = NotificationActionButton(title: "Cancel", target: nil, action: nil)
+    private let copyButton = NotificationActionButton(title: "Copy", target: nil, action: nil)
+    private let showInFinderButton = NotificationActionButton(title: "Show in Finder", target: nil, action: nil)
+    private let onCancel: (String) -> Void
+    private let onCopy: ([URL]) -> Void
+    private let onShowInFinder: ([URL]) -> Void
+    private let onClose: (String) -> Void
+    private var fileURLs: [URL] = []
+    private var autoCloseTimer: Timer?
+    private var isClosing = false
+    private var state: State = .active
+
+    private static let panelWidth: CGFloat = 352
+    private static let panelHeight: CGFloat = 128
+
+    init(
+        transferId: String,
+        onCancel: @escaping (String) -> Void,
+        onCopy: @escaping ([URL]) -> Void,
+        onShowInFinder: @escaping ([URL]) -> Void,
+        onClose: @escaping (String) -> Void
+    ) {
+        self.transferId = transferId
+        self.onCancel = onCancel
+        self.onCopy = onCopy
+        self.onShowInFinder = onShowInFinder
+        self.onClose = onClose
+
+        panel = NotificationInteractionPanel(
+            contentRect: NSRect(x: 0, y: 0, width: Self.panelWidth, height: Self.panelHeight),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        panel.level = .floating
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.hidesOnDeactivate = false
+        panel.isReleasedWhenClosed = false
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        panel.ignoresMouseEvents = false
+        panel.isMovableByWindowBackground = false
+        panel.appearance = NSApp.effectiveAppearance
+
+        super.init()
+        configureContent()
+    }
+
+    func show() {
+        positionNearTopRight()
+        panel.orderFrontRegardless()
+    }
+
+    func updateActive(
+        fileName: String,
+        status: String,
+        transferredBytes: Int64,
+        totalBytes: Int64
+    ) {
+        state = .active
+        autoCloseTimer?.invalidate()
+        autoCloseTimer = nil
+        titleLabel.stringValue = Self.singleLine(fileName)
+        statusLabel.stringValue = status
+        detailLabel.stringValue = Self.progressText(transferredBytes: transferredBytes, totalBytes: totalBytes)
+        progressIndicator.isHidden = false
+        progressIndicator.doubleValue = Self.progressValue(transferredBytes: transferredBytes, totalBytes: totalBytes)
+        cancelButton.isHidden = false
+        copyButton.isHidden = true
+        showInFinderButton.isHidden = true
+    }
+
+    func updateSent(fileName: String) {
+        state = .sent
+        titleLabel.stringValue = Self.singleLine(fileName)
+        statusLabel.stringValue = "Sent successfully"
+        detailLabel.stringValue = "File transfer completed."
+        progressIndicator.isHidden = false
+        progressIndicator.doubleValue = 100
+        cancelButton.isHidden = true
+        copyButton.isHidden = true
+        showInFinderButton.isHidden = true
+        scheduleAutoClose(after: 5)
+    }
+
+    func updateReceived(fileName: String, fileURLs: [URL]) {
+        state = .received
+        self.fileURLs = fileURLs
+        titleLabel.stringValue = Self.singleLine(fileName)
+        statusLabel.stringValue = "Received successfully"
+        detailLabel.stringValue = "Saved to Downloads."
+        progressIndicator.isHidden = false
+        progressIndicator.doubleValue = 100
+        cancelButton.isHidden = true
+        copyButton.isHidden = false
+        showInFinderButton.isHidden = false
+        scheduleAutoClose(after: 15)
+    }
+
+    func close(notify: Bool = true) {
+        guard !isClosing else { return }
+        isClosing = true
+        autoCloseTimer?.invalidate()
+        autoCloseTimer = nil
+        panel.close()
+        if notify {
+            onClose(transferId)
+        }
+    }
+
+    private func configureContent() {
+        guard let contentView = panel.contentView else { return }
+
+        contentView.wantsLayer = true
+        contentView.layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.94).cgColor
+        contentView.layer?.cornerRadius = 20
+        contentView.layer?.masksToBounds = true
+
+        iconView.image = NSApp.applicationIconImage
+        iconView.imageScaling = .scaleProportionallyUpOrDown
+        iconView.wantsLayer = true
+        iconView.layer?.cornerRadius = 9
+        iconView.layer?.masksToBounds = true
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+
+        titleLabel.font = .systemFont(ofSize: 14, weight: .semibold)
+        titleLabel.textColor = .labelColor
+        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.maximumNumberOfLines = 1
+        titleLabel.cell?.usesSingleLineMode = true
+
+        statusLabel.font = .systemFont(ofSize: 12)
+        statusLabel.textColor = .secondaryLabelColor
+        statusLabel.lineBreakMode = .byTruncatingTail
+        statusLabel.maximumNumberOfLines = 1
+        statusLabel.cell?.usesSingleLineMode = true
+
+        detailLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+        detailLabel.textColor = .tertiaryLabelColor
+        detailLabel.lineBreakMode = .byTruncatingTail
+        detailLabel.maximumNumberOfLines = 1
+        detailLabel.cell?.usesSingleLineMode = true
+
+        progressIndicator.isIndeterminate = false
+        progressIndicator.minValue = 0
+        progressIndicator.maxValue = 100
+        progressIndicator.controlSize = .small
+        progressIndicator.style = .bar
+        progressIndicator.translatesAutoresizingMaskIntoConstraints = false
+
+        let textStack = NSStackView(views: [titleLabel, statusLabel, detailLabel, progressIndicator])
+        textStack.orientation = .vertical
+        textStack.alignment = .leading
+        textStack.spacing = 3
+        textStack.translatesAutoresizingMaskIntoConstraints = false
+
+        let headerStack = NSStackView(views: [iconView, textStack])
+        headerStack.orientation = .horizontal
+        headerStack.alignment = .top
+        headerStack.spacing = 12
+        headerStack.translatesAutoresizingMaskIntoConstraints = false
+
+        let buttonStack = NSStackView()
+        buttonStack.orientation = .horizontal
+        buttonStack.alignment = .centerY
+        buttonStack.spacing = 8
+        buttonStack.translatesAutoresizingMaskIntoConstraints = false
+
+        configureButton(cancelButton, action: #selector(cancel))
+        configureButton(copyButton, action: #selector(copyFiles))
+        configureButton(showInFinderButton, action: #selector(showInFinder))
+        cancelButton.hasDestructiveAction = true
+        copyButton.isHidden = true
+        showInFinderButton.isHidden = true
+
+        buttonStack.addArrangedSubview(cancelButton)
+        buttonStack.addArrangedSubview(copyButton)
+        buttonStack.addArrangedSubview(showInFinderButton)
+
+        let rootStack = NSStackView(views: [headerStack, buttonStack])
+        rootStack.orientation = .vertical
+        rootStack.alignment = .leading
+        rootStack.spacing = 10
+        rootStack.translatesAutoresizingMaskIntoConstraints = false
+
+        contentView.addSubview(rootStack)
+        NSLayoutConstraint.activate([
+            rootStack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
+            rootStack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
+            rootStack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 14),
+            rootStack.bottomAnchor.constraint(lessThanOrEqualTo: contentView.bottomAnchor, constant: -14),
+            iconView.widthAnchor.constraint(equalToConstant: 38),
+            iconView.heightAnchor.constraint(equalToConstant: 38),
+            textStack.widthAnchor.constraint(equalToConstant: 270),
+            progressIndicator.widthAnchor.constraint(equalTo: textStack.widthAnchor)
+        ])
+    }
+
+    private func configureButton(_ button: NSButton, action: Selector) {
+        button.target = self
+        button.action = action
+        button.bezelStyle = .rounded
+        button.controlSize = .small
+        button.font = .systemFont(ofSize: 12, weight: .medium)
+    }
+
+    private func scheduleAutoClose(after delay: TimeInterval) {
+        autoCloseTimer?.invalidate()
+        autoCloseTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
+            self?.close()
+        }
+    }
+
+    private func positionNearTopRight() {
+        guard let screen = NSScreen.main else {
+            panel.center()
+            return
+        }
+
+        let visibleFrame = screen.visibleFrame
+        let frame = panel.frame
+        panel.setFrameOrigin(
+            NSPoint(
+                x: visibleFrame.maxX - frame.width - 18,
+                y: visibleFrame.maxY - frame.height - 18
+            )
+        )
+    }
+
+    @objc private func cancel() {
+        guard state == .active else { return }
+        statusLabel.stringValue = "Cancelling..."
+        onCancel(transferId)
+        close()
+    }
+
+    @objc private func copyFiles() {
+        onCopy(fileURLs)
+        statusLabel.stringValue = "Copied"
+        scheduleAutoClose(after: 1.5)
+    }
+
+    @objc private func showInFinder() {
+        onShowInFinder(fileURLs)
+        scheduleAutoClose(after: 1.5)
+    }
+
+    private static func progressValue(transferredBytes: Int64, totalBytes: Int64) -> Double {
+        let safeTotal = max(0, totalBytes)
+        guard safeTotal > 0 else { return 100 }
+        let clampedTransferred = min(max(0, transferredBytes), safeTotal)
+        return (Double(clampedTransferred) / Double(safeTotal)) * 100
+    }
+
+    private static func progressText(transferredBytes: Int64, totalBytes: Int64) -> String {
+        let safeTotal = max(0, totalBytes)
+        let clampedTransferred = min(max(0, transferredBytes), safeTotal)
+        let percent = Int(progressValue(transferredBytes: clampedTransferred, totalBytes: safeTotal).rounded())
+        return "\(percent)%  \(ByteCountFormatter.string(fromByteCount: clampedTransferred, countStyle: .file)) / \(ByteCountFormatter.string(fromByteCount: safeTotal, countStyle: .file))"
+    }
+
+    private static func singleLine(_ text: String) -> String {
+        text
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
     }
 }
 

@@ -85,6 +85,7 @@ final class FileTransferService: ObservableObject {
     func cancelActiveTransfer() {
         if let transferId = displayState.transferId {
             try? receiver.cancel(transferId: transferId)
+            MacNotificationPresenter.shared.clearFileTransfer(transferId: transferId)
         }
         outgoingTask?.cancel()
         outgoingTask = nil
@@ -107,6 +108,7 @@ final class FileTransferService: ObservableObject {
 
         outgoingTask = Task { [weak self] in
             guard let self else { return }
+            var activeTransferId: String?
             do {
                 let sources = try FileTransferMacSender.fileSources(from: urls)
                 guard !sources.isEmpty else {
@@ -120,8 +122,11 @@ final class FileTransferService: ObservableObject {
                     requestedStreamCount: 8,
                     includeFileHashes: false
                 )
+                activeTransferId = manifest.transferId
+                let manifestFileName = Self.transferTitle(manifest)
                 await self.updateOutgoing(
                     title: "Sending to Android",
+                    fileName: manifestFileName,
                     verifiedBytes: 0,
                     totalBytes: manifest.totalBytes,
                     transferId: manifest.transferId,
@@ -136,6 +141,7 @@ final class FileTransferService: ObservableObject {
                         Task { @MainActor in
                             self?.updateOutgoing(
                                 title: "Sending to Android",
+                                fileName: manifestFileName,
                                 verifiedBytes: sentBytes,
                                 totalBytes: manifest.totalBytes,
                                 transferId: manifest.transferId,
@@ -144,10 +150,26 @@ final class FileTransferService: ObservableObject {
                         }
                     }
                 )
+                await MainActor.run {
+                    MacNotificationPresenter.shared.showFileTransferSent(
+                        transferId: manifest.transferId,
+                        fileName: manifestFileName
+                    )
+                }
                 await self.finishOutgoing(message: "Sent \(manifest.entryCount) item(s) to Android.")
             } catch is CancellationError {
+                if let activeTransferId {
+                    await MainActor.run {
+                        MacNotificationPresenter.shared.clearFileTransfer(transferId: activeTransferId)
+                    }
+                }
                 await self.finishOutgoing(message: "File transfer cancelled.")
             } catch {
+                if let activeTransferId {
+                    await MainActor.run {
+                        MacNotificationPresenter.shared.clearFileTransfer(transferId: activeTransferId)
+                    }
+                }
                 await self.finishOutgoing(message: "File transfer failed: \(error.localizedDescription)")
             }
         }
@@ -171,7 +193,8 @@ final class FileTransferService: ObservableObject {
         incomingProgress[manifest.transferId] = IncomingProgress(
             totalBytes: manifest.totalBytes,
             verifiedBytes: 0,
-            startedAt: Date()
+            startedAt: Date(),
+            fileName: Self.transferTitle(manifest)
         )
         stateLock.unlock()
         publishIncomingProgress(manifest: manifest, verifiedBytes: 0)
@@ -211,9 +234,14 @@ final class FileTransferService: ObservableObject {
         let transferId = try transferId(from: headers, body: body)
         let result = try receiver.complete(transferId: transferId)
         stateLock.lock()
-        incomingProgress.removeValue(forKey: transferId)
+        let completedProgress = incomingProgress.removeValue(forKey: transferId)
         stateLock.unlock()
         DispatchQueue.main.async { [weak self] in
+            MacNotificationPresenter.shared.showFileTransferReceived(
+                transferId: transferId,
+                fileName: completedProgress?.fileName ?? Self.transferTitle(fileCount: result.files.count),
+                fileURLs: result.files.map(\.url)
+            )
             self?.displayState = FileTransferDisplayState(
                 title: "Received files",
                 detail: "Saved to \(result.destinationRoot.path)",
@@ -239,6 +267,7 @@ final class FileTransferService: ObservableObject {
         incomingProgress.removeValue(forKey: transferId)
         stateLock.unlock()
         DispatchQueue.main.async { [weak self] in
+            MacNotificationPresenter.shared.clearFileTransfer(transferId: transferId)
             self?.displayState = .idle
         }
         return FileTransferHTTPResponse(status: "200 OK", text: "Transfer cancelled.")
@@ -267,7 +296,12 @@ final class FileTransferService: ObservableObject {
 
     private func recordIncomingBytes(transferId: String, byteCount: Int64) -> IncomingProgress {
         stateLock.lock()
-        var progress = incomingProgress[transferId] ?? IncomingProgress(totalBytes: byteCount, verifiedBytes: 0, startedAt: Date())
+        var progress = incomingProgress[transferId] ?? IncomingProgress(
+            totalBytes: byteCount,
+            verifiedBytes: 0,
+            startedAt: Date(),
+            fileName: "File transfer"
+        )
         progress.verifiedBytes = min(progress.totalBytes, progress.verifiedBytes + max(0, byteCount))
         incomingProgress[transferId] = progress
         stateLock.unlock()
@@ -275,7 +309,12 @@ final class FileTransferService: ObservableObject {
     }
 
     private func publishIncomingProgress(manifest: FileTransferManifest, verifiedBytes: Int64) {
-        let progress = IncomingProgress(totalBytes: manifest.totalBytes, verifiedBytes: verifiedBytes, startedAt: Date())
+        let progress = IncomingProgress(
+            totalBytes: manifest.totalBytes,
+            verifiedBytes: verifiedBytes,
+            startedAt: Date(),
+            fileName: Self.transferTitle(manifest)
+        )
         publishIncomingProgress(transferId: manifest.transferId, progress: progress)
     }
 
@@ -285,6 +324,13 @@ final class FileTransferService: ObservableObject {
         let remaining = max(0, progress.totalBytes - progress.verifiedBytes)
         let eta = speed > 0 ? Double(remaining) / speed : nil
         DispatchQueue.main.async { [weak self] in
+            MacNotificationPresenter.shared.showFileTransferActive(
+                transferId: transferId,
+                fileName: progress.fileName,
+                status: "Receiving from Android",
+                transferredBytes: progress.verifiedBytes,
+                totalBytes: progress.totalBytes
+            )
             self?.displayState = FileTransferDisplayState(
                 title: "Receiving files",
                 detail: "\(Self.formatBytes(progress.verifiedBytes)) / \(Self.formatBytes(progress.totalBytes))",
@@ -300,6 +346,7 @@ final class FileTransferService: ObservableObject {
     @MainActor
     private func updateOutgoing(
         title: String,
+        fileName: String,
         verifiedBytes: Int64,
         totalBytes: Int64,
         transferId: String,
@@ -310,6 +357,13 @@ final class FileTransferService: ObservableObject {
         let elapsed = max(0.001, Date().timeIntervalSince(currentStartedAt))
         let speed = Double(verifiedBytes) / elapsed
         let remaining = max(0, totalBytes - verifiedBytes)
+        MacNotificationPresenter.shared.showFileTransferActive(
+            transferId: transferId,
+            fileName: fileName,
+            status: title,
+            transferredBytes: verifiedBytes,
+            totalBytes: totalBytes
+        )
         displayState = FileTransferDisplayState(
             title: title,
             detail: "\(Self.formatBytes(verifiedBytes)) / \(Self.formatBytes(totalBytes))",
@@ -342,9 +396,22 @@ final class FileTransferService: ObservableObject {
         let totalBytes: Int64
         var verifiedBytes: Int64
         let startedAt: Date
+        let fileName: String
     }
 
     private static func formatBytes(_ bytes: Int64) -> String {
         ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+    }
+
+    private static func transferTitle(_ manifest: FileTransferManifest) -> String {
+        if manifest.entryCount == 1,
+           let entry = manifest.entries.first {
+            return URL(fileURLWithPath: entry.relativePath).lastPathComponent
+        }
+        return transferTitle(fileCount: manifest.entryCount)
+    }
+
+    private static func transferTitle(fileCount: Int) -> String {
+        fileCount == 1 ? "1 item" : "\(fileCount) items"
     }
 }

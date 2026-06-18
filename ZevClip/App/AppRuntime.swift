@@ -85,6 +85,11 @@ final class ZevClipRuntime {
                 )
             }
         }
+        MacNotificationPresenter.shared.onFileTransferCancel = { [weak self] _ in
+            Task { @MainActor in
+                self?.fileTransferService.cancelActiveTransfer()
+            }
+        }
         macClipboardWatcher.onTextChanged = { [weak self] change in
             self?.androidClipboardSender.send(change)
         }
