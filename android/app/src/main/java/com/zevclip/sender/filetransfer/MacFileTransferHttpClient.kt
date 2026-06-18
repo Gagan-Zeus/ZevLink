@@ -89,11 +89,7 @@ class MacFileTransferHttpClient(
         )
 
         if (isCancelled.get()) {
-            postJson(
-                "/transfer/cancel",
-                JSONObject().put("transferId", manifest.transferId).toString(),
-                manifest.transferId
-            )
+            cancel(manifest.transferId)
             throw InterruptedException("Transfer cancelled.")
         }
 
@@ -102,6 +98,18 @@ class MacFileTransferHttpClient(
             JSONObject().put("transferId", manifest.transferId).toString(),
             manifest.transferId
         )
+    }
+
+    fun cancel(transferId: String) {
+        runCatching {
+            postJson(
+                "/transfer/cancel",
+                JSONObject().put("transferId", transferId).toString(),
+                transferId
+            )
+        }.onFailure { error ->
+            Log.w(TAG, "Could not notify Mac that transfer $transferId was cancelled.", error)
+        }
     }
 
     private fun uploadBatch(

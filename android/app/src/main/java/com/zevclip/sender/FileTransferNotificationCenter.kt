@@ -21,8 +21,10 @@ object FileTransferNotificationCenter {
     }
 
     private val cancelCallbacks = ConcurrentHashMap<String, () -> Unit>()
+    private val cancelledTransferIds = ConcurrentHashMap.newKeySet<String>()
 
     fun registerCancelCallback(transferId: String, callback: () -> Unit) {
+        cancelledTransferIds.remove(transferId)
         cancelCallbacks[transferId] = callback
     }
 
@@ -31,6 +33,7 @@ object FileTransferNotificationCenter {
     }
 
     fun cancelTransfer(context: Context, transferId: String) {
+        cancelledTransferIds.add(transferId)
         cancelCallbacks.remove(transferId)?.invoke()
         context.applicationContext
             .getSystemService(NotificationManager::class.java)
@@ -45,6 +48,7 @@ object FileTransferNotificationCenter {
         transferredBytes: Long,
         totalBytes: Long
     ) {
+        if (cancelledTransferIds.contains(transferId)) return
         val appContext = context.applicationContext
         if (!canPostNotifications(appContext)) return
 
@@ -95,6 +99,11 @@ object FileTransferNotificationCenter {
     ) {
         unregisterCancelCallback(transferId)
         val appContext = context.applicationContext
+        if (cancelledTransferIds.contains(transferId)) {
+            appContext.getSystemService(NotificationManager::class.java)
+                .cancel(notificationId(transferId))
+            return
+        }
         if (!canPostNotifications(appContext)) return
 
         ensureChannel(appContext)
@@ -143,6 +152,11 @@ object FileTransferNotificationCenter {
     ) {
         unregisterCancelCallback(transferId)
         val appContext = context.applicationContext
+        if (cancelledTransferIds.contains(transferId)) {
+            appContext.getSystemService(NotificationManager::class.java)
+                .cancel(notificationId(transferId))
+            return
+        }
         if (!canPostNotifications(appContext)) return
 
         ensureChannel(appContext)
@@ -160,6 +174,7 @@ object FileTransferNotificationCenter {
     }
 
     fun clear(context: Context, transferId: String) {
+        cancelledTransferIds.add(transferId)
         unregisterCancelCallback(transferId)
         context.applicationContext
             .getSystemService(NotificationManager::class.java)

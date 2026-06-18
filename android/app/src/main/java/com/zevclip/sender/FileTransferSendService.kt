@@ -95,6 +95,7 @@ class FileTransferSendService : Service() {
         thread(name = "ZevLinkFileShareSend") {
             var activeTransferId: String? = null
             var activeTitle = "File transfer"
+            var activeClient: MacFileTransferHttpClient? = null
             try {
                 val sources = uris.map { uri ->
                     ContentResolverFileTransferSource(contentResolver, uri)
@@ -108,8 +109,14 @@ class FileTransferSendService : Service() {
                 val title = transferTitle(sources.map { it.displayName })
                 activeTransferId = manifest.transferId
                 activeTitle = title
+                val client = MacFileTransferHttpClient(host, port, token)
+                activeClient = client
                 FileTransferNotificationCenter.registerCancelCallback(manifest.transferId) {
-                    cancelled.set(true)
+                    if (cancelled.compareAndSet(false, true)) {
+                        thread(name = "ZevLinkFileShareCancel") {
+                            client.cancel(manifest.transferId)
+                        }
+                    }
                 }
                 FileTransferNotificationCenter.showActive(
                     context = this,
@@ -120,7 +127,7 @@ class FileTransferSendService : Service() {
                     totalBytes = manifest.totalBytes
                 )
                 Log.i(TAG, "Sending ${sources.size} file(s) to Mac.")
-                MacFileTransferHttpClient(host, port, token).send(
+                client.send(
                     manifest = manifest,
                     sources = sources,
                     isCancelled = cancelled,
@@ -149,6 +156,7 @@ class FileTransferSendService : Service() {
                 if (cancelled.get()) {
                     Log.i(TAG, "File transfer cancelled.")
                     activeTransferId?.let { transferId ->
+                        activeClient?.cancel(transferId)
                         FileTransferNotificationCenter.clear(this, transferId)
                     }
                 } else {

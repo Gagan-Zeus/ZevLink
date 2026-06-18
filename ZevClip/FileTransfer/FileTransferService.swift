@@ -32,6 +32,7 @@ struct FileTransferDisplayState: Equatable {
 
 final class FileTransferService: ObservableObject {
     @Published private(set) var displayState: FileTransferDisplayState = .idle
+    var onCancelPeerTransfer: ((String) -> Void)?
 
     private let receiver = FileTransferReceiver()
     private let sender = FileTransferMacSender()
@@ -39,7 +40,9 @@ final class FileTransferService: ObservableObject {
     private let workerQueue = DispatchQueue(label: "com.zevlink.file-transfer-service", attributes: .concurrent)
     private let stateLock = NSLock()
     private var incomingProgress: [String: IncomingProgress] = [:]
+    private var cancelledTransferIds = Set<String>()
     private var outgoingTask: Task<Void, Never>?
+    private var outgoingTransferId: String?
 
     private var autoAcceptIncoming = true
     private var saveIncomingToDownloads = true
@@ -83,13 +86,23 @@ final class FileTransferService: ObservableObject {
     }
 
     func cancelActiveTransfer() {
-        if let transferId = displayState.transferId {
-            try? receiver.cancel(transferId: transferId)
-            MacNotificationPresenter.shared.clearFileTransfer(transferId: transferId)
+        guard let transferId = displayState.transferId else { return }
+        cancelTransfer(transferId: transferId)
+    }
+
+    func cancelTransfer(transferId: String) {
+        markTransferCancelled(transferId)
+        onCancelPeerTransfer?(transferId)
+        try? receiver.cancel(transferId: transferId)
+        if isOutgoingTransfer(transferId) {
+            outgoingTask?.cancel()
+            outgoingTask = nil
+            setOutgoingTransferId(nil)
         }
-        outgoingTask?.cancel()
-        outgoingTask = nil
-        displayState = .idle
+        MacNotificationPresenter.shared.clearFileTransfer(transferId: transferId)
+        if displayState.transferId == transferId {
+            displayState = .idle
+        }
     }
 
     func sendFilesToPhone(urls: [URL], endpoint: AndroidReceiverEndpoint?, token: String) {
@@ -123,6 +136,8 @@ final class FileTransferService: ObservableObject {
                     includeFileHashes: false
                 )
                 activeTransferId = manifest.transferId
+                self.setOutgoingTransferId(manifest.transferId)
+                self.clearTransferCancellation(manifest.transferId)
                 let manifestFileName = Self.transferTitle(manifest)
                 await self.updateOutgoing(
                     title: "Sending to Android",
@@ -190,6 +205,7 @@ final class FileTransferService: ObservableObject {
             receiverMaximumStreams: ZevLinkTransferProtocol.maxStreamCount
         )
         stateLock.lock()
+        cancelledTransferIds.remove(manifest.transferId)
         incomingProgress[manifest.transferId] = IncomingProgress(
             totalBytes: manifest.totalBytes,
             verifiedBytes: 0,
@@ -262,6 +278,7 @@ final class FileTransferService: ObservableObject {
 
     private func handleIncomingCancel(headers: [String: String], body: Data) throws -> FileTransferHTTPResponse {
         let transferId = try transferId(from: headers, body: body)
+        markTransferCancelled(transferId)
         try receiver.cancel(transferId: transferId)
         stateLock.lock()
         incomingProgress.removeValue(forKey: transferId)
@@ -319,6 +336,7 @@ final class FileTransferService: ObservableObject {
     }
 
     private func publishIncomingProgress(transferId: String, progress: IncomingProgress) {
+        guard !isTransferCancelled(transferId) else { return }
         let elapsed = max(0.001, Date().timeIntervalSince(progress.startedAt))
         let speed = Double(progress.verifiedBytes) / elapsed
         let remaining = max(0, progress.totalBytes - progress.verifiedBytes)
@@ -352,6 +370,7 @@ final class FileTransferService: ObservableObject {
         transferId: String,
         startedAt: Date?
     ) {
+        guard !isTransferCancelled(transferId) else { return }
         let currentStartedAt = startedAt ?? outgoingStartedAt ?? Date()
         outgoingStartedAt = currentStartedAt
         let elapsed = max(0.001, Date().timeIntervalSince(currentStartedAt))
@@ -379,6 +398,7 @@ final class FileTransferService: ObservableObject {
     private func finishOutgoing(message: String) {
         outgoingStartedAt = nil
         outgoingTask = nil
+        setOutgoingTransferId(nil)
         displayState = FileTransferDisplayState(
             title: "File transfer",
             detail: message,
@@ -413,5 +433,35 @@ final class FileTransferService: ObservableObject {
 
     private static func transferTitle(fileCount: Int) -> String {
         fileCount == 1 ? "1 item" : "\(fileCount) items"
+    }
+
+    private func markTransferCancelled(_ transferId: String) {
+        stateLock.lock()
+        cancelledTransferIds.insert(transferId)
+        stateLock.unlock()
+    }
+
+    private func clearTransferCancellation(_ transferId: String) {
+        stateLock.lock()
+        cancelledTransferIds.remove(transferId)
+        stateLock.unlock()
+    }
+
+    private func isTransferCancelled(_ transferId: String) -> Bool {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return cancelledTransferIds.contains(transferId)
+    }
+
+    private func setOutgoingTransferId(_ transferId: String?) {
+        stateLock.lock()
+        outgoingTransferId = transferId
+        stateLock.unlock()
+    }
+
+    private func isOutgoingTransfer(_ transferId: String) -> Bool {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return outgoingTransferId == transferId
     }
 }

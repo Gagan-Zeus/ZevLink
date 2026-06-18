@@ -238,10 +238,10 @@ final class FileTransferReceiver {
     }
 
     func cancel(transferId: String) throws {
-        let session = try session(for: transferId)
         lock.lock()
-        sessionsByTransferId.removeValue(forKey: transferId)
+        let session = sessionsByTransferId.removeValue(forKey: transferId)
         lock.unlock()
+        guard let session else { return }
         try? fileManager.removeItem(at: session.tempRoot)
     }
 

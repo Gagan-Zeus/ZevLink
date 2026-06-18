@@ -529,8 +529,8 @@ class AndroidClipboardHttpReceiver(
                 }
                 TRANSFER_CANCEL_PATH -> {
                     val transferId = transferId(headers, body)
+                    FileTransferNotificationCenter.cancelTransfer(appContext, transferId)
                     fileTransferReceiver.cancel(transferId)
-                    FileTransferNotificationCenter.clear(appContext, transferId)
                     response("200 OK", "Transfer cancelled.")
                 }
                 else -> response("404 Not Found", "Unknown transfer path.")

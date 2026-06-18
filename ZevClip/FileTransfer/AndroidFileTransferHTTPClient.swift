@@ -8,6 +8,46 @@ enum AndroidFileTransferHTTPClient {
         token: String,
         progress: @escaping @Sendable (Int64) -> Void
     ) async throws {
+        try await withTaskCancellationHandler {
+            try await sendTransfer(
+                manifest: manifest,
+                sources: sources,
+                endpoint: endpoint,
+                token: token,
+                progress: progress
+            )
+        } onCancel: {
+            Task.detached(priority: .utility) {
+                try? await cancel(
+                    transferId: manifest.transferId,
+                    endpoint: endpoint,
+                    token: token
+                )
+            }
+        }
+    }
+
+    static func cancel(
+        transferId: String,
+        endpoint: AndroidReceiverEndpoint,
+        token: String
+    ) async throws {
+        _ = try await postJSON(
+            path: "/transfer/cancel",
+            json: try JSONSerialization.data(withJSONObject: ["transferId": transferId]),
+            endpoint: endpoint,
+            token: token,
+            transferId: transferId
+        )
+    }
+
+    private static func sendTransfer(
+        manifest: FileTransferManifest,
+        sources: [FileTransferLocalFileSource],
+        endpoint: AndroidReceiverEndpoint,
+        token: String,
+        progress: @escaping @Sendable (Int64) -> Void
+    ) async throws {
         let response = try await postJSON(
             path: "/transfer/offer",
             json: try JSONEncoder().encode(manifest),

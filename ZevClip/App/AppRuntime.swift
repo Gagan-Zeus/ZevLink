@@ -61,6 +61,23 @@ final class ZevClipRuntime {
             autoAcceptIncoming: appSettings.fileTransferAutoAccept,
             saveIncomingToDownloads: appSettings.fileTransferSaveToDownloads
         )
+        fileTransferService.onCancelPeerTransfer = { [weak self] transferId in
+            guard
+                let self,
+                let endpoint = self.androidClipboardSender.resolvedEndpoint
+            else {
+                return
+            }
+            let token = self.receiver.pairingToken
+            guard !token.isEmpty else { return }
+            Task {
+                try? await AndroidFileTransferHTTPClient.cancel(
+                    transferId: transferId,
+                    endpoint: endpoint,
+                    token: token
+                )
+            }
+        }
         MacNotificationPresenter.shared.onDismiss = { [weak self] notificationKey in
             Task { @MainActor in
                 self?.androidClipboardSender.dismissAndroidNotification(notificationKey: notificationKey)
@@ -85,9 +102,9 @@ final class ZevClipRuntime {
                 )
             }
         }
-        MacNotificationPresenter.shared.onFileTransferCancel = { [weak self] _ in
+        MacNotificationPresenter.shared.onFileTransferCancel = { [weak self] transferId in
             Task { @MainActor in
-                self?.fileTransferService.cancelActiveTransfer()
+                self?.fileTransferService.cancelTransfer(transferId: transferId)
             }
         }
         macClipboardWatcher.onTextChanged = { [weak self] change in

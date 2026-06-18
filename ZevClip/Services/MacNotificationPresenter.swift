@@ -127,6 +127,7 @@ final class MacNotificationPresenter: NSObject, UNUserNotificationCenterDelegate
     private var authorizationRequested = false
     private var activeCallPanel: CallControlPanelController?
     private var activeFileTransferPanels: [String: FileTransferPanelController] = [:]
+    private var fileTransferPanelOrder: [String] = []
     private var activeNotificationPanels: [String: AndroidNotificationPanelController] = [:]
     private var notificationPanelOrder: [String] = []
     private var notificationPanelSerial = 0
@@ -292,6 +293,7 @@ final class MacNotificationPresenter: NSObject, UNUserNotificationCenterDelegate
                 transferredBytes: transferredBytes,
                 totalBytes: totalBytes
             )
+            self.repositionFileTransferPanels()
             panel.show()
         }
     }
@@ -304,6 +306,7 @@ final class MacNotificationPresenter: NSObject, UNUserNotificationCenterDelegate
             guard let self else { return }
             let panel = self.fileTransferPanel(for: transferId)
             panel.updateSent(fileName: fileName)
+            self.repositionFileTransferPanels()
             panel.show()
         }
     }
@@ -317,6 +320,7 @@ final class MacNotificationPresenter: NSObject, UNUserNotificationCenterDelegate
             guard let self else { return }
             let panel = self.fileTransferPanel(for: transferId)
             panel.updateReceived(fileName: fileName, fileURLs: fileURLs)
+            self.repositionFileTransferPanels()
             panel.show()
         }
     }
@@ -325,7 +329,9 @@ final class MacNotificationPresenter: NSObject, UNUserNotificationCenterDelegate
         DispatchQueue.main.async { [weak self] in
             guard let self, let panel = self.activeFileTransferPanels[transferId] else { return }
             self.activeFileTransferPanels[transferId] = nil
+            self.fileTransferPanelOrder.removeAll { $0 == transferId }
             panel.close(notify: false)
+            self.repositionFileTransferPanels()
         }
     }
 
@@ -346,11 +352,25 @@ final class MacNotificationPresenter: NSObject, UNUserNotificationCenterDelegate
                 Self.showFileTransferURLsInFinder(urls)
             },
             onClose: { [weak self] transferId in
-                self?.activeFileTransferPanels[transferId] = nil
+                guard let self else { return }
+                self.activeFileTransferPanels[transferId] = nil
+                self.fileTransferPanelOrder.removeAll { $0 == transferId }
+                self.repositionFileTransferPanels()
             }
         )
         activeFileTransferPanels[transferId] = panel
+        fileTransferPanelOrder.insert(transferId, at: 0)
         return panel
+    }
+
+    private func repositionFileTransferPanels() {
+        guard let screen = NSScreen.main else { return }
+        var nextTopY = screen.visibleFrame.maxY - 18
+        for transferId in fileTransferPanelOrder {
+            guard let panel = activeFileTransferPanels[transferId] else { continue }
+            panel.move(toTopY: nextTopY)
+            nextTopY -= panel.currentHeight + 10
+        }
     }
 
     private func showNotificationPanel(_ notification: AndroidMirroredNotification) {
@@ -3469,9 +3489,16 @@ private final class FileTransferPanelController: NSObject {
         configureContent()
     }
 
+    var currentHeight: CGFloat {
+        panel.frame.height
+    }
+
     func show() {
-        positionNearTopRight()
         panel.orderFrontRegardless()
+    }
+
+    func move(toTopY topY: CGFloat) {
+        positionNearTopRight(topY: topY)
     }
 
     func updateActive(
@@ -3665,7 +3692,7 @@ private final class FileTransferPanelController: NSObject {
         }
     }
 
-    private func positionNearTopRight() {
+    private func positionNearTopRight(topY: CGFloat) {
         guard let screen = NSScreen.main else {
             panel.center()
             return
@@ -3676,7 +3703,7 @@ private final class FileTransferPanelController: NSObject {
         panel.setFrameOrigin(
             NSPoint(
                 x: visibleFrame.maxX - frame.width - 18,
-                y: visibleFrame.maxY - frame.height - 18
+                y: min(visibleFrame.maxY - 18, topY) - frame.height
             )
         )
     }
