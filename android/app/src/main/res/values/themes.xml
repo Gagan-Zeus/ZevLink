@@ -19,4 +19,9 @@
         <item name="android:colorBackgroundCacheHint">@null</item>
     </style>
 
+    <style name="Theme.ZevClip.FileTransferShare" parent="@android:style/Theme.NoDisplay">
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowDisablePreview">true</item>
+    </style>
+
 </resources>

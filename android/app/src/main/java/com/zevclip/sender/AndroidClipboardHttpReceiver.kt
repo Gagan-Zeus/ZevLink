@@ -463,6 +463,17 @@ class AndroidClipboardHttpReceiver(
                         requestedStreamCount = manifest.requestedStreamCount,
                         receiverMaximumStreams = com.zevclip.sender.filetransfer.ZevLinkTransferProtocol.MAX_STREAM_COUNT
                     )
+                    FileTransferNotificationCenter.registerCancelCallback(manifest.transferId) {
+                        fileTransferReceiver.cancel(manifest.transferId)
+                    }
+                    FileTransferNotificationCenter.showActive(
+                        context = appContext,
+                        transferId = manifest.transferId,
+                        fileName = transferTitle(manifest.fileEntries.map { it.relativePath.substringAfterLast('/') }),
+                        direction = FileTransferNotificationCenter.Direction.RECEIVING,
+                        transferredBytes = 0L,
+                        totalBytes = manifest.totalBytes
+                    )
                     response(
                         status = "200 OK",
                         body = FileTransferJson.offerResponseToJson(offer).toString(),
@@ -490,12 +501,22 @@ class AndroidClipboardHttpReceiver(
                         chunkSha256 = chunkHash,
                         activeStreamCount = 4
                     )
+                    updateReceivingNotification(transferId)
                     response("200 OK", "Chunk accepted.")
                 }
                 TRANSFER_COMPLETE_PATH -> {
                     val transferId = transferId(headers, body)
                     val completed = fileTransferReceiver.complete(transferId, verifyFileHashes = false)
                     val published = AndroidPublicDownloadsPublisher.publish(appContext, completed)
+                    val openUri = published.fileUris.firstOrNull()
+                    FileTransferNotificationCenter.showComplete(
+                        context = appContext,
+                        transferId = completed.transferId,
+                        fileName = transferTitle(completed.files.map { it.file.name }),
+                        direction = FileTransferNotificationCenter.Direction.RECEIVING,
+                        openUri = openUri,
+                        mimeType = openUri?.let { appContext.contentResolver.getType(it) }
+                    )
                     response(
                         status = "200 OK",
                         body = JSONObject()
@@ -507,7 +528,9 @@ class AndroidClipboardHttpReceiver(
                     )
                 }
                 TRANSFER_CANCEL_PATH -> {
-                    fileTransferReceiver.cancel(transferId(headers, body))
+                    val transferId = transferId(headers, body)
+                    fileTransferReceiver.cancel(transferId)
+                    FileTransferNotificationCenter.clear(appContext, transferId)
                     response("200 OK", "Transfer cancelled.")
                 }
                 else -> response("404 Not Found", "Unknown transfer path.")
@@ -537,11 +560,30 @@ class AndroidClipboardHttpReceiver(
                 chunkSha256 = chunkHash,
                 activeStreamCount = 8
             )
+            updateReceivingNotification(transferId)
             response("200 OK", "Chunk accepted.")
         } catch (error: Exception) {
             Log.w(TAG, "Streaming file chunk failed", error)
             response("400 Bad Request", error.message ?: "File transfer failed.")
         }
+    }
+
+    private fun updateReceivingNotification(transferId: String) {
+        val manifest = fileTransferReceiver.manifest(transferId)
+        val progress = fileTransferReceiver.progress(transferId)
+        FileTransferNotificationCenter.showActive(
+            context = appContext,
+            transferId = transferId,
+            fileName = transferTitle(manifest.fileEntries.map { it.relativePath.substringAfterLast('/') }),
+            direction = FileTransferNotificationCenter.Direction.RECEIVING,
+            transferredBytes = progress.verifiedBytes,
+            totalBytes = progress.totalBytes
+        )
+    }
+
+    private fun transferTitle(fileNames: List<String>): String {
+        val first = fileNames.firstOrNull()?.takeIf { it.isNotBlank() } ?: "File transfer"
+        return if (fileNames.size <= 1) first else "$first + ${fileNames.size - 1} more"
     }
 
     private fun transferId(headers: Map<String, String>, body: ByteArray): String {

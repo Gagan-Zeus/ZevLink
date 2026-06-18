@@ -51,9 +51,10 @@
 
         <activity
             android:name=".FileTransferShareActivity"
+            android:excludeFromRecents="true"
             android:exported="true"
             android:label="Send to Mac"
-            android:theme="@style/Theme.ZevClip">
+            android:theme="@style/Theme.ZevClip.FileTransferShare">
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -110,6 +111,10 @@
             android:exported="false" />
 
         <service
+            android:name=".FileTransferSendService"
+            android:exported="false" />
+
+        <service
             android:name=".AndroidCallMirrorService"
             android:exported="false" />
 
@@ -158,6 +163,10 @@
                 <action android:name="android.provider.Telephony.SMS_RECEIVED" />
             </intent-filter>
         </receiver>
+
+        <receiver
+            android:name=".FileTransferNotificationActionReceiver"
+            android:exported="false" />
 
         <meta-data
             android:name="com.google.mlkit.vision.DEPENDENCIES"

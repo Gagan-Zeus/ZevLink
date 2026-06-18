@@ -91,6 +91,16 @@ class FileTransferReceiver(
         }
     }
 
+    @Synchronized
+    fun manifest(transferId: String): FileTransferManifest {
+        return session(transferId).manifest
+    }
+
+    @Synchronized
+    fun progress(transferId: String): FileTransferProgress {
+        return session(transferId).stateMachine.progress
+    }
+
     fun writeChunk(
         transferId: String,
         fileId: String,
