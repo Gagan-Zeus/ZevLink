@@ -149,7 +149,6 @@ private final class SettingsWindowController {
                 receiver: receiver,
                 macClipboardWatcher: macClipboardWatcher,
                 androidClipboardSender: androidClipboardSender,
-                fileTransferService: ZevClipRuntime.shared.fileTransferService,
                 appSettings: appSettings
             )
         )

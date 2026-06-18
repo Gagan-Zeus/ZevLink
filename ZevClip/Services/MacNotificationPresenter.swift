@@ -3422,12 +3422,13 @@ private final class FileTransferPanelController: NSObject {
     private let cancelButton = NotificationActionButton(title: "Cancel", target: nil, action: nil)
     private let copyButton = NotificationActionButton(title: "Copy", target: nil, action: nil)
     private let showInFinderButton = NotificationActionButton(title: "Show in Finder", target: nil, action: nil)
+    private let closeButton = NotificationActionButton(title: "", target: nil, action: nil)
     private let onCancel: (String) -> Void
     private let onCopy: ([URL]) -> Void
     private let onShowInFinder: ([URL]) -> Void
     private let onClose: (String) -> Void
     private var fileURLs: [URL] = []
-    private var autoCloseTimer: Timer?
+    private var sentAutoCloseTimer: Timer?
     private var isClosing = false
     private var state: State = .active
 
@@ -3480,8 +3481,8 @@ private final class FileTransferPanelController: NSObject {
         totalBytes: Int64
     ) {
         state = .active
-        autoCloseTimer?.invalidate()
-        autoCloseTimer = nil
+        sentAutoCloseTimer?.invalidate()
+        sentAutoCloseTimer = nil
         titleLabel.stringValue = Self.singleLine(fileName)
         statusLabel.stringValue = status
         detailLabel.stringValue = Self.progressText(transferredBytes: transferredBytes, totalBytes: totalBytes)
@@ -3490,6 +3491,7 @@ private final class FileTransferPanelController: NSObject {
         cancelButton.isHidden = false
         copyButton.isHidden = true
         showInFinderButton.isHidden = true
+        closeButton.isHidden = true
     }
 
     func updateSent(fileName: String) {
@@ -3502,11 +3504,14 @@ private final class FileTransferPanelController: NSObject {
         cancelButton.isHidden = true
         copyButton.isHidden = true
         showInFinderButton.isHidden = true
-        scheduleAutoClose(after: 5)
+        closeButton.isHidden = false
+        scheduleSentAutoClose()
     }
 
     func updateReceived(fileName: String, fileURLs: [URL]) {
         state = .received
+        sentAutoCloseTimer?.invalidate()
+        sentAutoCloseTimer = nil
         self.fileURLs = fileURLs
         titleLabel.stringValue = Self.singleLine(fileName)
         statusLabel.stringValue = "Received successfully"
@@ -3516,14 +3521,14 @@ private final class FileTransferPanelController: NSObject {
         cancelButton.isHidden = true
         copyButton.isHidden = false
         showInFinderButton.isHidden = false
-        scheduleAutoClose(after: 15)
+        closeButton.isHidden = false
     }
 
     func close(notify: Bool = true) {
         guard !isClosing else { return }
         isClosing = true
-        autoCloseTimer?.invalidate()
-        autoCloseTimer = nil
+        sentAutoCloseTimer?.invalidate()
+        sentAutoCloseTimer = nil
         panel.close()
         if notify {
             onClose(transferId)
@@ -3594,6 +3599,8 @@ private final class FileTransferPanelController: NSObject {
         cancelButton.hasDestructiveAction = true
         copyButton.isHidden = true
         showInFinderButton.isHidden = true
+        configureCloseButton()
+        closeButton.isHidden = true
 
         buttonStack.addArrangedSubview(cancelButton)
         buttonStack.addArrangedSubview(copyButton)
@@ -3606,6 +3613,7 @@ private final class FileTransferPanelController: NSObject {
         rootStack.translatesAutoresizingMaskIntoConstraints = false
 
         contentView.addSubview(rootStack)
+        contentView.addSubview(closeButton)
         NSLayoutConstraint.activate([
             rootStack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
             rootStack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
@@ -3613,8 +3621,12 @@ private final class FileTransferPanelController: NSObject {
             rootStack.bottomAnchor.constraint(lessThanOrEqualTo: contentView.bottomAnchor, constant: -14),
             iconView.widthAnchor.constraint(equalToConstant: 38),
             iconView.heightAnchor.constraint(equalToConstant: 38),
-            textStack.widthAnchor.constraint(equalToConstant: 270),
-            progressIndicator.widthAnchor.constraint(equalTo: textStack.widthAnchor)
+            textStack.widthAnchor.constraint(equalToConstant: 238),
+            progressIndicator.widthAnchor.constraint(equalTo: textStack.widthAnchor),
+            closeButton.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -10),
+            closeButton.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 10),
+            closeButton.widthAnchor.constraint(equalToConstant: 20),
+            closeButton.heightAnchor.constraint(equalToConstant: 20)
         ])
     }
 
@@ -3626,9 +3638,29 @@ private final class FileTransferPanelController: NSObject {
         button.font = .systemFont(ofSize: 12, weight: .medium)
     }
 
-    private func scheduleAutoClose(after delay: TimeInterval) {
-        autoCloseTimer?.invalidate()
-        autoCloseTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
+    private func configureCloseButton() {
+        closeButton.target = self
+        closeButton.action = #selector(closeCompletedTransfer)
+        closeButton.image = NSImage(
+            systemSymbolName: "xmark",
+            accessibilityDescription: "Close"
+        )?.withSymbolConfiguration(
+            NSImage.SymbolConfiguration(pointSize: 9, weight: .bold)
+        )
+        closeButton.imagePosition = .imageOnly
+        closeButton.contentTintColor = .white
+        closeButton.isBordered = false
+        closeButton.focusRingType = .none
+        closeButton.toolTip = "Close"
+        closeButton.translatesAutoresizingMaskIntoConstraints = false
+        closeButton.wantsLayer = true
+        closeButton.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.34).cgColor
+        closeButton.layer?.cornerRadius = 10
+    }
+
+    private func scheduleSentAutoClose() {
+        sentAutoCloseTimer?.invalidate()
+        sentAutoCloseTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: false) { [weak self] _ in
             self?.close()
         }
     }
@@ -3658,13 +3690,17 @@ private final class FileTransferPanelController: NSObject {
 
     @objc private func copyFiles() {
         onCopy(fileURLs)
-        statusLabel.stringValue = "Copied"
-        scheduleAutoClose(after: 1.5)
+        close()
     }
 
     @objc private func showInFinder() {
         onShowInFinder(fileURLs)
-        scheduleAutoClose(after: 1.5)
+        close()
+    }
+
+    @objc private func closeCompletedTransfer() {
+        guard state != .active else { return }
+        close()
     }
 
     private static func progressValue(transferredBytes: Int64, totalBytes: Int64) -> Double {

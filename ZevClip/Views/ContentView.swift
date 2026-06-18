@@ -4,7 +4,6 @@ struct ContentView: View {
     @ObservedObject var receiver: ClipboardReceiver
     @ObservedObject var macClipboardWatcher: MacClipboardWatcher
     @ObservedObject var androidClipboardSender: AndroidClipboardSender
-    @ObservedObject var fileTransferService: FileTransferService
     @ObservedObject var appSettings: AppSettings
 
     private var isSyncRunning: Bool {
@@ -95,37 +94,6 @@ struct ContentView: View {
                     if androidClipboardSender.isDiscovering {
                         ProgressView()
                             .scaleEffect(0.65)
-                    }
-                }
-            }
-
-            Divider()
-
-            VStack(alignment: .leading, spacing: 12) {
-                Text("File Transfer")
-                    .font(.headline)
-
-                Text(fileTransferService.displayState.title)
-                    .font(.subheadline.weight(.semibold))
-                Text(fileTransferService.displayState.detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-
-                ProgressView(value: fileTransferService.displayState.progress)
-
-                HStack {
-                    Text(transferSpeedText)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Text(transferETAText)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    if fileTransferService.displayState.canCancel {
-                        Button("Cancel") {
-                            fileTransferService.cancelActiveTransfer()
-                        }
                     }
                 }
             }
@@ -233,20 +201,7 @@ struct ContentView: View {
             Spacer(minLength: 0)
         }
         .padding(24)
-        .frame(minWidth: 500, minHeight: 620)
-    }
-
-    private var transferSpeedText: String {
-        let speed = Int64(fileTransferService.displayState.speedBytesPerSecond)
-        guard speed > 0 else { return "Speed: -" }
-        return "Speed: \(ByteCountFormatter.string(fromByteCount: speed, countStyle: .file))/s"
-    }
-
-    private var transferETAText: String {
-        guard let eta = fileTransferService.displayState.etaSeconds, eta.isFinite else {
-            return "ETA: -"
-        }
-        return "ETA: \(Int(eta.rounded()))s"
+        .frame(minWidth: 500, minHeight: 500)
     }
 
     private var macStatusText: String {
