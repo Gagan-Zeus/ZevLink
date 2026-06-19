@@ -3452,6 +3452,145 @@ private final class TrackpadCornerGestureMonitor {
     }
 }
 
+private final class FileTransferDragBoxView: NSView, NSDraggingSource {
+    private var fileURLs: [URL] = []
+    private var fileName = "Received file"
+    private var mouseDownLocation: NSPoint?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        toolTip = "Drag received files to another folder or app"
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        toolTip = "Drag received files to another folder or app"
+    }
+
+    func update(fileName: String, fileURLs: [URL]) {
+        self.fileName = fileName
+        self.fileURLs = fileURLs
+        needsDisplay = true
+        setAccessibilityLabel("Drag \(fileName)")
+        toolTip = fileURLs.count == 1
+            ? "Drag received file to another folder or app"
+            : "Drag received files to another folder or app"
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+
+        let bounds = bounds.insetBy(dx: 0.5, dy: 0.5)
+        let path = NSBezierPath(roundedRect: bounds, xRadius: 18, yRadius: 18)
+        NSColor.controlAccentColor.withAlphaComponent(0.10).setFill()
+        path.fill()
+
+        NSColor.controlAccentColor.withAlphaComponent(0.46).setStroke()
+        path.lineWidth = 1
+        path.setLineDash([4, 3], count: 2, phase: 0)
+        path.stroke()
+
+        let iconSize: CGFloat = 72
+        let iconRect = NSRect(
+            x: bounds.midX - iconSize / 2,
+            y: bounds.maxY - iconSize - 14,
+            width: iconSize,
+            height: iconSize
+        )
+        let icon = fileURLs.first.map { NSWorkspace.shared.icon(forFile: $0.path) } ?? NSImage()
+        icon.size = NSSize(width: iconSize, height: iconSize)
+        icon.draw(in: iconRect)
+
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.alignment = .center
+        paragraphStyle.lineBreakMode = .byCharWrapping
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 14, weight: .semibold),
+            .foregroundColor: NSColor.labelColor,
+            .paragraphStyle: paragraphStyle
+        ]
+        fileName.draw(
+            in: NSRect(x: 10, y: 12, width: bounds.width - 20, height: 40),
+            withAttributes: attributes
+        )
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard !fileURLs.isEmpty else { return }
+        mouseDownLocation = event.locationInWindow
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard !fileURLs.isEmpty, let mouseDownLocation else { return }
+        let location = event.locationInWindow
+        let dragDistance = hypot(location.x - mouseDownLocation.x, location.y - mouseDownLocation.y)
+        guard dragDistance > 3 else { return }
+        self.mouseDownLocation = nil
+        startDragging(with: event)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        mouseDownLocation = nil
+    }
+
+    func draggingSession(
+        _ session: NSDraggingSession,
+        sourceOperationMaskFor context: NSDraggingContext
+    ) -> NSDragOperation {
+        .copy
+    }
+
+    private func startDragging(with event: NSEvent) {
+        let image = draggingImage()
+        let itemFrame = NSRect(
+            x: bounds.midX - image.size.width / 2,
+            y: bounds.midY - image.size.height / 2,
+            width: image.size.width,
+            height: image.size.height
+        )
+        let items = fileURLs.map { url in
+            let item = NSDraggingItem(pasteboardWriter: url as NSURL)
+            item.setDraggingFrame(itemFrame, contents: image)
+            return item
+        }
+        beginDraggingSession(with: items, event: event, source: self)
+    }
+
+    private func draggingImage() -> NSImage {
+        let image = NSImage(size: NSSize(width: 56, height: 56))
+        image.lockFocus()
+        defer { image.unlockFocus() }
+
+        NSColor.windowBackgroundColor.withAlphaComponent(0.95).setFill()
+        NSBezierPath(roundedRect: NSRect(x: 4, y: 4, width: 48, height: 48), xRadius: 10, yRadius: 10).fill()
+
+        let icon = fileURLs.first.map { NSWorkspace.shared.icon(forFile: $0.path) } ?? NSImage()
+        icon.size = NSSize(width: 34, height: 34)
+        icon.draw(in: NSRect(x: 11, y: 11, width: 34, height: 34))
+
+        if fileURLs.count > 1 {
+            let badgeRect = NSRect(x: 33, y: 32, width: 19, height: 18)
+            NSColor.controlAccentColor.setFill()
+            NSBezierPath(roundedRect: badgeRect, xRadius: 9, yRadius: 9).fill()
+            let countText = "\(min(fileURLs.count, 99))"
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 10, weight: .bold),
+                .foregroundColor: NSColor.white
+            ]
+            let textSize = countText.size(withAttributes: attributes)
+            countText.draw(
+                at: NSPoint(
+                    x: badgeRect.midX - textSize.width / 2,
+                    y: badgeRect.midY - textSize.height / 2
+                ),
+                withAttributes: attributes
+            )
+        }
+
+        return image
+    }
+}
+
 private final class FileTransferPanelController: NSObject {
     private enum State {
         case pending
@@ -3473,6 +3612,7 @@ private final class FileTransferPanelController: NSObject {
     private let copyButton = NotificationActionButton(title: "Copy", target: nil, action: nil)
     private let showInFinderButton = NotificationActionButton(title: "Show in Finder", target: nil, action: nil)
     private let closeButton = NotificationActionButton(title: "", target: nil, action: nil)
+    private let dragBoxView = FileTransferDragBoxView()
     private let onCancel: (String) -> Void
     private let onAccept: (String) -> Void
     private let onDecline: (String) -> Void
@@ -3483,9 +3623,21 @@ private final class FileTransferPanelController: NSObject {
     private var sentAutoCloseTimer: Timer?
     private var isClosing = false
     private var state: State = .active
+    private var dragBoxWidthConstraint: NSLayoutConstraint?
+    private var dragBoxHeightConstraint: NSLayoutConstraint?
+    private var iconWidthConstraint: NSLayoutConstraint?
+    private var iconHeightConstraint: NSLayoutConstraint?
+    private var copyButtonWidthConstraint: NSLayoutConstraint?
+    private var showInFinderButtonWidthConstraint: NSLayoutConstraint?
 
-    private static let panelWidth: CGFloat = 352
-    private static let panelHeight: CGFloat = 128
+    private static let panelWidth: CGFloat = 200
+    private static let panelHeight: CGFloat = 206
+    private static let wrappedPanelHeight: CGFloat = 216
+    private static let compactSentPanelHeight: CGFloat = 202
+    private static let wrappedSentPanelHeight: CGFloat = 208
+    private static let receivedPanelWidth: CGFloat = 200
+    private static let receivedPanelHeight: CGFloat = 250
+    private static let receivedDragBoxHeight: CGFloat = 154
 
     init(
         transferId: String,
@@ -3546,11 +3698,14 @@ private final class FileTransferPanelController: NSObject {
         state = .active
         sentAutoCloseTimer?.invalidate()
         sentAutoCloseTimer = nil
+        resizePanel(width: Self.panelWidth, height: Self.standardPanelHeight(for: fileName))
+        applyStandardLayout()
         titleLabel.stringValue = Self.singleLine(fileName)
         statusLabel.stringValue = status
         detailLabel.stringValue = Self.progressText(transferredBytes: transferredBytes, totalBytes: totalBytes)
         progressIndicator.isHidden = false
         progressIndicator.doubleValue = Self.progressValue(transferredBytes: transferredBytes, totalBytes: totalBytes)
+        dragBoxView.isHidden = true
         acceptButton.isHidden = true
         declineButton.isHidden = true
         cancelButton.isHidden = false
@@ -3563,10 +3718,13 @@ private final class FileTransferPanelController: NSObject {
         state = .pending
         sentAutoCloseTimer?.invalidate()
         sentAutoCloseTimer = nil
+        resizePanel(width: Self.panelWidth, height: Self.standardPanelHeight(for: fileName))
+        applyStandardLayout()
         titleLabel.stringValue = Self.singleLine(fileName)
         statusLabel.stringValue = "Incoming from \(Self.singleLine(senderName))"
         detailLabel.stringValue = ByteCountFormatter.string(fromByteCount: totalBytes, countStyle: .file)
         progressIndicator.isHidden = true
+        dragBoxView.isHidden = true
         acceptButton.isHidden = false
         acceptButton.isEnabled = true
         declineButton.isHidden = false
@@ -3579,17 +3737,23 @@ private final class FileTransferPanelController: NSObject {
 
     func updateSent(fileName: String) {
         state = .sent
+        applyStandardLayout()
         titleLabel.stringValue = Self.singleLine(fileName)
         statusLabel.stringValue = "Sent successfully"
         detailLabel.stringValue = "File transfer completed."
         progressIndicator.isHidden = false
         progressIndicator.doubleValue = 100
+        dragBoxView.isHidden = true
         acceptButton.isHidden = true
         declineButton.isHidden = true
         cancelButton.isHidden = true
         copyButton.isHidden = true
         showInFinderButton.isHidden = true
         closeButton.isHidden = false
+        iconWidthConstraint?.constant = 88
+        iconHeightConstraint?.constant = 88
+        panel.contentView?.layoutSubtreeIfNeeded()
+        resizePanel(width: Self.panelWidth, height: Self.sentPanelHeight(for: fileName))
         scheduleSentAutoClose()
     }
 
@@ -3598,17 +3762,29 @@ private final class FileTransferPanelController: NSObject {
         sentAutoCloseTimer?.invalidate()
         sentAutoCloseTimer = nil
         self.fileURLs = fileURLs
-        titleLabel.stringValue = Self.singleLine(fileName)
+        titleLabel.stringValue = ""
+        titleLabel.isHidden = true
+        iconView.isHidden = true
         statusLabel.stringValue = "Received successfully"
         detailLabel.stringValue = "Saved to Downloads."
-        progressIndicator.isHidden = false
-        progressIndicator.doubleValue = 100
+        statusLabel.alignment = .center
+        detailLabel.alignment = .center
+        progressIndicator.isHidden = true
+        dragBoxView.update(fileName: Self.singleLine(fileName), fileURLs: fileURLs)
+        dragBoxView.isHidden = fileURLs.isEmpty
+        dragBoxWidthConstraint?.constant = Self.receivedPanelWidth - 32
+        dragBoxHeightConstraint?.constant = Self.receivedDragBoxHeight
+        copyButtonWidthConstraint?.isActive = true
+        showInFinderButtonWidthConstraint?.isActive = true
+        copyButton.font = .systemFont(ofSize: 11, weight: .medium)
+        showInFinderButton.font = .systemFont(ofSize: 11, weight: .medium)
         acceptButton.isHidden = true
         declineButton.isHidden = true
         cancelButton.isHidden = true
         copyButton.isHidden = false
         showInFinderButton.isHidden = false
         closeButton.isHidden = false
+        resizePanel(width: Self.receivedPanelWidth, height: Self.receivedPanelHeight)
     }
 
     func close(notify: Bool = true) {
@@ -3639,18 +3815,23 @@ private final class FileTransferPanelController: NSObject {
 
         titleLabel.font = .systemFont(ofSize: 14, weight: .semibold)
         titleLabel.textColor = .labelColor
-        titleLabel.lineBreakMode = .byTruncatingTail
-        titleLabel.maximumNumberOfLines = 1
-        titleLabel.cell?.usesSingleLineMode = true
+        titleLabel.alignment = .center
+        titleLabel.lineBreakMode = .byCharWrapping
+        titleLabel.maximumNumberOfLines = 2
+        titleLabel.cell?.usesSingleLineMode = false
+        titleLabel.cell?.wraps = true
+        titleLabel.cell?.truncatesLastVisibleLine = true
 
         statusLabel.font = .systemFont(ofSize: 12)
         statusLabel.textColor = .secondaryLabelColor
+        statusLabel.alignment = .center
         statusLabel.lineBreakMode = .byTruncatingTail
         statusLabel.maximumNumberOfLines = 1
         statusLabel.cell?.usesSingleLineMode = true
 
         detailLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
         detailLabel.textColor = .tertiaryLabelColor
+        detailLabel.alignment = .center
         detailLabel.lineBreakMode = .byTruncatingTail
         detailLabel.maximumNumberOfLines = 1
         detailLabel.cell?.usesSingleLineMode = true
@@ -3662,16 +3843,19 @@ private final class FileTransferPanelController: NSObject {
         progressIndicator.style = .bar
         progressIndicator.translatesAutoresizingMaskIntoConstraints = false
 
+        dragBoxView.isHidden = true
+        dragBoxView.translatesAutoresizingMaskIntoConstraints = false
+
         let textStack = NSStackView(views: [titleLabel, statusLabel, detailLabel, progressIndicator])
         textStack.orientation = .vertical
-        textStack.alignment = .leading
+        textStack.alignment = .centerX
         textStack.spacing = 3
         textStack.translatesAutoresizingMaskIntoConstraints = false
 
         let headerStack = NSStackView(views: [iconView, textStack])
-        headerStack.orientation = .horizontal
-        headerStack.alignment = .top
-        headerStack.spacing = 12
+        headerStack.orientation = .vertical
+        headerStack.alignment = .centerX
+        headerStack.spacing = 8
         headerStack.translatesAutoresizingMaskIntoConstraints = false
 
         let buttonStack = NSStackView()
@@ -3700,23 +3884,38 @@ private final class FileTransferPanelController: NSObject {
         buttonStack.addArrangedSubview(copyButton)
         buttonStack.addArrangedSubview(showInFinderButton)
 
-        let rootStack = NSStackView(views: [headerStack, buttonStack])
+        let rootStack = NSStackView(views: [dragBoxView, headerStack, buttonStack])
         rootStack.orientation = .vertical
-        rootStack.alignment = .leading
-        rootStack.spacing = 10
+        rootStack.alignment = .centerX
+        rootStack.spacing = 8
         rootStack.translatesAutoresizingMaskIntoConstraints = false
 
         contentView.addSubview(rootStack)
         contentView.addSubview(closeButton)
+        let dragBoxHeight = dragBoxView.heightAnchor.constraint(equalToConstant: 34)
+        let dragBoxWidth = dragBoxView.widthAnchor.constraint(equalToConstant: Self.panelWidth - 32)
+        dragBoxWidthConstraint = dragBoxWidth
+        dragBoxHeightConstraint = dragBoxHeight
+        let copyButtonWidth = copyButton.widthAnchor.constraint(equalToConstant: 52)
+        let showInFinderButtonWidth = showInFinderButton.widthAnchor.constraint(equalToConstant: 108)
+        copyButtonWidthConstraint = copyButtonWidth
+        showInFinderButtonWidthConstraint = showInFinderButtonWidth
+        let iconWidth = iconView.widthAnchor.constraint(equalToConstant: 70)
+        let iconHeight = iconView.heightAnchor.constraint(equalToConstant: 70)
+        iconWidthConstraint = iconWidth
+        iconHeightConstraint = iconHeight
         NSLayoutConstraint.activate([
             rootStack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
             rootStack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
-            rootStack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 14),
-            rootStack.bottomAnchor.constraint(lessThanOrEqualTo: contentView.bottomAnchor, constant: -14),
-            iconView.widthAnchor.constraint(equalToConstant: 38),
-            iconView.heightAnchor.constraint(equalToConstant: 38),
-            textStack.widthAnchor.constraint(equalToConstant: 238),
+            rootStack.topAnchor.constraint(greaterThanOrEqualTo: contentView.topAnchor, constant: 10),
+            rootStack.bottomAnchor.constraint(lessThanOrEqualTo: contentView.bottomAnchor, constant: -10),
+            rootStack.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
+            iconWidth,
+            iconHeight,
+            textStack.widthAnchor.constraint(equalToConstant: Self.panelWidth - 32),
             progressIndicator.widthAnchor.constraint(equalTo: textStack.widthAnchor),
+            dragBoxWidth,
+            dragBoxHeight,
             closeButton.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -10),
             closeButton.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 10),
             closeButton.widthAnchor.constraint(equalToConstant: 20),
@@ -3757,6 +3956,46 @@ private final class FileTransferPanelController: NSObject {
         sentAutoCloseTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: false) { [weak self] _ in
             self?.close()
         }
+    }
+
+    private func resizePanel(width: CGFloat, height: CGFloat) {
+        let frame = panel.frame
+        guard abs(frame.width - width) > 0.5 || abs(frame.height - height) > 0.5 else { return }
+        panel.setFrame(
+            NSRect(x: frame.maxX - width, y: frame.maxY - height, width: width, height: height),
+            display: true,
+            animate: false
+        )
+    }
+
+    private func applyStandardLayout() {
+        titleLabel.isHidden = false
+        iconView.isHidden = false
+        titleLabel.alignment = .center
+        statusLabel.alignment = .center
+        detailLabel.alignment = .center
+        iconWidthConstraint?.constant = 70
+        iconHeightConstraint?.constant = 70
+        dragBoxWidthConstraint?.constant = Self.panelWidth - 32
+        dragBoxHeightConstraint?.constant = 34
+        copyButtonWidthConstraint?.isActive = false
+        showInFinderButtonWidthConstraint?.isActive = false
+    }
+
+    private static func standardPanelHeight(for fileName: String) -> CGFloat {
+        titleNeedsTwoLines(fileName) ? wrappedPanelHeight : panelHeight
+    }
+
+    private static func sentPanelHeight(for fileName: String) -> CGFloat {
+        titleNeedsTwoLines(fileName) ? wrappedSentPanelHeight : compactSentPanelHeight
+    }
+
+    private static func titleNeedsTwoLines(_ fileName: String) -> Bool {
+        let cleanName = singleLine(fileName)
+        let width = (cleanName as NSString).size(
+            withAttributes: [.font: NSFont.systemFont(ofSize: 14, weight: .semibold)]
+        ).width
+        return width > panelWidth - 32
     }
 
     private func positionNearTopRight(topY: CGFloat) {
