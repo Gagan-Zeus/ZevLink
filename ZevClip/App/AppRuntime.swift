@@ -116,7 +116,7 @@ final class ZevClipRuntime {
                 self?.fileTransferService.declineIncomingTransfer(transferId: transferId)
             }
         }
-        macClipboardWatcher.onTextChanged = { [weak self] change in
+        macClipboardWatcher.onContentChanged = { [weak self] change in
             self?.androidClipboardSender.send(change)
         }
     }

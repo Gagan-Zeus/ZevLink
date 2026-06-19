@@ -6,7 +6,7 @@ Current release version: **2.3.0**.
 
 It includes:
 
-- Two-way clipboard text sync with the Mac.
+- Two-way clipboard text sync, plus image clipboard sync from Mac to Android.
 - AirPlay screen mirroring to the paired Mac.
 - AirPlay audio streaming to the Mac.
 - AirPlay audio broadcast to selected AirPlay receivers.

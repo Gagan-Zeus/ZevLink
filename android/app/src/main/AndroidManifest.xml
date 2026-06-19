@@ -27,6 +27,12 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.ZevClip"
         android:usesCleartextTraffic="true">
+        <provider
+            android:name=".ClipboardImageProvider"
+            android:authorities="${applicationId}.clipboard-images"
+            android:exported="false"
+            android:grantUriPermissions="true" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true">

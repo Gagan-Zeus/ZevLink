@@ -260,8 +260,13 @@ class ClipboardAccessibilityService : AccessibilityService() {
 
     private fun readClipboardAndSend(): Boolean {
         val text = try {
-            getSystemService(ClipboardManager::class.java)
-                .primaryClip
+            val primaryClip = getSystemService(ClipboardManager::class.java).primaryClip
+            if (primaryClip != null && !primaryClip.description.hasMimeType("text/*")) {
+                Log.d(TAG, "Ignoring non-text clipboard content; file sync is Mac to Android only")
+                return true
+            }
+
+            primaryClip
                 ?.takeIf { it.itemCount > 0 }
                 ?.getItemAt(0)
                 ?.coerceToText(this)

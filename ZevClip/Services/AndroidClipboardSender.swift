@@ -12,7 +12,7 @@ final class AndroidClipboardSender: ObservableObject {
 
     private let tokenProvider: () -> String
     private var discovery: AndroidReceiverDiscovery?
-    private var pendingChange: MacClipboardTextChange?
+    private var pendingChange: MacClipboardChange?
     private var sendTask: Task<Void, Never>?
     private var statusTask: Task<Void, Never>?
     private var statusRefreshTimer: Timer?
@@ -23,9 +23,19 @@ final class AndroidClipboardSender: ObservableObject {
         pairedDeviceId = AndroidReceiverIdentityStore.pairedDeviceId()
     }
 
-    func send(_ change: MacClipboardTextChange) {
-        guard change.text.utf8.count <= Self.maximumBodyLength else {
-            status = "Mac clipboard text is too large to send to Android."
+    func send(_ change: MacClipboardChange) {
+        let maximumLength: Int
+        switch change.content {
+        case .text:
+            maximumLength = Self.maximumTextBodyLength
+        case .pngImage:
+            maximumLength = Self.maximumImageBodyLength
+        case .file:
+            maximumLength = Self.maximumImageBodyLength
+        }
+
+        guard change.content.byteCount <= maximumLength else {
+            status = "Mac clipboard content is too large to send to Android."
             return
         }
 
@@ -257,7 +267,7 @@ final class AndroidClipboardSender: ObservableObject {
 
         sendTask = Task { [weak self] in
             let result = await AndroidClipboardHTTPClient.send(
-                text: change.text,
+                content: change.content,
                 to: endpoint,
                 token: token
             )
@@ -304,7 +314,7 @@ final class AndroidClipboardSender: ObservableObject {
 
     private func handleSendResult(
         _ result: AndroidClipboardHTTPClient.Result,
-        for change: MacClipboardTextChange,
+        for change: MacClipboardChange,
         endpoint: AndroidReceiverEndpoint
     ) {
         sendTask = nil
@@ -313,14 +323,23 @@ final class AndroidClipboardSender: ObservableObject {
         switch result {
         case .success(let confirmedDeviceId):
             retriedChangeIDs.remove(change.id)
-            lastSentText = change.text
+            if case .text(let text) = change.content {
+                lastSentText = text
+            }
             lastSentAt = Date()
             resolvedEndpoint = endpoint
             saveConfirmedAndroidIdentity(
                 confirmedDeviceId ?? endpoint.deviceId,
                 transferCertificateSHA256: endpoint.transferCertificateSHA256
             )
-            status = "Sent \(change.text.utf8.count) UTF-8 bytes to Android."
+            switch change.content {
+            case .text:
+                status = "Sent \(change.content.byteCount) UTF-8 bytes to Android."
+            case .pngImage:
+                status = "Sent \(change.content.byteCount) bytes of image data to Android."
+            case .file(_, let fileName, _):
+                status = "Sent clipboard file \(fileName) to Android."
+            }
 
         case .failure(let message, let isRetryable):
             if isRetryable && !retriedChangeIDs.contains(change.id) {
@@ -406,7 +425,8 @@ final class AndroidClipboardSender: ObservableObject {
         pairedDeviceId = AndroidReceiverIdentityStore.pairedDeviceId()
     }
 
-    private static let maximumBodyLength = 1_048_576
+    private static let maximumTextBodyLength = 1_048_576
+    private static let maximumImageBodyLength = 20 * 1_024 * 1_024
     private static let statusRefreshInterval: TimeInterval = 60
     private static let statusRefreshTolerance: TimeInterval = 15
 }
@@ -428,11 +448,29 @@ private enum AndroidClipboardHTTPClient {
     }
 
     static func send(
-        text: String,
+        content: MacClipboardContent,
         to endpoint: AndroidReceiverEndpoint,
         token: String
     ) async -> Result {
-        guard let url = clipboardURL(for: endpoint) else {
+        let path: String
+        let contentType: String
+        let body: Data
+        switch content {
+        case .text(let text):
+            path = "/clipboard"
+            contentType = "text/plain; charset=utf-8"
+            body = Data(text.utf8)
+        case .pngImage(let data):
+            path = "/clipboard-image"
+            contentType = "image/png"
+            body = data
+        case .file(let data, _, let mimeType):
+            path = "/clipboard-file"
+            contentType = mimeType
+            body = data
+        }
+
+        guard let url = url(for: endpoint, path: path) else {
             return .failure("Android receiver URL is invalid.", isRetryable: false)
         }
 
@@ -440,9 +478,15 @@ private enum AndroidClipboardHTTPClient {
         request.httpMethod = "POST"
         request.timeoutInterval = 8
         request.setValue(token, forHTTPHeaderField: "X-ZevClip-Token")
-        request.setValue("text/plain; charset=utf-8", forHTTPHeaderField: "Content-Type")
+        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        if case .file(_, let fileName, _) = content {
+            request.setValue(
+                Data(fileName.utf8).base64EncodedString(),
+                forHTTPHeaderField: "X-ZevClip-File-Name-Base64"
+            )
+        }
         applyMacBatteryHeaders(to: &request)
-        request.httpBody = Data(text.utf8)
+        request.httpBody = body
 
         do {
             let (body, response) = try await URLSession.shared.data(for: request)

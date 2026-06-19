@@ -20,7 +20,7 @@ It works over the same Wi-Fi/LAN, including a phone hotspot. Pair once with the 
 ## What It Does
 
 - Syncs clipboard text from Android to Mac.
-- Syncs clipboard text from Mac to Android.
+- Syncs clipboard text and images from Mac to Android.
 - Mirrors Android screen to Mac with AirPlay.
 - Streams Android audio to Mac or AirPlay receivers.
 - Mirrors Android notifications as native macOS notifications.
@@ -119,7 +119,7 @@ Security limitations:
 ## Current Limitations
 
 - Android to Mac clipboard sync can be limited by Android/OEM clipboard restrictions.
-- Text clipboard sync is supported. Image clipboard sync is planned for a later version.
+- Text sync works in both directions. Image sync is supported from Mac to Android.
 - macOS public distribution needs Developer ID signing and notarization.
 - Some Android brands may block boot autostart unless Auto-start or unrestricted battery is enabled manually.
 - Bonjour discovery may fail on networks with client isolation enabled. Reconnect from Android Settings after moving between Wi-Fi, LAN, or hotspot networks.
@@ -175,9 +175,27 @@ Hello from Android
 
 Mac to Android uses the Android receiver endpoint saved during pairing and presence updates.
 
+Mac to Android image clipboard:
+
+```http
+POST /clipboard-image
+X-ZevClip-Token: <pairing-token>
+Content-Type: image/png
+
+<PNG bytes>
+```
+
+Finder files are sent only when one regular file is copied and its type is an
+approved image, vector, RAW, or PSD format. Folders, multiple files, and
+all other file types are ignored.
+
+Approved extensions: `jpeg`, `jpg`, `png`, `gif`, `webp`, `avif`, `heif`,
+`heic`, `tif`, `tiff`, `bmp`, `svg`, Android vector `xml`, `icns`, `raw`,
+`dng`, `cr2`, `cr3`, `nef`, `arw`, `orf`, `rw2`, `raf`, `ico`, and `psd`.
+
 ## Roadmap
 
-- Two-way image clipboard sync.
+- Android-to-Mac image clipboard sync.
 - Optional Tailscale fallback mode for remote sync when both devices are on the same tailnet.
 - Cleaner signed/notarized macOS release pipeline.
 - Better onboarding for Android battery/autostart settings.

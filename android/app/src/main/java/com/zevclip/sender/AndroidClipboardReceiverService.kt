@@ -149,6 +149,26 @@ class AndroidClipboardReceiverService : Service() {
                 ZevClipStatusNotification.update(this)
                 Log.i(TAG, "Received ${text.length} characters from Mac")
             },
+            onImageReceived = { byteCount ->
+                val now = System.currentTimeMillis()
+                ZevClipPreferences.setAndroidReceiverLastReceived(
+                    this,
+                    timestampMillis = now,
+                    status = "Received $byteCount bytes of image data from Mac at ${formatTime(now)}."
+                )
+                ZevClipStatusNotification.update(this)
+                Log.i(TAG, "Received $byteCount bytes of image data from Mac")
+            },
+            onFileReceived = { fileName, byteCount ->
+                val now = System.currentTimeMillis()
+                ZevClipPreferences.setAndroidReceiverLastReceived(
+                    this,
+                    timestampMillis = now,
+                    status = "Received $fileName ($byteCount bytes) from Mac at ${formatTime(now)}."
+                )
+                ZevClipStatusNotification.update(this)
+                Log.i(TAG, "Received approved clipboard file $fileName ($byteCount bytes) from Mac")
+            },
             onNotificationAction = { notificationKey, actionId, replyText ->
                 if (actionId.isNullOrBlank()) {
                     AndroidNotificationMirrorService.cancelMirroredNotification(notificationKey)

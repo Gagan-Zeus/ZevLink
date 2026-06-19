@@ -8,6 +8,7 @@ import android.os.BatteryManager
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import android.util.Base64
 import org.json.JSONObject
 import com.zevclip.sender.filetransfer.FileTransferJson
 import com.zevclip.sender.filetransfer.FileTransferManifest
@@ -37,6 +38,8 @@ class AndroidClipboardHttpReceiver(
     private val onReady: (Int) -> Unit = {},
     private val onFailure: (String) -> Unit = {},
     private val onTextReceived: (String) -> Unit = {},
+    private val onImageReceived: (Int) -> Unit = {},
+    private val onFileReceived: (String, Int) -> Unit = { _, _ -> },
     private val onNotificationAction: (String, String?, String?) -> Boolean = { _, _, _ -> false },
     private val onCallAction: (String, String?) -> AndroidCallActionResult = { _, _ ->
         AndroidCallActionResult(false, "Android call mirror is unavailable.")
@@ -166,6 +169,8 @@ class AndroidClipboardHttpReceiver(
 
             if (
                 requestParts[1] != CLIPBOARD_PATH &&
+                requestParts[1] != CLIPBOARD_IMAGE_PATH &&
+                requestParts[1] != CLIPBOARD_FILE_PATH &&
                 requestParts[1] != NOTIFICATION_ACTION_PATH &&
                 requestParts[1] != CALL_ACTION_PATH &&
                 requestParts[1] != MEDIA_CONTROL_PATH &&
@@ -222,6 +227,49 @@ class AndroidClipboardHttpReceiver(
 
             if (requestParts[1].startsWith(TRANSFER_PREFIX)) {
                 output.write(handleFileTransfer(requestParts[1], headers, body).toByteArray(Charsets.UTF_8))
+                output.flush()
+                continue
+            }
+
+            if (requestParts[1] == CLIPBOARD_IMAGE_PATH) {
+                if (!writeClipboardImage(body)) {
+                    output.write(response("400 Bad Request", "Request body must be a supported PNG image.").toByteArray(Charsets.UTF_8))
+                    return
+                }
+
+                mainHandler.post { onImageReceived(body.size) }
+                output.write(
+                    response(
+                        "200 OK",
+                        "Clipboard image updated.",
+                        extraHeaders = mapOf(
+                            ANDROID_DEVICE_ID_HEADER to ZevClipPreferences.androidDeviceId(appContext),
+                            ANDROID_RECEIVER_NAME_HEADER to AndroidClipboardReceiverService.SERVICE_NAME
+                        )
+                    ).toByteArray(Charsets.UTF_8)
+                )
+                output.flush()
+                continue
+            }
+
+            if (requestParts[1] == CLIPBOARD_FILE_PATH) {
+                val fileName = decodeClipboardFileName(headers[FILE_NAME_BASE64_HEADER])
+                if (fileName == null || !writeClipboardFile(body, fileName)) {
+                    output.write(response("400 Bad Request", "Request must contain one approved clipboard file.").toByteArray(Charsets.UTF_8))
+                    return
+                }
+
+                mainHandler.post { onFileReceived(fileName, body.size) }
+                output.write(
+                    response(
+                        "200 OK",
+                        "Clipboard file updated.",
+                        extraHeaders = mapOf(
+                            ANDROID_DEVICE_ID_HEADER to ZevClipPreferences.androidDeviceId(appContext),
+                            ANDROID_RECEIVER_NAME_HEADER to AndroidClipboardReceiverService.SERVICE_NAME
+                        )
+                    ).toByteArray(Charsets.UTF_8)
+                )
                 output.flush()
                 continue
             }
@@ -333,6 +381,66 @@ class AndroidClipboardHttpReceiver(
 
         latch.await(CLIPBOARD_WRITE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
         return succeeded
+    }
+
+    private fun writeClipboardImage(pngData: ByteArray): Boolean {
+        val latch = CountDownLatch(1)
+        var succeeded = false
+
+        mainHandler.post {
+            try {
+                val imageUri = ClipboardImageProvider.publish(appContext, pngData)
+                    ?: return@post
+                val clipboard = appContext.getSystemService(ClipboardManager::class.java)
+                clipboard.setPrimaryClip(
+                    ClipData.newUri(appContext.contentResolver, CLIPBOARD_LABEL, imageUri)
+                )
+                succeeded = true
+            } catch (error: Exception) {
+                Log.w(TAG, "Android clipboard image write failed", error)
+            } finally {
+                latch.countDown()
+            }
+        }
+
+        latch.await(CLIPBOARD_WRITE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+        return succeeded
+    }
+
+    private fun writeClipboardFile(data: ByteArray, fileName: String): Boolean {
+        val latch = CountDownLatch(1)
+        var succeeded = false
+
+        mainHandler.post {
+            try {
+                val contentUri = ClipboardImageProvider.publishApprovedFile(appContext, data, fileName)
+                    ?: return@post
+                val clipboard = appContext.getSystemService(ClipboardManager::class.java)
+                clipboard.setPrimaryClip(
+                    ClipData.newUri(appContext.contentResolver, CLIPBOARD_LABEL, contentUri)
+                )
+                succeeded = true
+            } catch (error: Exception) {
+                Log.w(TAG, "Android clipboard file write failed", error)
+            } finally {
+                latch.countDown()
+            }
+        }
+
+        latch.await(CLIPBOARD_WRITE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+        return succeeded
+    }
+
+    private fun decodeClipboardFileName(encoded: String?): String? {
+        if (encoded.isNullOrBlank()) {
+            return null
+        }
+        return try {
+            String(Base64.decode(encoded, Base64.DEFAULT), Charsets.UTF_8)
+                .takeIf { it.isNotBlank() && it.length <= 180 }
+        } catch (_: IllegalArgumentException) {
+            null
+        }
     }
 
     private fun statusResponse(): String {
@@ -756,6 +864,8 @@ class AndroidClipboardHttpReceiver(
     companion object {
         const val DEFAULT_PORT = 9877
         const val CLIPBOARD_PATH = "/clipboard"
+        const val CLIPBOARD_IMAGE_PATH = "/clipboard-image"
+        const val CLIPBOARD_FILE_PATH = "/clipboard-file"
         const val STATUS_PATH = "/status"
         const val NOTIFICATION_ACTION_PATH = "/notification-action"
         const val CALL_ACTION_PATH = "/call-action"
@@ -770,6 +880,7 @@ class AndroidClipboardHttpReceiver(
 
         private const val TAG = "ZevClipAndroidReceiver"
         private const val TOKEN_HEADER = "x-zevclip-token"
+        private const val FILE_NAME_BASE64_HEADER = "x-zevclip-file-name-base64"
         private const val ANDROID_DEVICE_ID_HEADER = "X-ZevClip-Android-Device-ID"
         private const val ANDROID_RECEIVER_NAME_HEADER = "X-ZevClip-Android-Receiver-Name"
         private const val ANDROID_BATTERY_HEADER = "X-ZevClip-Android-Battery"
