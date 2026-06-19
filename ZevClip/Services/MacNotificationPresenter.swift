@@ -122,6 +122,8 @@ final class MacNotificationPresenter: NSObject, UNUserNotificationCenterDelegate
     var onNotificationAction: ((String, String, String?, @escaping (Bool, String) -> Void) -> Void)?
     var onCallAction: ((String, String, @escaping (Bool, String) -> Void) -> Void)?
     var onFileTransferCancel: ((String) -> Void)?
+    var onFileTransferAccept: ((String) -> Void)?
+    var onFileTransferDecline: ((String) -> Void)?
 
     private let center = UNUserNotificationCenter.current()
     private var authorizationRequested = false
@@ -298,6 +300,25 @@ final class MacNotificationPresenter: NSObject, UNUserNotificationCenterDelegate
         }
     }
 
+    func showFileTransferApproval(
+        transferId: String,
+        fileName: String,
+        senderName: String,
+        totalBytes: Int64
+    ) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            let panel = self.fileTransferPanel(for: transferId)
+            panel.updatePending(
+                fileName: fileName,
+                senderName: senderName,
+                totalBytes: totalBytes
+            )
+            self.repositionFileTransferPanels()
+            panel.show()
+        }
+    }
+
     func showFileTransferSent(
         transferId: String,
         fileName: String
@@ -344,6 +365,12 @@ final class MacNotificationPresenter: NSObject, UNUserNotificationCenterDelegate
             transferId: transferId,
             onCancel: { [weak self] transferId in
                 self?.onFileTransferCancel?(transferId)
+            },
+            onAccept: { [weak self] transferId in
+                self?.onFileTransferAccept?(transferId)
+            },
+            onDecline: { [weak self] transferId in
+                self?.onFileTransferDecline?(transferId)
             },
             onCopy: { urls in
                 Self.copyFileTransferURLs(urls)
@@ -3427,6 +3454,7 @@ private final class TrackpadCornerGestureMonitor {
 
 private final class FileTransferPanelController: NSObject {
     private enum State {
+        case pending
         case active
         case sent
         case received
@@ -3439,11 +3467,15 @@ private final class FileTransferPanelController: NSObject {
     private let statusLabel = NSTextField(labelWithString: "")
     private let detailLabel = NSTextField(labelWithString: "")
     private let progressIndicator = NSProgressIndicator()
+    private let acceptButton = NotificationActionButton(title: "Accept", target: nil, action: nil)
+    private let declineButton = NotificationActionButton(title: "Decline", target: nil, action: nil)
     private let cancelButton = NotificationActionButton(title: "Cancel", target: nil, action: nil)
     private let copyButton = NotificationActionButton(title: "Copy", target: nil, action: nil)
     private let showInFinderButton = NotificationActionButton(title: "Show in Finder", target: nil, action: nil)
     private let closeButton = NotificationActionButton(title: "", target: nil, action: nil)
     private let onCancel: (String) -> Void
+    private let onAccept: (String) -> Void
+    private let onDecline: (String) -> Void
     private let onCopy: ([URL]) -> Void
     private let onShowInFinder: ([URL]) -> Void
     private let onClose: (String) -> Void
@@ -3458,12 +3490,16 @@ private final class FileTransferPanelController: NSObject {
     init(
         transferId: String,
         onCancel: @escaping (String) -> Void,
+        onAccept: @escaping (String) -> Void,
+        onDecline: @escaping (String) -> Void,
         onCopy: @escaping ([URL]) -> Void,
         onShowInFinder: @escaping ([URL]) -> Void,
         onClose: @escaping (String) -> Void
     ) {
         self.transferId = transferId
         self.onCancel = onCancel
+        self.onAccept = onAccept
+        self.onDecline = onDecline
         self.onCopy = onCopy
         self.onShowInFinder = onShowInFinder
         self.onClose = onClose
@@ -3515,7 +3551,27 @@ private final class FileTransferPanelController: NSObject {
         detailLabel.stringValue = Self.progressText(transferredBytes: transferredBytes, totalBytes: totalBytes)
         progressIndicator.isHidden = false
         progressIndicator.doubleValue = Self.progressValue(transferredBytes: transferredBytes, totalBytes: totalBytes)
+        acceptButton.isHidden = true
+        declineButton.isHidden = true
         cancelButton.isHidden = false
+        copyButton.isHidden = true
+        showInFinderButton.isHidden = true
+        closeButton.isHidden = true
+    }
+
+    func updatePending(fileName: String, senderName: String, totalBytes: Int64) {
+        state = .pending
+        sentAutoCloseTimer?.invalidate()
+        sentAutoCloseTimer = nil
+        titleLabel.stringValue = Self.singleLine(fileName)
+        statusLabel.stringValue = "Incoming from \(Self.singleLine(senderName))"
+        detailLabel.stringValue = ByteCountFormatter.string(fromByteCount: totalBytes, countStyle: .file)
+        progressIndicator.isHidden = true
+        acceptButton.isHidden = false
+        acceptButton.isEnabled = true
+        declineButton.isHidden = false
+        declineButton.isEnabled = true
+        cancelButton.isHidden = true
         copyButton.isHidden = true
         showInFinderButton.isHidden = true
         closeButton.isHidden = true
@@ -3528,6 +3584,8 @@ private final class FileTransferPanelController: NSObject {
         detailLabel.stringValue = "File transfer completed."
         progressIndicator.isHidden = false
         progressIndicator.doubleValue = 100
+        acceptButton.isHidden = true
+        declineButton.isHidden = true
         cancelButton.isHidden = true
         copyButton.isHidden = true
         showInFinderButton.isHidden = true
@@ -3545,6 +3603,8 @@ private final class FileTransferPanelController: NSObject {
         detailLabel.stringValue = "Saved to Downloads."
         progressIndicator.isHidden = false
         progressIndicator.doubleValue = 100
+        acceptButton.isHidden = true
+        declineButton.isHidden = true
         cancelButton.isHidden = true
         copyButton.isHidden = false
         showInFinderButton.isHidden = false
@@ -3620,15 +3680,22 @@ private final class FileTransferPanelController: NSObject {
         buttonStack.spacing = 8
         buttonStack.translatesAutoresizingMaskIntoConstraints = false
 
+        configureButton(acceptButton, action: #selector(acceptTransfer))
+        configureButton(declineButton, action: #selector(declineTransfer))
         configureButton(cancelButton, action: #selector(cancel))
         configureButton(copyButton, action: #selector(copyFiles))
         configureButton(showInFinderButton, action: #selector(showInFinder))
         cancelButton.hasDestructiveAction = true
+        declineButton.hasDestructiveAction = true
+        acceptButton.isHidden = true
+        declineButton.isHidden = true
         copyButton.isHidden = true
         showInFinderButton.isHidden = true
         configureCloseButton()
         closeButton.isHidden = true
 
+        buttonStack.addArrangedSubview(acceptButton)
+        buttonStack.addArrangedSubview(declineButton)
         buttonStack.addArrangedSubview(cancelButton)
         buttonStack.addArrangedSubview(copyButton)
         buttonStack.addArrangedSubview(showInFinderButton)
@@ -3712,6 +3779,23 @@ private final class FileTransferPanelController: NSObject {
         guard state == .active else { return }
         statusLabel.stringValue = "Cancelling..."
         onCancel(transferId)
+        close()
+    }
+
+    @objc private func acceptTransfer() {
+        guard state == .pending else { return }
+        acceptButton.isEnabled = false
+        declineButton.isEnabled = false
+        statusLabel.stringValue = "Accepting..."
+        onAccept(transferId)
+    }
+
+    @objc private func declineTransfer() {
+        guard state == .pending else { return }
+        acceptButton.isEnabled = false
+        declineButton.isEnabled = false
+        statusLabel.stringValue = "Declining..."
+        onDecline(transferId)
         close()
     }
 

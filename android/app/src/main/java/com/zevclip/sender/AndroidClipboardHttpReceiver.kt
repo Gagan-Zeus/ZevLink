@@ -10,6 +10,8 @@ import android.os.Looper
 import android.util.Log
 import org.json.JSONObject
 import com.zevclip.sender.filetransfer.FileTransferJson
+import com.zevclip.sender.filetransfer.FileTransferManifest
+import com.zevclip.sender.filetransfer.FileTransferOfferResponse
 import com.zevclip.sender.filetransfer.FileTransferReceiver
 import com.zevclip.sender.filetransfer.AndroidPublicDownloadsPublisher
 import java.io.ByteArrayOutputStream
@@ -24,6 +26,7 @@ import java.nio.ByteBuffer
 import java.nio.charset.CodingErrorAction
 import java.util.Locale
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
@@ -51,6 +54,9 @@ class AndroidClipboardHttpReceiver(
     private val fileTransferReceiver = FileTransferReceiver(
         File(appContext.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: appContext.filesDir, "ZevLink Transfers")
     )
+    private val pendingIncomingOffers = ConcurrentHashMap<String, FileTransferManifest>()
+    private val acceptedIncomingOffers = ConcurrentHashMap<String, FileTransferOfferResponse>()
+    private val declinedIncomingOffers = ConcurrentHashMap.newKeySet<String>()
 
     @Volatile private var serverSocket: ServerSocket? = null
 
@@ -451,34 +457,39 @@ class AndroidClipboardHttpReceiver(
         return try {
             when (path) {
                 TRANSFER_OFFER_PATH -> {
-                    if (!ZevClipPreferences.isFileTransferAutoAcceptEnabled(appContext)) {
+                    val manifest = FileTransferJson.manifestFromJson(JSONObject(String(body, Charsets.UTF_8)))
+                    acceptedIncomingOffers[manifest.transferId]?.let { accepted ->
                         return response(
-                            "403 Forbidden",
-                            "Incoming file transfers are disabled in ZevLink settings."
+                            status = "200 OK",
+                            body = FileTransferJson.offerResponseToJson(accepted).toString(),
+                            contentType = "application/json; charset=utf-8"
                         )
                     }
-                    val manifest = FileTransferJson.manifestFromJson(JSONObject(String(body, Charsets.UTF_8)))
-                    val offer = fileTransferReceiver.accept(
-                        manifest = manifest,
-                        requestedStreamCount = manifest.requestedStreamCount,
-                        receiverMaximumStreams = com.zevclip.sender.filetransfer.ZevLinkTransferProtocol.MAX_STREAM_COUNT
-                    )
-                    FileTransferNotificationCenter.registerCancelCallback(manifest.transferId) {
-                        fileTransferReceiver.cancel(manifest.transferId)
+                    if (declinedIncomingOffers.contains(manifest.transferId)) {
+                        return response("403 Forbidden", "Incoming file transfer was declined.")
                     }
-                    FileTransferNotificationCenter.showActive(
-                        context = appContext,
-                        transferId = manifest.transferId,
-                        fileName = transferTitle(manifest.fileEntries.map { it.relativePath.substringAfterLast('/') }),
-                        direction = FileTransferNotificationCenter.Direction.RECEIVING,
-                        transferredBytes = 0L,
-                        totalBytes = manifest.totalBytes
-                    )
-                    response(
-                        status = "200 OK",
-                        body = FileTransferJson.offerResponseToJson(offer).toString(),
-                        contentType = "application/json; charset=utf-8"
-                    )
+                    if (!ZevClipPreferences.isFileTransferAutoAcceptEnabled(appContext)) {
+                        if (pendingIncomingOffers.putIfAbsent(manifest.transferId, manifest) == null) {
+                            registerPendingTransfer(manifest)
+                        }
+                        pendingOfferResponse(manifest.transferId)
+                    } else {
+                        acceptedOfferResponse(acceptIncomingManifest(manifest))
+                    }
+                }
+                TRANSFER_OFFER_STATUS_PATH -> {
+                    val transferId = transferId(headers, body)
+                    acceptedIncomingOffers[transferId]?.let { accepted ->
+                        return acceptedOfferResponse(accepted)
+                    }
+                    if (declinedIncomingOffers.remove(transferId)) {
+                        return response("403 Forbidden", "Incoming file transfer was declined.")
+                    }
+                    if (pendingIncomingOffers.containsKey(transferId)) {
+                        pendingOfferResponse(transferId)
+                    } else {
+                        response("404 Not Found", "Incoming file transfer offer was not found.")
+                    }
                 }
                 TRANSFER_RANGES_PATH -> {
                     val transferId = transferId(headers, body)
@@ -507,6 +518,7 @@ class AndroidClipboardHttpReceiver(
                 TRANSFER_COMPLETE_PATH -> {
                     val transferId = transferId(headers, body)
                     val completed = fileTransferReceiver.complete(transferId, verifyFileHashes = false)
+                    acceptedIncomingOffers.remove(transferId)
                     val published = AndroidPublicDownloadsPublisher.publish(appContext, completed)
                     val openUri = published.fileUris.firstOrNull()
                     FileTransferNotificationCenter.showComplete(
@@ -529,6 +541,9 @@ class AndroidClipboardHttpReceiver(
                 }
                 TRANSFER_CANCEL_PATH -> {
                     val transferId = transferId(headers, body)
+                    pendingIncomingOffers.remove(transferId)
+                    acceptedIncomingOffers.remove(transferId)
+                    declinedIncomingOffers.remove(transferId)
                     FileTransferNotificationCenter.cancelTransfer(appContext, transferId)
                     fileTransferReceiver.cancel(transferId)
                     response("200 OK", "Transfer cancelled.")
@@ -539,6 +554,93 @@ class AndroidClipboardHttpReceiver(
             Log.w(TAG, "File transfer request failed", error)
             response("400 Bad Request", error.message ?: "File transfer failed.")
         }
+    }
+
+    private fun registerPendingTransfer(manifest: FileTransferManifest) {
+        val fileName = transferTitle(manifest.fileEntries.map { it.relativePath.substringAfterLast('/') })
+        FileTransferNotificationCenter.registerCancelCallback(manifest.transferId) {
+            pendingIncomingOffers.remove(manifest.transferId)
+            acceptedIncomingOffers.remove(manifest.transferId)
+            declinedIncomingOffers.remove(manifest.transferId)
+            fileTransferReceiver.cancel(manifest.transferId)
+        }
+        FileTransferNotificationCenter.registerApprovalCallbacks(
+            transferId = manifest.transferId,
+            onAccept = {
+                connectionExecutor.execute {
+                    val pending = pendingIncomingOffers[manifest.transferId] ?: return@execute
+                    runCatching { acceptIncomingManifest(pending) }
+                        .onFailure { error ->
+                            pendingIncomingOffers.remove(manifest.transferId)
+                            declinedIncomingOffers.add(manifest.transferId)
+                            FileTransferNotificationCenter.showFailed(
+                                context = appContext,
+                                transferId = manifest.transferId,
+                                fileName = fileName,
+                                direction = FileTransferNotificationCenter.Direction.RECEIVING,
+                                message = error.message ?: "Could not accept file transfer."
+                            )
+                        }
+                }
+            },
+            onDecline = {
+                pendingIncomingOffers.remove(manifest.transferId)
+                declinedIncomingOffers.add(manifest.transferId)
+                FileTransferNotificationCenter.unregisterCancelCallback(manifest.transferId)
+            }
+        )
+        FileTransferNotificationCenter.showApproval(
+            context = appContext,
+            transferId = manifest.transferId,
+            fileName = fileName,
+            senderName = manifest.senderName,
+            totalBytes = manifest.totalBytes
+        )
+    }
+
+    private fun acceptIncomingManifest(manifest: FileTransferManifest): FileTransferOfferResponse {
+        val offer = fileTransferReceiver.accept(
+            manifest = manifest,
+            requestedStreamCount = manifest.requestedStreamCount,
+            receiverMaximumStreams = com.zevclip.sender.filetransfer.ZevLinkTransferProtocol.MAX_STREAM_COUNT
+        )
+        pendingIncomingOffers.remove(manifest.transferId)
+        declinedIncomingOffers.remove(manifest.transferId)
+        acceptedIncomingOffers[manifest.transferId] = offer
+        FileTransferNotificationCenter.unregisterApprovalCallbacks(manifest.transferId)
+        FileTransferNotificationCenter.registerCancelCallback(manifest.transferId) {
+            acceptedIncomingOffers.remove(manifest.transferId)
+            fileTransferReceiver.cancel(manifest.transferId)
+        }
+        FileTransferNotificationCenter.showActive(
+            context = appContext,
+            transferId = manifest.transferId,
+            fileName = transferTitle(manifest.fileEntries.map { it.relativePath.substringAfterLast('/') }),
+            direction = FileTransferNotificationCenter.Direction.RECEIVING,
+            transferredBytes = 0L,
+            totalBytes = manifest.totalBytes
+        )
+        return offer
+    }
+
+    private fun acceptedOfferResponse(offer: FileTransferOfferResponse): String {
+        return response(
+            status = "200 OK",
+            body = FileTransferJson.offerResponseToJson(offer).toString(),
+            contentType = "application/json; charset=utf-8"
+        )
+    }
+
+    private fun pendingOfferResponse(transferId: String): String {
+        return response(
+            status = "202 Accepted",
+            body = JSONObject()
+                .put("transferId", transferId)
+                .put("status", "pending")
+                .put("retryAfterMillis", 500)
+                .toString(),
+            contentType = "application/json; charset=utf-8"
+        )
     }
 
     private fun handleFileTransferChunk(
@@ -660,6 +762,7 @@ class AndroidClipboardHttpReceiver(
         const val MEDIA_CONTROL_PATH = "/media-control"
         const val TRANSFER_PREFIX = "/transfer/"
         const val TRANSFER_OFFER_PATH = "/transfer/offer"
+        const val TRANSFER_OFFER_STATUS_PATH = "/transfer/offer-status"
         const val TRANSFER_RANGES_PATH = "/transfer/ranges"
         const val TRANSFER_CHUNK_PATH = "/transfer/chunk"
         const val TRANSFER_COMPLETE_PATH = "/transfer/complete"

@@ -40,6 +40,9 @@ final class FileTransferService: ObservableObject {
     private let workerQueue = DispatchQueue(label: "com.zevlink.file-transfer-service", attributes: .concurrent)
     private let stateLock = NSLock()
     private var incomingProgress: [String: IncomingProgress] = [:]
+    private var pendingIncomingOffers: [String: FileTransferManifest] = [:]
+    private var acceptedIncomingOffers: [String: FileTransferOfferResponse] = [:]
+    private var declinedIncomingOffers = Set<String>()
     private var cancelledTransferIds = Set<String>()
     private var outgoingTask: Task<Void, Never>?
     private var outgoingTransferId: String?
@@ -63,6 +66,8 @@ final class FileTransferService: ObservableObject {
             switch path.components(separatedBy: "?").first {
             case "/transfer/offer":
                 return try handleIncomingOffer(body: body)
+            case "/transfer/offer-status":
+                return try handleIncomingOfferStatus(headers: headers, body: body)
             case "/transfer/ranges":
                 return try handleIncomingRanges(headers: headers, body: body)
             case "/transfer/chunk":
@@ -99,6 +104,65 @@ final class FileTransferService: ObservableObject {
             outgoingTask = nil
             setOutgoingTransferId(nil)
         }
+        MacNotificationPresenter.shared.clearFileTransfer(transferId: transferId)
+        if displayState.transferId == transferId {
+            displayState = .idle
+        }
+    }
+
+    func acceptIncomingTransfer(transferId: String) {
+        workerQueue.async { [weak self] in
+            guard let self else { return }
+            self.stateLock.lock()
+            let manifest = self.pendingIncomingOffers[transferId]
+            self.stateLock.unlock()
+            guard let manifest else { return }
+
+            do {
+                let response = try self.receiver.accept(
+                    manifest: manifest,
+                    requestedStreamCount: manifest.requestedStreamCount,
+                    receiverMaximumStreams: ZevLinkTransferProtocol.maxStreamCount
+                )
+                let progress = IncomingProgress(
+                    totalBytes: manifest.totalBytes,
+                    verifiedBytes: 0,
+                    startedAt: Date(),
+                    fileName: Self.transferTitle(manifest)
+                )
+                self.stateLock.lock()
+                guard self.pendingIncomingOffers.removeValue(forKey: transferId) != nil else {
+                    self.stateLock.unlock()
+                    try? self.receiver.cancel(transferId: transferId)
+                    return
+                }
+                self.declinedIncomingOffers.remove(transferId)
+                self.cancelledTransferIds.remove(transferId)
+                self.acceptedIncomingOffers[transferId] = response
+                self.incomingProgress[transferId] = progress
+                self.stateLock.unlock()
+                self.publishIncomingProgress(transferId: transferId, progress: progress)
+            } catch {
+                self.stateLock.lock()
+                self.pendingIncomingOffers.removeValue(forKey: transferId)
+                self.declinedIncomingOffers.insert(transferId)
+                self.stateLock.unlock()
+                DispatchQueue.main.async {
+                    MacNotificationPresenter.shared.clearFileTransfer(transferId: transferId)
+                }
+            }
+        }
+    }
+
+    func declineIncomingTransfer(transferId: String) {
+        stateLock.lock()
+        let wasPending = pendingIncomingOffers.removeValue(forKey: transferId) != nil
+        if wasPending {
+            declinedIncomingOffers.insert(transferId)
+            cancelledTransferIds.insert(transferId)
+        }
+        stateLock.unlock()
+        guard wasPending else { return }
         MacNotificationPresenter.shared.clearFileTransfer(transferId: transferId)
         if displayState.transferId == transferId {
             displayState = .idle
@@ -191,14 +255,69 @@ final class FileTransferService: ObservableObject {
     }
 
     private func handleIncomingOffer(body: Data) throws -> FileTransferHTTPResponse {
+        let manifest = try JSONDecoder().decode(FileTransferManifest.self, from: body)
         stateLock.lock()
         let shouldAccept = autoAcceptIncoming
+        if let accepted = acceptedIncomingOffers[manifest.transferId] {
+            stateLock.unlock()
+            return FileTransferHTTPResponse(json: try JSONEncoder().encode(accepted))
+        }
+        if declinedIncomingOffers.contains(manifest.transferId) {
+            stateLock.unlock()
+            return FileTransferHTTPResponse(status: "403 Forbidden", text: "Incoming file transfer was declined.")
+        }
         stateLock.unlock()
         guard shouldAccept else {
-            return FileTransferHTTPResponse(status: "403 Forbidden", text: "Incoming file transfers require approval in ZevLink settings.")
+            stateLock.lock()
+            let isNewOffer = pendingIncomingOffers[manifest.transferId] == nil
+            pendingIncomingOffers[manifest.transferId] = manifest
+            stateLock.unlock()
+            if isNewOffer {
+                DispatchQueue.main.async { [weak self] in
+                    MacNotificationPresenter.shared.showFileTransferApproval(
+                        transferId: manifest.transferId,
+                        fileName: Self.transferTitle(manifest),
+                        senderName: manifest.senderName,
+                        totalBytes: manifest.totalBytes
+                    )
+                    self?.displayState = FileTransferDisplayState(
+                        title: "Incoming file transfer",
+                        detail: "Waiting for approval",
+                        progress: 0,
+                        speedBytesPerSecond: 0,
+                        etaSeconds: nil,
+                        canCancel: false,
+                        transferId: manifest.transferId
+                    )
+                }
+            }
+            return pendingOfferResponse(transferId: manifest.transferId)
         }
 
-        let manifest = try JSONDecoder().decode(FileTransferManifest.self, from: body)
+        let response = try acceptIncomingManifest(manifest)
+        return FileTransferHTTPResponse(json: try JSONEncoder().encode(response))
+    }
+
+    private func handleIncomingOfferStatus(headers: [String: String], body: Data) throws -> FileTransferHTTPResponse {
+        let transferId = try transferId(from: headers, body: body)
+        stateLock.lock()
+        if let accepted = acceptedIncomingOffers[transferId] {
+            stateLock.unlock()
+            return FileTransferHTTPResponse(json: try JSONEncoder().encode(accepted))
+        }
+        if declinedIncomingOffers.remove(transferId) != nil {
+            stateLock.unlock()
+            return FileTransferHTTPResponse(status: "403 Forbidden", text: "Incoming file transfer was declined.")
+        }
+        let isPending = pendingIncomingOffers[transferId] != nil
+        stateLock.unlock()
+        if isPending {
+            return pendingOfferResponse(transferId: transferId)
+        }
+        return FileTransferHTTPResponse(status: "404 Not Found", text: "Incoming file transfer offer was not found.")
+    }
+
+    private func acceptIncomingManifest(_ manifest: FileTransferManifest) throws -> FileTransferOfferResponse {
         let response = try receiver.accept(
             manifest: manifest,
             requestedStreamCount: manifest.requestedStreamCount,
@@ -206,6 +325,7 @@ final class FileTransferService: ObservableObject {
         )
         stateLock.lock()
         cancelledTransferIds.remove(manifest.transferId)
+        acceptedIncomingOffers[manifest.transferId] = response
         incomingProgress[manifest.transferId] = IncomingProgress(
             totalBytes: manifest.totalBytes,
             verifiedBytes: 0,
@@ -214,7 +334,19 @@ final class FileTransferService: ObservableObject {
         )
         stateLock.unlock()
         publishIncomingProgress(manifest: manifest, verifiedBytes: 0)
-        return FileTransferHTTPResponse(json: try JSONEncoder().encode(response))
+        return response
+    }
+
+    private func pendingOfferResponse(transferId: String) -> FileTransferHTTPResponse {
+        let payload: [String: Any] = [
+            "transferId": transferId,
+            "status": "pending",
+            "retryAfterMillis": 500
+        ]
+        return FileTransferHTTPResponse(
+            status: "202 Accepted",
+            json: (try? JSONSerialization.data(withJSONObject: payload)) ?? Data("{}".utf8)
+        )
     }
 
     private func handleIncomingRanges(headers: [String: String], body: Data) throws -> FileTransferHTTPResponse {
@@ -251,6 +383,7 @@ final class FileTransferService: ObservableObject {
         let result = try receiver.complete(transferId: transferId)
         stateLock.lock()
         let completedProgress = incomingProgress.removeValue(forKey: transferId)
+        acceptedIncomingOffers.removeValue(forKey: transferId)
         stateLock.unlock()
         DispatchQueue.main.async { [weak self] in
             MacNotificationPresenter.shared.showFileTransferReceived(
@@ -281,6 +414,9 @@ final class FileTransferService: ObservableObject {
         markTransferCancelled(transferId)
         try receiver.cancel(transferId: transferId)
         stateLock.lock()
+        pendingIncomingOffers.removeValue(forKey: transferId)
+        acceptedIncomingOffers.removeValue(forKey: transferId)
+        declinedIncomingOffers.remove(transferId)
         incomingProgress.removeValue(forKey: transferId)
         stateLock.unlock()
         DispatchQueue.main.async { [weak self] in

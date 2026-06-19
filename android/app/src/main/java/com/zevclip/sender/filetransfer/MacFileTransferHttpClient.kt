@@ -22,10 +22,9 @@ class MacFileTransferHttpClient(
         isCancelled: AtomicBoolean,
         onProgress: (Long) -> Unit
     ) {
-        val offerBody = postJson(
-            "/transfer/offer",
-            FileTransferJson.manifestToJson(manifest).toString(),
-            manifest.transferId
+        val offerBody = awaitOfferDecision(
+            manifest = manifest,
+            isCancelled = isCancelled
         )
         val maximumStreamCount = JSONObject(offerBody).getInt("streamCount")
         val rangesBody = postJson(
@@ -100,6 +99,36 @@ class MacFileTransferHttpClient(
         )
     }
 
+    private fun awaitOfferDecision(
+        manifest: FileTransferManifest,
+        isCancelled: AtomicBoolean
+    ): String {
+        var response = postJsonResponse(
+            "/transfer/offer",
+            FileTransferJson.manifestToJson(manifest).toString(),
+            manifest.transferId
+        )
+        while (response.code == HTTP_ACCEPTED) {
+            if (isCancelled.get()) {
+                cancel(manifest.transferId)
+                throw InterruptedException("Transfer cancelled while waiting for approval.")
+            }
+            Thread.sleep(APPROVAL_POLL_INTERVAL_MS)
+            response = postJsonResponse(
+                "/transfer/offer-status",
+                JSONObject().put("transferId", manifest.transferId).toString(),
+                manifest.transferId
+            )
+        }
+        if (response.code == HTTP_FORBIDDEN) {
+            throw IllegalStateException("File transfer was declined on Mac.")
+        }
+        if (response.code !in 200..299) {
+            throw IllegalStateException("Mac transfer endpoint failed (${response.code}): ${response.body}")
+        }
+        return response.body
+    }
+
     fun cancel(transferId: String) {
         runCatching {
             postJson(
@@ -165,6 +194,14 @@ class MacFileTransferHttpClient(
     }
 
     private fun postJson(path: String, body: String, transferId: String): String {
+        val response = postJsonResponse(path, body, transferId)
+        if (response.code !in 200..299) {
+            throw IllegalStateException("Mac transfer endpoint failed (${response.code}): ${response.body}")
+        }
+        return response.body
+    }
+
+    private fun postJsonResponse(path: String, body: String, transferId: String): HttpResult {
         val bodyBytes = body.toByteArray(Charsets.UTF_8)
         val connection = openConnection(path, transferId).apply {
             setRequestProperty("Content-Type", "application/json; charset=utf-8")
@@ -173,10 +210,8 @@ class MacFileTransferHttpClient(
         connection.outputStream.use { it.write(bodyBytes) }
         val code = connection.responseCode
         val responseText = if (code in 200..299) connection.inputStream.bufferedReader().use { it.readText() } else connection.errorText()
-        if (code !in 200..299) {
-            throw IllegalStateException("Mac transfer endpoint failed ($code): $responseText")
-        }
-        return responseText
+        connection.disconnect()
+        return HttpResult(code, responseText)
     }
 
     private fun openConnection(path: String, transferId: String): HttpURLConnection {
@@ -198,5 +233,10 @@ class MacFileTransferHttpClient(
 
     companion object {
         private const val TAG = "ZevLinkFileTransfer"
+        private const val HTTP_ACCEPTED = 202
+        private const val HTTP_FORBIDDEN = 403
+        private const val APPROVAL_POLL_INTERVAL_MS = 500L
     }
+
+    private data class HttpResult(val code: Int, val body: String)
 }

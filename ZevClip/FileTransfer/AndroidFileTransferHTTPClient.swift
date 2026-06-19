@@ -48,16 +48,11 @@ enum AndroidFileTransferHTTPClient {
         token: String,
         progress: @escaping @Sendable (Int64) -> Void
     ) async throws {
-        let response = try await postJSON(
-            path: "/transfer/offer",
-            json: try JSONEncoder().encode(manifest),
+        let response = try await awaitOfferDecision(
+            manifest: manifest,
             endpoint: endpoint,
-            token: token,
-            transferId: manifest.transferId
+            token: token
         )
-        guard (200..<300).contains(response.statusCode) else {
-            throw FileTransferHTTPClientError.server("Android rejected offer (\(response.statusCode)).")
-        }
         let offer = try JSONDecoder().decode(FileTransferOfferResponse.self, from: response.body)
 
         let rangesData = try await postJSON(
@@ -138,6 +133,38 @@ enum AndroidFileTransferHTTPClient {
         guard (200..<300).contains(completeResponse.statusCode) else {
             throw FileTransferHTTPClientError.server("Android could not complete transfer (\(completeResponse.statusCode)).")
         }
+    }
+
+    private static func awaitOfferDecision(
+        manifest: FileTransferManifest,
+        endpoint: AndroidReceiverEndpoint,
+        token: String
+    ) async throws -> HTTPPayload {
+        var response = try await postJSON(
+            path: "/transfer/offer",
+            json: try JSONEncoder().encode(manifest),
+            endpoint: endpoint,
+            token: token,
+            transferId: manifest.transferId
+        )
+        while response.statusCode == 202 {
+            try Task.checkCancellation()
+            try await Task.sleep(for: .milliseconds(500))
+            response = try await postJSON(
+                path: "/transfer/offer-status",
+                json: try JSONSerialization.data(withJSONObject: ["transferId": manifest.transferId]),
+                endpoint: endpoint,
+                token: token,
+                transferId: manifest.transferId
+            )
+        }
+        if response.statusCode == 403 {
+            throw FileTransferHTTPClientError.server("File transfer was declined on Android.")
+        }
+        guard (200..<300).contains(response.statusCode) else {
+            throw FileTransferHTTPClientError.server("Android rejected offer (\(response.statusCode)).")
+        }
+        return response
     }
 
     private static func upload(

@@ -15,17 +15,35 @@ class FileTransferNotificationActionReceiver : BroadcastReceiver() {
                 val transferId = intent.getStringExtra(EXTRA_TRANSFER_ID) ?: return
                 FileTransferNotificationCenter.cancelTransfer(context, transferId)
             }
+            ACTION_ACCEPT -> {
+                val transferId = intent.getStringExtra(EXTRA_TRANSFER_ID) ?: return
+                FileTransferNotificationCenter.acceptTransfer(transferId)
+            }
+            ACTION_DECLINE -> {
+                val transferId = intent.getStringExtra(EXTRA_TRANSFER_ID) ?: return
+                FileTransferNotificationCenter.declineTransfer(context, transferId)
+            }
         }
     }
 
     companion object {
         private const val ACTION_CANCEL = "com.zevclip.sender.action.FILE_TRANSFER_CANCEL"
+        private const val ACTION_ACCEPT = "com.zevclip.sender.action.FILE_TRANSFER_ACCEPT"
+        private const val ACTION_DECLINE = "com.zevclip.sender.action.FILE_TRANSFER_DECLINE"
         private const val ACTION_OPEN = "com.zevclip.sender.action.FILE_TRANSFER_OPEN"
         private const val ACTION_SHOW_IN_FILES = "com.zevclip.sender.action.FILE_TRANSFER_SHOW_IN_FILES"
         private const val EXTRA_TRANSFER_ID = "com.zevclip.sender.extra.TRANSFER_ID"
 
         fun cancelIntent(context: Context, transferId: String): PendingIntent {
             return broadcastIntent(context, transferId, ACTION_CANCEL)
+        }
+
+        fun acceptIntent(context: Context, transferId: String): PendingIntent {
+            return broadcastIntent(context, transferId, ACTION_ACCEPT)
+        }
+
+        fun declineIntent(context: Context, transferId: String): PendingIntent {
+            return broadcastIntent(context, transferId, ACTION_DECLINE)
         }
 
         fun showInFilesIntent(context: Context, transferId: String): PendingIntent {

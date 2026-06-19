@@ -21,6 +21,8 @@ object FileTransferNotificationCenter {
     }
 
     private val cancelCallbacks = ConcurrentHashMap<String, () -> Unit>()
+    private val acceptCallbacks = ConcurrentHashMap<String, () -> Unit>()
+    private val declineCallbacks = ConcurrentHashMap<String, () -> Unit>()
     private val cancelledTransferIds = ConcurrentHashMap.newKeySet<String>()
 
     fun registerCancelCallback(transferId: String, callback: () -> Unit) {
@@ -32,12 +34,79 @@ object FileTransferNotificationCenter {
         cancelCallbacks.remove(transferId)
     }
 
+    fun registerApprovalCallbacks(
+        transferId: String,
+        onAccept: () -> Unit,
+        onDecline: () -> Unit
+    ) {
+        cancelledTransferIds.remove(transferId)
+        acceptCallbacks[transferId] = onAccept
+        declineCallbacks[transferId] = onDecline
+    }
+
+    fun unregisterApprovalCallbacks(transferId: String) {
+        acceptCallbacks.remove(transferId)
+        declineCallbacks.remove(transferId)
+    }
+
+    fun acceptTransfer(transferId: String) {
+        declineCallbacks.remove(transferId)
+        acceptCallbacks.remove(transferId)?.invoke()
+    }
+
+    fun declineTransfer(context: Context, transferId: String) {
+        acceptCallbacks.remove(transferId)
+        declineCallbacks.remove(transferId)?.invoke()
+        context.applicationContext
+            .getSystemService(NotificationManager::class.java)
+            .cancel(notificationId(transferId))
+    }
+
     fun cancelTransfer(context: Context, transferId: String) {
         cancelledTransferIds.add(transferId)
+        unregisterApprovalCallbacks(transferId)
         cancelCallbacks.remove(transferId)?.invoke()
         context.applicationContext
             .getSystemService(NotificationManager::class.java)
             .cancel(notificationId(transferId))
+    }
+
+    fun showApproval(
+        context: Context,
+        transferId: String,
+        fileName: String,
+        senderName: String,
+        totalBytes: Long
+    ) {
+        val appContext = context.applicationContext
+        if (!canPostNotifications(appContext)) return
+        ensureChannel(appContext)
+        val detail = "From $senderName · ${Formatter.formatFileSize(appContext, totalBytes)}"
+        val notification = Notification.Builder(appContext, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_sync_clipboard)
+            .setContentTitle(fileName)
+            .setContentText("Incoming file transfer")
+            .setStyle(Notification.BigTextStyle().bigText("Incoming file transfer\n$detail"))
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setShowWhen(false)
+            .addAction(
+                Notification.Action.Builder(
+                    0,
+                    "Accept",
+                    FileTransferNotificationActionReceiver.acceptIntent(appContext, transferId)
+                ).build()
+            )
+            .addAction(
+                Notification.Action.Builder(
+                    0,
+                    "Decline",
+                    FileTransferNotificationActionReceiver.declineIntent(appContext, transferId)
+                ).build()
+            )
+            .build()
+        appContext.getSystemService(NotificationManager::class.java)
+            .notify(notificationId(transferId), notification)
     }
 
     fun showActive(
@@ -98,6 +167,7 @@ object FileTransferNotificationCenter {
         mimeType: String?
     ) {
         unregisterCancelCallback(transferId)
+        unregisterApprovalCallbacks(transferId)
         val appContext = context.applicationContext
         if (cancelledTransferIds.contains(transferId)) {
             appContext.getSystemService(NotificationManager::class.java)
@@ -151,6 +221,7 @@ object FileTransferNotificationCenter {
         message: String
     ) {
         unregisterCancelCallback(transferId)
+        unregisterApprovalCallbacks(transferId)
         val appContext = context.applicationContext
         if (cancelledTransferIds.contains(transferId)) {
             appContext.getSystemService(NotificationManager::class.java)
@@ -176,6 +247,7 @@ object FileTransferNotificationCenter {
     fun clear(context: Context, transferId: String) {
         cancelledTransferIds.add(transferId)
         unregisterCancelCallback(transferId)
+        unregisterApprovalCallbacks(transferId)
         context.applicationContext
             .getSystemService(NotificationManager::class.java)
             .cancel(notificationId(transferId))
