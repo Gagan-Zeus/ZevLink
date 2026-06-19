@@ -48,12 +48,10 @@ final class FileTransferService: ObservableObject {
     private var outgoingTransferId: String?
 
     private var autoAcceptIncoming = true
-    private var saveIncomingToDownloads = true
 
-    func updateSettings(autoAcceptIncoming: Bool, saveIncomingToDownloads: Bool) {
+    func updateSettings(autoAcceptIncoming: Bool) {
         stateLock.lock()
         self.autoAcceptIncoming = autoAcceptIncoming
-        self.saveIncomingToDownloads = saveIncomingToDownloads
         stateLock.unlock()
     }
 

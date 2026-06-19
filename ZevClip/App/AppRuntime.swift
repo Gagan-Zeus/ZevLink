@@ -58,8 +58,7 @@ final class ZevClipRuntime {
             AppSettings.savedRemoteControlEnabled()
         }
         fileTransferService.updateSettings(
-            autoAcceptIncoming: appSettings.fileTransferAutoAccept,
-            saveIncomingToDownloads: appSettings.fileTransferSaveToDownloads
+            autoAcceptIncoming: appSettings.fileTransferAutoAccept
         )
         fileTransferService.onCancelPeerTransfer = { [weak self] transferId in
             guard

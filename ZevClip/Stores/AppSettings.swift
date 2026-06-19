@@ -10,7 +10,6 @@ final class AppSettings: ObservableObject {
         static let remoteControlEnabled = "remoteControlEnabled"
         static let showMenuBarIcon = "showMenuBarIcon"
         static let fileTransferAutoAccept = "fileTransferAutoAccept"
-        static let fileTransferSaveToDownloads = "fileTransferSaveToDownloads"
         static let fileTransferChunkDeduplication = "fileTransferChunkDeduplication"
     }
 
@@ -19,7 +18,6 @@ final class AppSettings: ObservableObject {
     @Published private(set) var remoteControlEnabled: Bool
     @Published private(set) var showMenuBarIcon: Bool
     @Published private(set) var fileTransferAutoAccept: Bool
-    @Published private(set) var fileTransferSaveToDownloads: Bool
     @Published private(set) var fileTransferChunkDeduplication: Bool
 
     init() {
@@ -46,9 +44,6 @@ final class AppSettings: ObservableObject {
         fileTransferAutoAccept = UserDefaults.standard.object(
             forKey: DefaultsKey.fileTransferAutoAccept
         ) as? Bool ?? true
-        fileTransferSaveToDownloads = UserDefaults.standard.object(
-            forKey: DefaultsKey.fileTransferSaveToDownloads
-        ) as? Bool ?? true
         fileTransferChunkDeduplication = UserDefaults.standard.object(
             forKey: DefaultsKey.fileTransferChunkDeduplication
         ) as? Bool ?? true
@@ -74,17 +69,7 @@ final class AppSettings: ObservableObject {
         UserDefaults.standard.set(isEnabled, forKey: DefaultsKey.fileTransferAutoAccept)
         fileTransferAutoAccept = isEnabled
         ZevClipRuntime.shared.fileTransferService.updateSettings(
-            autoAcceptIncoming: isEnabled,
-            saveIncomingToDownloads: fileTransferSaveToDownloads
-        )
-    }
-
-    func setFileTransferSaveToDownloads(_ isEnabled: Bool) {
-        UserDefaults.standard.set(isEnabled, forKey: DefaultsKey.fileTransferSaveToDownloads)
-        fileTransferSaveToDownloads = isEnabled
-        ZevClipRuntime.shared.fileTransferService.updateSettings(
-            autoAcceptIncoming: fileTransferAutoAccept,
-            saveIncomingToDownloads: isEnabled
+            autoAcceptIncoming: isEnabled
         )
     }
 
@@ -227,7 +212,6 @@ final class AppSettings: ObservableObject {
                 DefaultsKey.remoteControlEnabled,
                 DefaultsKey.showMenuBarIcon,
                 DefaultsKey.fileTransferAutoAccept,
-                DefaultsKey.fileTransferSaveToDownloads,
                 DefaultsKey.fileTransferChunkDeduplication
             ] where defaults.object(forKey: key) == nil {
                 defaults.set(legacyDomain[key], forKey: key)

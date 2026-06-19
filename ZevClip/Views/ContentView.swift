@@ -182,14 +182,6 @@ struct ContentView: View {
                 )
 
                 Toggle(
-                    "Save received files to Downloads",
-                    isOn: Binding(
-                        get: { appSettings.fileTransferSaveToDownloads },
-                        set: { appSettings.setFileTransferSaveToDownloads($0) }
-                    )
-                )
-
-                Toggle(
                     "Skip already verified chunks on resume",
                     isOn: Binding(
                         get: { appSettings.fileTransferChunkDeduplication },
