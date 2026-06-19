@@ -1,6 +1,7 @@
 package com.zevclip.sender
 
 import android.content.Context
+import android.util.Log
 import org.json.JSONObject
 import java.io.IOException
 import java.net.ConnectException
@@ -10,9 +11,70 @@ import java.net.SocketTimeoutException
 import java.net.URL
 
 object MacRemoteSender {
+    private const val TAG = "ZevClip"
     private const val CONNECT_TIMEOUT_MS = 5_000
     private const val READ_TIMEOUT_MS = 8_000
     private const val MAX_RESPONSE_PREVIEW = 200
+
+    fun sendSavedEndpoint(
+        context: Context,
+        action: String,
+        url: String? = null
+    ): SendResult {
+        val appContext = context.applicationContext
+        val endpoint = ZevClipPreferences.endpoint(appContext)
+            ?: return SendResult.Failure("Pair or reconnect your Mac first.")
+        val pairingToken = ZevClipPreferences.pairingToken(appContext)
+        if (pairingToken.isBlank()) {
+            return SendResult.Failure("Pair or reconnect your Mac first.")
+        }
+
+        val firstResult = send(appContext, endpoint.ipAddress, endpoint.port, action, pairingToken, url)
+        if (firstResult !is SendResult.Failure || !firstResult.retryableWithDiscovery) {
+            return firstResult
+        }
+
+        val deviceId = ZevClipPreferences.deviceId(appContext)
+        if (deviceId.isBlank()) {
+            Log.i(TAG, "Mac remote failed, but no paired deviceId is saved; skipping rediscovery")
+            return firstResult
+        }
+
+        Log.i(TAG, "Saved Mac remote endpoint failed. Rediscovering paired Mac by deviceId.")
+        ZevClipPreferences.setDiscoveryStatus(appContext, "Saved Mac address failed. Rediscovering paired Mac...")
+        val rediscoveredEndpoint = MacAddressRediscoverer.resolvePairedMac(appContext, deviceId)
+            ?: return SendResult.Failure(
+                "${firstResult.message} Rediscovery did not find the paired Mac.",
+                retryableWithDiscovery = false
+            )
+
+        ZevClipPreferences.saveEndpoint(
+            appContext,
+            rediscoveredEndpoint.ipAddress,
+            rediscoveredEndpoint.port.toString()
+        )
+        ZevClipPreferences.setDiscoveryStatus(
+            appContext,
+            "Rediscovered paired Mac at ${rediscoveredEndpoint.ipAddress}:${rediscoveredEndpoint.port}."
+        )
+
+        return when (
+            val retryResult = send(
+                appContext,
+                rediscoveredEndpoint.ipAddress,
+                rediscoveredEndpoint.port,
+                action,
+                pairingToken,
+                url
+            )
+        ) {
+            is SendResult.Success -> SendResult.Success(retryResult.message)
+            is SendResult.Failure -> SendResult.Failure(
+                "Rediscovered Mac at ${rediscoveredEndpoint.ipAddress}:${rediscoveredEndpoint.port}, but retry failed: ${retryResult.message}",
+                retryableWithDiscovery = false
+            )
+        }
+    }
 
     fun send(
         context: Context,

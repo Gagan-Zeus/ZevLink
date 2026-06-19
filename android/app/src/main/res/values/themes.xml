@@ -24,4 +24,9 @@
         <item name="android:windowDisablePreview">true</item>
     </style>
 
+    <style name="Animation.ZevAssistantSheet" parent="@android:style/Animation.Dialog">
+        <item name="android:windowEnterAnimation">@anim/zev_assistant_sheet_enter</item>
+        <item name="android:windowExitAnimation">@anim/zev_assistant_sheet_exit</item>
+    </style>
+
 </resources>
