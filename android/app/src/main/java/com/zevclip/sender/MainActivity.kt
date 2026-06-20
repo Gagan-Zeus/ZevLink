@@ -76,6 +76,7 @@ class MainActivity : Activity() {
     private lateinit var airPlayReceiverDiscoveryManager: AirPlayReceiverDiscoveryManager
     private lateinit var colors: DynamicPalette
     private var showingSettings = false
+    private var showingSetupGuide = false
     private var showingAirPlayBroadcast = false
     private var showingMacRemote = false
     private var airPlayBroadcastReceivers: List<AirPlayDiscoveredReceiver> = emptyList()
@@ -299,7 +300,9 @@ class MainActivity : Activity() {
 
     @Deprecated("Deprecated in Android framework, but still the compatibility path for this Activity.")
     override fun onBackPressed() {
-        if (showingAirPlayBroadcast) {
+        if (showingSetupGuide) {
+            showSettingsPage()
+        } else if (showingAirPlayBroadcast) {
             showHomePage()
         } else if (showingMacRemote) {
             showHomePage()
@@ -328,6 +331,7 @@ class MainActivity : Activity() {
             airPlayReceiverDiscoveryManager.stop()
         }
         showingSettings = false
+        showingSetupGuide = false
         showingAirPlayBroadcast = false
         showingMacRemote = false
         setContentView(createHomeView())
@@ -356,14 +360,27 @@ class MainActivity : Activity() {
             airPlayReceiverDiscoveryManager.stop()
         }
         showingSettings = true
+        showingSetupGuide = false
         showingAirPlayBroadcast = false
         showingMacRemote = false
         setContentView(createSettingsView())
         refreshSyncStatuses()
     }
 
+    private fun showSetupGuidePage() {
+        if (::airPlayReceiverDiscoveryManager.isInitialized) {
+            airPlayReceiverDiscoveryManager.stop()
+        }
+        showingSettings = false
+        showingSetupGuide = true
+        showingAirPlayBroadcast = false
+        showingMacRemote = false
+        setContentView(createSetupGuideView())
+    }
+
     private fun showAirPlayBroadcastPage() {
         showingSettings = false
+        showingSetupGuide = false
         showingAirPlayBroadcast = true
         showingMacRemote = false
         setContentView(createAirPlayBroadcastView())
@@ -376,6 +393,7 @@ class MainActivity : Activity() {
             airPlayReceiverDiscoveryManager.stop()
         }
         showingSettings = false
+        showingSetupGuide = false
         showingAirPlayBroadcast = false
         showingMacRemote = true
         setContentView(createMacRemoteView())
@@ -517,6 +535,41 @@ class MainActivity : Activity() {
             }
             addView(quickSettingsStatusText, matchWidth())
         }, matchWidth(topMargin = 16))
+
+        content.addView(card(colors.primaryContainer).apply {
+            addView(cardTitle(getString(R.string.setup_guide_title)))
+            addView(textView(getString(R.string.setup_guide_description), 14f, colors.muted).apply {
+                setPadding(0, dp(6), 0, dp(14))
+                setLineSpacing(0f, 1.06f)
+            })
+
+            addView(primaryButton(getString(R.string.open_setup_guide)) {
+                showSetupGuidePage()
+            }, matchWidth())
+        }, matchWidth(topMargin = 16))
+
+        return scrollPage(content)
+    }
+
+    private fun createSetupGuideView(): View {
+        val content = pageContent()
+
+        content.addView(headerRow(
+            title = getString(R.string.setup_guide_title),
+            action = tonalButton(getString(R.string.back)) { showSettingsPage() }
+        ))
+        content.addView(textView(getString(R.string.setup_guide_intro), 17f, colors.muted).apply {
+            setPadding(0, dp(6), 0, dp(18))
+            setLineSpacing(0f, 1.08f)
+        })
+
+        content.addView(guideSection(R.string.setup_guide_pairing_title, R.string.setup_guide_pairing_body), matchWidth(topMargin = 2))
+        content.addView(guideSection(R.string.setup_guide_clipboard_title, R.string.setup_guide_clipboard_body), matchWidth(topMargin = 14))
+        content.addView(guideSection(R.string.setup_guide_file_sharing_title, R.string.setup_guide_file_sharing_body), matchWidth(topMargin = 14))
+        content.addView(guideSection(R.string.setup_guide_mac_remote_title, R.string.setup_guide_mac_remote_body), matchWidth(topMargin = 14))
+        content.addView(guideSection(R.string.setup_guide_airplay_title, R.string.setup_guide_airplay_body), matchWidth(topMargin = 14))
+        content.addView(guideSection(R.string.setup_guide_assistant_title, R.string.setup_guide_assistant_body), matchWidth(topMargin = 14))
+        content.addView(guideSection(R.string.setup_guide_troubleshooting_title, R.string.setup_guide_troubleshooting_body), matchWidth(topMargin = 14))
 
         return scrollPage(content)
     }
@@ -1700,6 +1753,16 @@ class MainActivity : Activity() {
     private fun cardTitle(value: String): TextView {
         return textView(value, 20f, colors.text).apply {
             setTypeface(typeface, Typeface.BOLD)
+        }
+    }
+
+    private fun guideSection(titleResource: Int, bodyResource: Int): LinearLayout {
+        return card(colors.surface).apply {
+            addView(cardTitle(getString(titleResource)))
+            addView(textView(getString(bodyResource), 15f, colors.muted).apply {
+                setPadding(0, dp(8), 0, 0)
+                setLineSpacing(0f, 1.12f)
+            }, matchWidth())
         }
     }
 

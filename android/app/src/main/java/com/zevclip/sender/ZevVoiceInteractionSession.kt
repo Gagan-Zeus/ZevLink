@@ -6,10 +6,14 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.graphics.Canvas
+import android.graphics.BlurMaskFilter
+import android.graphics.Bitmap
 import android.graphics.Color
+import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
+import android.graphics.Shader
 import android.graphics.Typeface
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.ColorDrawable
@@ -54,6 +58,7 @@ class ZevVoiceInteractionSession(context: Context) : VoiceInteractionSession(con
     private var lastSpeechActivityAt = 0L
     private var lastHeardText: String? = null
     private lateinit var sheet: View
+    private lateinit var ambientOutline: AssistantAmbientOutlineView
     private lateinit var indicator: ListeningIndicatorView
     private lateinit var retryButton: TextView
     private lateinit var statusText: TextView
@@ -109,7 +114,7 @@ class ZevVoiceInteractionSession(context: Context) : VoiceInteractionSession(con
             setDimAmount(0.12f)
             attributes = attributes.apply {
                 gravity = Gravity.BOTTOM
-                windowAnimations = R.style.Animation_ZevAssistantSheet
+                windowAnimations = 0
             }
         }
     }
@@ -121,11 +126,21 @@ class ZevVoiceInteractionSession(context: Context) : VoiceInteractionSession(con
             clipToPadding = false
         }
 
+        ambientOutline = AssistantAmbientOutlineView(context).apply { visibility = View.GONE }
+        root.addView(ambientOutline, FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.MATCH_PARENT
+        ))
+
         sheet = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(10), dp(20), dp(18))
             elevation = dp(14).toFloat()
             background = roundedDrawable(SURFACE, 30, OUTLINE, 1)
+            alpha = 0f
+            scaleX = 0.975f
+            scaleY = 0.975f
+            translationY = dp(18).toFloat()
 
             addView(View(context).apply {
                 background = roundedDrawable(HANDLE, 4)
@@ -227,6 +242,7 @@ class ZevVoiceInteractionSession(context: Context) : VoiceInteractionSession(con
                 }
             ), matchWidth(topMargin = CONTROL_GAP_DP))
         }
+        ambientOutline.track(sheet)
 
         root.addView(sheet, FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT,
@@ -252,6 +268,19 @@ class ZevVoiceInteractionSession(context: Context) : VoiceInteractionSession(con
     override fun onShow(args: Bundle?, showFlags: Int) {
         super.onShow(args, showFlags)
         visible = true
+        prepareAssistantEntrance()
+        sheet.post {
+            if (!visible) return@post
+            ambientOutline.start()
+            sheet.animate()
+                .alpha(1f)
+                .translationY(0f)
+                .scaleX(1f)
+                .scaleY(1f)
+                .setDuration(ASSISTANT_ENTER_ANIMATION_MILLIS)
+                .setInterpolator(android.view.animation.DecelerateInterpolator(1.6f))
+                .start()
+        }
         val initialCommand = args?.getString(ZevVoiceInteractionService.EXTRA_INITIAL_COMMAND).orEmpty()
         if (initialCommand.isNotBlank()) {
             transcriptText.visibility = View.VISIBLE
@@ -283,6 +312,8 @@ class ZevVoiceInteractionSession(context: Context) : VoiceInteractionSession(con
         assistedUrl = null
         pendingConfirmationAction = null
         indicator.setActive(false)
+        sheet.animate().cancel()
+        ambientOutline.pause()
         handler.removeCallbacksAndMessages(null)
         if (wasListening) recognizer?.cancel()
         scheduleRecognizerAudioRestore()
@@ -297,10 +328,22 @@ class ZevVoiceInteractionSession(context: Context) : VoiceInteractionSession(con
         lastSpeechActivityAt = 0L
         lastHeardText = null
         handler.removeCallbacksAndMessages(null)
+        if (::ambientOutline.isInitialized) {
+            ambientOutline.release()
+        }
         recognizer?.destroy()
         recognizer = null
         scheduleRecognizerAudioRestore()
         super.onDestroy()
+    }
+
+    private fun prepareAssistantEntrance() {
+        sheet.animate().cancel()
+        sheet.alpha = 0f
+        sheet.scaleX = 0.975f
+        sheet.scaleY = 0.975f
+        sheet.translationY = dp(18).toFloat()
+        ambientOutline.pause()
     }
 
     private fun startListening() {
@@ -766,6 +809,146 @@ class ZevVoiceInteractionSession(context: Context) : VoiceInteractionSession(con
         )
     }
 
+    private class AssistantAmbientOutlineView(context: Context) : View(context) {
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeCap = Paint.Cap.ROUND
+            strokeJoin = Paint.Join.ROUND
+        }
+        private val rect = RectF()
+        private val density = context.resources.displayMetrics.density
+        private var startedAt = 0L
+        private var running = false
+        private var targetView: View? = null
+        private var cachedGlow: Bitmap? = null
+        private var cachedWidth = 0
+        private var cachedHeight = 0
+        private val cachedRect = RectF()
+
+        init {
+            setWillNotDraw(false)
+            setLayerType(LAYER_TYPE_SOFTWARE, null)
+            importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
+        }
+
+        fun track(view: View) {
+            targetView = view
+        }
+
+        fun start() {
+            startedAt = SystemClock.uptimeMillis()
+            running = true
+            visibility = VISIBLE
+            invalidate()
+        }
+
+        fun pause() {
+            running = false
+            visibility = GONE
+            paint.shader = null
+            paint.maskFilter = null
+        }
+
+        fun release() {
+            pause()
+            cachedGlow?.recycle()
+            cachedGlow = null
+        }
+
+        override fun onDraw(canvas: Canvas) {
+            super.onDraw(canvas)
+            val target = targetView ?: return
+            if (!running || width <= 0 || height <= 0 || target.width <= 0 || target.height <= 0) {
+                if (running) postInvalidateOnAnimation()
+                return
+            }
+
+            val elapsed = SystemClock.uptimeMillis() - startedAt
+            val appear = easeOut((elapsed / OUTLINE_APPEAR_MILLIS.toFloat()).coerceIn(0f, 1f))
+            val pulse = 0.84f + 0.16f * kotlin.math.sin(elapsed / 260f).toFloat()
+            val intensity = appear * pulse
+
+            val bleedInset = 1.5f * density
+            val radius = 30f * density
+            rect.set(
+                target.left + bleedInset,
+                target.top + bleedInset,
+                target.right - bleedInset,
+                target.bottom - bleedInset
+            )
+
+            val glow = cachedGlowFor(width, height, rect, radius)
+            paint.shader = null
+            paint.maskFilter = null
+            paint.alpha = (255 * intensity).toInt().coerceIn(0, 255)
+            canvas.drawBitmap(glow, 0f, 0f, paint)
+
+            postInvalidateDelayed(66L)
+        }
+
+        private fun cachedGlowFor(width: Int, height: Int, bounds: RectF, radius: Float): Bitmap {
+            cachedGlow?.let {
+                if (!it.isRecycled && cachedWidth == width && cachedHeight == height && cachedRect == bounds) {
+                    return it
+                }
+            }
+            cachedGlow?.recycle()
+            cachedWidth = width
+            cachedHeight = height
+            cachedRect.set(bounds)
+            val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            val glowCanvas = Canvas(bitmap)
+            paint.shader = LinearGradient(
+                bounds.left,
+                bounds.top,
+                bounds.right,
+                bounds.bottom,
+                intArrayOf(
+                    Color.rgb(18, 188, 255),
+                    Color.rgb(45, 110, 255),
+                    Color.rgb(150, 72, 255),
+                    Color.rgb(238, 62, 203),
+                    Color.rgb(18, 188, 255)
+                ),
+                floatArrayOf(0f, 0.24f, 0.52f, 0.76f, 1f),
+                Shader.TileMode.CLAMP
+            )
+            drawGlowStroke(glowCanvas, bounds, radius, 34f * density, 82, 22f * density)
+            drawGlowStroke(glowCanvas, bounds, radius, 20f * density, 126, 11f * density)
+            drawGlowStroke(glowCanvas, bounds, radius, 8f * density, 196, 3.5f * density)
+            drawGlowStroke(glowCanvas, bounds, radius, 3f * density, 235, 0f)
+            cachedGlow = bitmap
+            return bitmap
+        }
+
+        private fun drawGlowStroke(
+            canvas: Canvas,
+            bounds: RectF,
+            radius: Float,
+            strokeWidth: Float,
+            alpha: Int,
+            blur: Float
+        ) {
+            paint.strokeWidth = strokeWidth
+            paint.alpha = alpha
+            paint.maskFilter = if (blur > 0f) BlurMaskFilter(blur, BlurMaskFilter.Blur.NORMAL) else null
+            canvas.drawRoundRect(bounds, radius, radius, paint)
+        }
+
+        private fun easeOut(value: Float): Float {
+            val inverse = 1f - value
+            return 1f - inverse * inverse * inverse
+        }
+
+        private fun easeIn(value: Float): Float {
+            return value * value
+        }
+
+        companion object {
+            private const val OUTLINE_APPEAR_MILLIS = 260L
+        }
+    }
+
     private enum class AssistantIcon {
         LOCK, SLEEP, RESTART, POWER, LOGOUT, MUTE, VOLUME_DOWN, VOLUME_UP,
         PREVIOUS, PLAY_PAUSE, NEXT, LINK, SCREEN, AUDIO, BROADCAST
@@ -904,6 +1087,7 @@ class ZevVoiceInteractionSession(context: Context) : VoiceInteractionSession(con
         private const val RECOGNIZER_END_CUE_MILLIS = 1_200L
         private const val CONFIRMATION_TIMEOUT_MILLIS = 5_000L
         private val HTTP_URL = Regex("https?://[^\\s<>\"']+", RegexOption.IGNORE_CASE)
+        private const val ASSISTANT_ENTER_ANIMATION_MILLIS = 210L
         private const val NO_SPEECH_TIMEOUT_MILLIS = 10_000L
         private const val RESULT_TIMEOUT_MILLIS = 2_500L
         private const val SPEECH_SILENCE_TIMEOUT_MILLIS = 1_200L
