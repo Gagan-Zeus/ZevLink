@@ -9,6 +9,8 @@ import android.graphics.drawable.ColorDrawable
 import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.Bundle
+import android.view.Gravity
+import android.view.View
 import android.view.Window
 import android.view.WindowManager
 
@@ -18,9 +20,8 @@ class AirPlayCaptureActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         requestWindowFeature(Window.FEATURE_NO_TITLE)
         overridePendingTransition(0, 0)
-        window.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
-        window.clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
         super.onCreate(savedInstanceState)
+        configureTransparentHandoffWindow()
         startAirPlayCapture()
     }
 
@@ -67,7 +68,15 @@ class AirPlayCaptureActivity : Activity() {
     }
 
     private fun startAirPlayCapture() {
-        if (requestedCapture || ZevClipPreferences.isAirPlayStreaming(this)) {
+        if (requestedCapture) {
+            finish()
+            return
+        }
+
+        if (ZevClipPreferences.isAirPlayStreaming(this)) {
+            AirPlayAudioCaptureService.stop(this)
+            ZevClipPreferences.setAirPlayTestStatus(this, getString(R.string.airplay_streaming_stopped))
+            ZevClipStatusNotification.update(this)
             finish()
             return
         }
@@ -92,6 +101,20 @@ class AirPlayCaptureActivity : Activity() {
             projectionManager.createScreenCaptureIntent(),
             REQUEST_AIRPLAY_CAPTURE
         )
+    }
+
+    private fun configureTransparentHandoffWindow() {
+        window.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+        window.clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+        window.setDimAmount(0f)
+        window.decorView.setBackgroundColor(Color.TRANSPARENT)
+        window.decorView.visibility = View.INVISIBLE
+        window.setLayout(1, 1)
+        window.attributes = window.attributes.apply {
+            gravity = Gravity.TOP or Gravity.START
+            width = 1
+            height = 1
+        }
     }
 
     companion object {

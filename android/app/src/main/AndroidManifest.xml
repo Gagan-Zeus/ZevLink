@@ -122,6 +122,16 @@
             android:taskAffinity=""
             android:theme="@style/Theme.ZevClip.ClipboardCapture" />
 
+        <activity
+            android:name=".AirPlayScreenCaptureActivity"
+            android:documentLaunchMode="never"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:finishOnTaskLaunch="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@style/Theme.ZevClip.ClipboardCapture" />
+
         <service
             android:name=".ClipboardAccessibilityService"
             android:exported="true"

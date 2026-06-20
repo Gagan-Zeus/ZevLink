@@ -9,9 +9,11 @@
     <string name="zev_assistant_listening">Listening for your command...</string>
     <string name="zev_assistant_working">Working...</string>
     <string name="zev_assistant_retry">Retry</string>
-    <string name="zev_assistant_retry_hint">Tap Retry when you are ready to speak again</string>
-    <string name="zev_assistant_command_hint">Try saying: call Mom or set a timer for 10 minutes</string>
     <string name="zev_assistant_capabilities">Calls  |  Apps  |  Search  |  Directions  |  Timers</string>
+    <string name="zev_assistant_mac_controls">MAC REMOTE</string>
+    <string name="zev_assistant_airplay_controls">AIRPLAY</string>
+    <string name="zev_assistant_tap_again">Tap %1$s again to confirm</string>
+    <string name="zev_assistant_select_url">Select or copy an HTTP or HTTPS URL before opening the assistant.</string>
     <string name="zev_assistant_did_not_hear">I did not hear that. Please try again.</string>
     <string name="zev_assistant_speech_unavailable">Speech recognition is unavailable on this phone.</string>
     <string name="zev_assistant_contacts_needed">Contacts permission is needed to call a contact by name.</string>
