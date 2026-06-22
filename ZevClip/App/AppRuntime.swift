@@ -299,34 +299,10 @@ private final class StatusItemController: NSObject {
     private func makeMenu() -> NSMenu {
         let menu = NSMenu()
 
-        addDisabledItem(
-            isClipboardSyncRunning ? "Clipboard Sync: On" : "Clipboard Sync: Off",
-            to: menu
-        )
-        addDisabledItem("Mac: \(macMenuStatus)", to: menu)
-        if let endpoint = androidClipboardSender.resolvedEndpoint {
-            addDisabledItem("Android: \(batteryMenuTitle(for: endpoint))", to: menu)
-        } else {
-            addDisabledItem("Android: \(androidClipboardSender.isDiscovering ? "Searching" : "Not connected")", to: menu)
-        }
-
-        if let lastActivity = latestActivityDate {
-            addDisabledItem(
-                "Last activity: \(lastActivity.formatted(date: .omitted, time: .shortened))",
-                to: menu
-            )
-        }
-
-        menu.addItem(.separator())
         menu.addItem(actionItem(
-            title: "Start Clipboard Sync",
-            action: #selector(startClipboardSync),
-            isEnabled: !isClipboardSyncRunning
-        ))
-        menu.addItem(actionItem(
-            title: "Stop Clipboard Sync",
-            action: #selector(stopClipboardSync),
-            isEnabled: isClipboardSyncRunning
+            title: androidClipboardSender.isFindingPhone ? "Stop Ringing" : "Find My Phone",
+            action: #selector(findMyPhone),
+            isEnabled: androidClipboardSender.resolvedEndpoint != nil
         ))
         menu.addItem(actionItem(
             title: "Reconnect Android",
@@ -335,16 +311,6 @@ private final class StatusItemController: NSObject {
         ))
 
         menu.addItem(.separator())
-        menu.addItem(toggleItem(
-            title: "Show in Menu Bar",
-            isOn: appSettings.showMenuBarIcon,
-            action: #selector(toggleMenuBarIcon)
-        ))
-        menu.addItem(toggleItem(
-            title: "Launch at Login",
-            isOn: appSettings.launchAtLoginEnabled,
-            action: #selector(toggleLaunchAtLogin)
-        ))
         menu.addItem(actionItem(title: "Open Settings...", action: #selector(openSettingsWindow)))
 
         menu.addItem(.separator())
@@ -459,6 +425,19 @@ private final class StatusItemController: NSObject {
 
     @objc private func reconnectAndroid() {
         androidClipboardSender.rediscoverAndroidReceiver()
+    }
+
+    @objc private func findMyPhone() {
+        androidClipboardSender.toggleFindMyPhone { success, message in
+            guard !success else { return }
+
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "Could Not Find Phone"
+            alert.informativeText = message
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+        }
     }
 
     @objc private func toggleMenuBarIcon() {

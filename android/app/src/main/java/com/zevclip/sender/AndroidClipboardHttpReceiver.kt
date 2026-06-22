@@ -44,7 +44,10 @@ class AndroidClipboardHttpReceiver(
     private val onCallAction: (String, String?) -> AndroidCallActionResult = { _, _ ->
         AndroidCallActionResult(false, "Android call mirror is unavailable.")
     },
-    private val onMediaControlAction: (String) -> Boolean = { false }
+    private val onMediaControlAction: (String) -> Boolean = { false },
+    private val onFindPhone: (String) -> FindPhoneActionResult = {
+        FindPhoneActionResult(false, "Find My Phone is unavailable.")
+    }
 ) {
     private val appContext = context.applicationContext
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -174,6 +177,7 @@ class AndroidClipboardHttpReceiver(
                 requestParts[1] != NOTIFICATION_ACTION_PATH &&
                 requestParts[1] != CALL_ACTION_PATH &&
                 requestParts[1] != MEDIA_CONTROL_PATH &&
+                requestParts[1] != FIND_PHONE_PATH &&
                 !requestParts[1].startsWith(TRANSFER_PREFIX)
             ) {
                 output.write(response("404 Not Found", "Unknown path.").toByteArray(Charsets.UTF_8))
@@ -221,6 +225,28 @@ class AndroidClipboardHttpReceiver(
 
             if (requestParts[1] == MEDIA_CONTROL_PATH) {
                 output.write(handleMediaControlAction(body).toByteArray(Charsets.UTF_8))
+                output.flush()
+                continue
+            }
+
+            if (requestParts[1] == FIND_PHONE_PATH) {
+                val action = try {
+                    JSONObject(decodeUtf8(body)).optString("action").trim().lowercase(Locale.US)
+                } catch (_: Exception) {
+                    ""
+                }
+                if (action != "start" && action != "stop") {
+                    output.write(response("400 Bad Request", "action must be start or stop.").toByteArray(Charsets.UTF_8))
+                    output.flush()
+                    continue
+                }
+                val result = onFindPhone(action)
+                output.write(
+                    response(
+                        if (result.success) "200 OK" else "409 Conflict",
+                        result.message
+                    ).toByteArray(Charsets.UTF_8)
+                )
                 output.flush()
                 continue
             }
@@ -870,6 +896,7 @@ class AndroidClipboardHttpReceiver(
         const val NOTIFICATION_ACTION_PATH = "/notification-action"
         const val CALL_ACTION_PATH = "/call-action"
         const val MEDIA_CONTROL_PATH = "/media-control"
+        const val FIND_PHONE_PATH = "/find-phone"
         const val TRANSFER_PREFIX = "/transfer/"
         const val TRANSFER_OFFER_PATH = "/transfer/offer"
         const val TRANSFER_OFFER_STATUS_PATH = "/transfer/offer-status"

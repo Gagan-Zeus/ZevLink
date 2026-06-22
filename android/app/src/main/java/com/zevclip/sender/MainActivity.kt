@@ -171,7 +171,9 @@ class MainActivity : Activity() {
         )
         showHomePage()
         handleNotificationAction(intent)
-        requestNotificationPermissionIfNeeded()
+        if (!requestNotificationPermissionIfNeeded()) {
+            requestAlarmAudioPermissionIfNeeded()
+        }
     }
 
     override fun onNewIntent(intent: Intent?) {
@@ -208,6 +210,7 @@ class MainActivity : Activity() {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == REQUEST_POST_NOTIFICATIONS) {
             ZevClipStatusNotification.update(this)
+            requestAlarmAudioPermissionIfNeeded()
         } else if (requestCode == REQUEST_PHONE_CALLS) {
             if (ZevClipPreferences.isClipboardSyncEnabled(this)) {
                 AndroidCallMirrorService.start(this)
@@ -886,7 +889,7 @@ class MainActivity : Activity() {
         ZevClipStatusNotification.update(this)
     }
 
-    private fun requestNotificationPermissionIfNeeded() {
+    private fun requestNotificationPermissionIfNeeded(): Boolean {
         if (
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
@@ -896,6 +899,19 @@ class MainActivity : Activity() {
                 arrayOf(Manifest.permission.POST_NOTIFICATIONS),
                 REQUEST_POST_NOTIFICATIONS
             )
+            return true
+        }
+        return false
+    }
+
+    private fun requestAlarmAudioPermissionIfNeeded() {
+        val permission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            Manifest.permission.READ_MEDIA_AUDIO
+        } else {
+            Manifest.permission.READ_EXTERNAL_STORAGE
+        }
+        if (checkSelfPermission(permission) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(permission), REQUEST_ALARM_AUDIO)
         }
     }
 
@@ -2009,6 +2025,7 @@ class MainActivity : Activity() {
         const val REQUEST_AIRPLAY_BROADCAST_CAPTURE = 2005
         const val REQUEST_AIRPLAY_SCREEN_CAPTURE = 2006
         const val REQUEST_SMS_OTP_MIRROR = 2007
+        const val REQUEST_ALARM_AUDIO = 2008
         val FALLBACK_BACKGROUND: Int = Color.rgb(247, 248, 250)
         val FALLBACK_TEXT: Int = Color.rgb(26, 28, 32)
         val FALLBACK_MUTED: Int = Color.rgb(91, 95, 103)

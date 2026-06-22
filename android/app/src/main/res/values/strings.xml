@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">ZevLink</string>
+    <string name="find_phone_notification_title">Find My Phone</string>
+    <string name="find_phone_notification_text">Your phone is ringing.</string>
+    <string name="find_phone_notification_stop">Stop Ringing</string>
     <string name="screen_title">ZevLink</string>
     <string name="screen_description">Connect your Android phone and Mac for clipboard sync, AirPlay, notifications, and calls.</string>
     <string name="settings_title">Settings</string>

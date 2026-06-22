@@ -30,6 +30,7 @@ class AndroidClipboardReceiverService : Service() {
     private var networkCallbackRegistered = false
     private var networkReceiverRegistered = false
     private val mainHandler = Handler(Looper.getMainLooper())
+    private lateinit var findMyPhoneRinger: FindMyPhoneRinger
 
     private val advertisingRefreshRunnable = Runnable {
         refreshAdvertising("network changed")
@@ -69,6 +70,12 @@ class AndroidClipboardReceiverService : Service() {
         super.onCreate()
         nsdManager = getSystemService(NsdManager::class.java)
         connectivityManager = getSystemService(ConnectivityManager::class.java)
+        findMyPhoneRinger = FindMyPhoneRinger(this) { isRinging ->
+            sendPresenceToMac(
+                reason = if (isRinging) "find phone started" else "find phone stopped",
+                findPhoneRinging = isRinging
+            )
+        }
         registerNetworkWatchers()
         Log.i(TAG, "Android clipboard receiver service created")
     }
@@ -80,6 +87,7 @@ class AndroidClipboardReceiverService : Service() {
                 stopReceiver("Stopped.")
                 stopSelf(startId)
             }
+            ACTION_STOP_FIND_PHONE -> findMyPhoneRinger.stop()
             else -> Log.w(TAG, "Ignoring unknown receiver service action: ${intent?.action}")
         }
 
@@ -93,6 +101,7 @@ class AndroidClipboardReceiverService : Service() {
         mainHandler.removeCallbacks(advertisingRefreshRunnable)
         mainHandler.removeCallbacks(periodicAdvertisingRefreshRunnable)
         stopReceiver("Stopped because the service was destroyed.")
+        findMyPhoneRinger.stop()
         Log.i(TAG, "Android clipboard receiver service destroyed")
         super.onDestroy()
     }
@@ -185,6 +194,9 @@ class AndroidClipboardReceiverService : Service() {
             },
             onMediaControlAction = { action ->
                 AirPlayMediaControlDispatcher.dispatch(this, action.toAirPlayDacpCommand())
+            },
+            onFindPhone = { action ->
+                if (action == "stop") findMyPhoneRinger.stop() else findMyPhoneRinger.start()
             }
         )
 
@@ -340,19 +352,29 @@ class AndroidClipboardReceiverService : Service() {
         )
     }
 
-    private fun sendPresenceToMac(reason: String, attempt: Int = 1) {
+    private fun sendPresenceToMac(
+        reason: String,
+        attempt: Int = 1,
+        findPhoneRinging: Boolean? = null
+    ) {
         if (receiver == null || !ZevClipPreferences.isClipboardSyncEnabled(this)) {
             return
         }
 
         thread(name = "ZevClipAndroidPresence") {
-            when (val result = AndroidPresenceSender.sendSavedEndpoint(applicationContext, activePort)) {
+            when (
+                val result = AndroidPresenceSender.sendSavedEndpoint(
+                    applicationContext,
+                    activePort,
+                    findPhoneRinging
+                )
+            ) {
                 is SendResult.Success -> Log.i(TAG, "${result.message} ($reason)")
                 is SendResult.Failure -> {
                     Log.w(TAG, "Android presence update failed ($reason, attempt $attempt): ${result.message}")
                     if (attempt < PRESENCE_UPDATE_ATTEMPTS) {
                         mainHandler.postDelayed(
-                            { sendPresenceToMac(reason, attempt + 1) },
+                            { sendPresenceToMac(reason, attempt + 1, findPhoneRinging) },
                             PRESENCE_RETRY_DELAY_MS
                         )
                     }
@@ -453,6 +475,7 @@ class AndroidClipboardReceiverService : Service() {
     companion object {
         const val ACTION_START = "com.zevclip.sender.action.START_ANDROID_RECEIVER"
         const val ACTION_STOP = "com.zevclip.sender.action.STOP_ANDROID_RECEIVER"
+        const val ACTION_STOP_FIND_PHONE = "com.zevclip.sender.action.STOP_FIND_MY_PHONE"
         const val SERVICE_TYPE = "_zevclip-android._tcp."
         const val SERVICE_NAME = "ZevLink Android Receiver"
 
@@ -479,6 +502,12 @@ class AndroidClipboardReceiverService : Service() {
             context.startService(Intent(context, AndroidClipboardReceiverService::class.java).apply {
                 action = ACTION_STOP
             })
+        }
+
+        fun stopFindMyPhoneIntent(context: Context): Intent {
+            return Intent(context, AndroidClipboardReceiverService::class.java).apply {
+                action = ACTION_STOP_FIND_PHONE
+            }
         }
     }
 }

@@ -14,7 +14,11 @@ object AndroidPresenceSender {
     private const val READ_TIMEOUT_MS = 5_000
     private const val MAX_RESPONSE_PREVIEW = 200
 
-    fun sendSavedEndpoint(context: Context, androidReceiverPort: Int): SendResult {
+    fun sendSavedEndpoint(
+        context: Context,
+        androidReceiverPort: Int,
+        findPhoneRinging: Boolean? = null
+    ): SendResult {
         val appContext = context.applicationContext
         val endpoint = ZevClipPreferences.endpoint(appContext)
             ?: return SendResult.Failure("No valid Mac IP and port.")
@@ -23,7 +27,14 @@ object AndroidPresenceSender {
             return SendResult.Failure("No pairing token.")
         }
 
-        val firstResult = send(appContext, endpoint.ipAddress, endpoint.port, pairingToken, androidReceiverPort)
+        val firstResult = send(
+            appContext,
+            endpoint.ipAddress,
+            endpoint.port,
+            pairingToken,
+            androidReceiverPort,
+            findPhoneRinging
+        )
         if (firstResult !is SendResult.Failure || !firstResult.retryableWithDiscovery) {
             return firstResult
         }
@@ -50,7 +61,8 @@ object AndroidPresenceSender {
             rediscoveredEndpoint.ipAddress,
             rediscoveredEndpoint.port,
             pairingToken,
-            androidReceiverPort
+            androidReceiverPort,
+            findPhoneRinging
         )
     }
 
@@ -59,7 +71,8 @@ object AndroidPresenceSender {
         ipAddress: String,
         port: Int,
         pairingToken: String,
-        androidReceiverPort: Int
+        androidReceiverPort: Int,
+        findPhoneRinging: Boolean?
     ): SendResult {
         var connection: HttpURLConnection? = null
 
@@ -81,6 +94,12 @@ object AndroidPresenceSender {
             activeConnection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
             activeConnection.setRequestProperty("X-ZevClip-Token", pairingToken)
             AndroidReceiverIdentityHeaders.apply(context, activeConnection, androidReceiverPort)
+            findPhoneRinging?.let { isRinging ->
+                activeConnection.setRequestProperty(
+                    "X-ZevClip-Find-Phone-Ringing",
+                    isRinging.toString()
+                )
+            }
             activeConnection.setFixedLengthStreamingMode(body.size)
 
             activeConnection.outputStream.use { output ->

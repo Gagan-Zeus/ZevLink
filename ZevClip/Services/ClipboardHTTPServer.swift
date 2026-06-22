@@ -475,6 +475,14 @@ private final class HTTPConnection {
         let batteryPercentage = requestHeaders["x-zevclip-android-battery"]
             .flatMap(Int.init)
             .flatMap { (0...100).contains($0) ? $0 : nil }
+        let findPhoneRinging = requestHeaders["x-zevclip-find-phone-ringing"]
+            .flatMap { value in
+                switch value.lowercased() {
+                case "true": true
+                case "false": false
+                default: nil
+                }
+            }
         let transferCertificateSHA256 = requestHeaders["x-zevlink-transfer-cert"]
             .flatMap { FileTransferCertificates.isValidFingerprint($0) ? $0.lowercased() : nil }
 
@@ -482,6 +490,7 @@ private final class HTTPConnection {
             name: name,
             deviceId: deviceId,
             batteryPercentage: batteryPercentage,
+            findPhoneRinging: findPhoneRinging,
             transferCertificateSHA256: transferCertificateSHA256,
             host: host,
             port: port

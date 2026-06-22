@@ -5,6 +5,7 @@ struct AndroidReceiverEndpoint: Equatable {
     let name: String
     let deviceId: String?
     let batteryPercentage: Int?
+    let findPhoneRinging: Bool?
     let transferCertificateSHA256: String?
     let host: String
     let port: Int
@@ -19,6 +20,7 @@ struct AndroidReceiverEndpoint: Equatable {
             name: name,
             deviceId: deviceId,
             batteryPercentage: batteryPercentage,
+            findPhoneRinging: findPhoneRinging,
             transferCertificateSHA256: transferCertificateSHA256,
             host: host,
             port: port
@@ -183,6 +185,7 @@ final class AndroidReceiverDiscovery: NSObject {
             name: service.name,
             deviceId: normalizedDeviceId(deviceId(from: service)),
             batteryPercentage: batteryPercentage(from: service),
+            findPhoneRinging: nil,
             transferCertificateSHA256: transferCertificateFingerprint(from: service),
             host: host,
             port: service.port

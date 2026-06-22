@@ -5,6 +5,7 @@ final class AndroidClipboardSender: ObservableObject {
     @Published private(set) var status = "Android clipboard sender is idle."
     @Published private(set) var isDiscovering = false
     @Published private(set) var isSending = false
+    @Published private(set) var isFindingPhone = false
     @Published private(set) var resolvedEndpoint: AndroidReceiverEndpoint?
     @Published private(set) var pairedDeviceId: String?
     @Published private(set) var lastSentText: String?
@@ -56,6 +57,9 @@ final class AndroidClipboardSender: ObservableObject {
         discovery = nil
         isDiscovering = false
         resolvedEndpoint = endpoint
+        if let findPhoneRinging = endpoint.findPhoneRinging {
+            setFindingPhone(findPhoneRinging)
+        }
         saveConfirmedAndroidIdentity(
             endpoint.deviceId,
             transferCertificateSHA256: endpoint.transferCertificateSHA256
@@ -245,6 +249,52 @@ final class AndroidClipboardSender: ObservableObject {
                 }
             }
         }
+    }
+
+    func toggleFindMyPhone(completion: ((Bool, String) -> Void)? = nil) {
+        guard let endpoint = resolvedEndpoint else {
+            discoverAndroidReceiver()
+            status = "Rediscovering Android receiver for Find My Phone..."
+            completion?(false, status)
+            return
+        }
+
+        let token = tokenProvider().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !token.isEmpty else {
+            status = "Pairing token is empty; cannot ring Android phone."
+            completion?(false, status)
+            return
+        }
+
+        let action = isFindingPhone ? "stop" : "start"
+        status = action == "start" ? "Asking Android phone to ring..." : "Stopping Android phone ring..."
+        Task { [weak self] in
+            let result = await AndroidClipboardHTTPClient.findMyPhone(
+                action: action,
+                on: endpoint,
+                token: token
+            )
+
+            await MainActor.run {
+                switch result {
+                case .success(let message):
+                    self?.status = message
+                    self?.setFindingPhone(action == "start")
+                    completion?(true, message)
+                case .failure(let message, let isRetryable):
+                    self?.status = message
+                    completion?(false, message)
+                    if isRetryable {
+                        self?.resolvedEndpoint = nil
+                        self?.discoverAndroidReceiver()
+                    }
+                }
+            }
+        }
+    }
+
+    private func setFindingPhone(_ isFinding: Bool) {
+        isFindingPhone = isFinding
     }
 
     private func sendPendingChangeIfPossible() {
@@ -760,6 +810,51 @@ private enum AndroidClipboardHTTPClient {
         }
     }
 
+    static func findMyPhone(
+        action: String,
+        on endpoint: AndroidReceiverEndpoint,
+        token: String
+    ) async -> CallActionResult {
+        guard let url = findPhoneURL(for: endpoint) else {
+            return .failure("Android Find My Phone URL is invalid.", isRetryable: false)
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 5
+        request.setValue(token, forHTTPHeaderField: "X-ZevClip-Token")
+        request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
+        applyMacBatteryHeaders(to: &request)
+        guard let requestBody = try? JSONSerialization.data(withJSONObject: ["action": action]) else {
+            return .failure("Could not encode Find My Phone action.", isRetryable: false)
+        }
+        request.httpBody = requestBody
+
+        do {
+            let (responseBody, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                return .failure("Find My Phone returned an invalid response.", isRetryable: true)
+            }
+
+            let bodyText = String(data: responseBody, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard httpResponse.statusCode == 200 else {
+                let detail = bodyText?.isEmpty == false ? " \(bodyText!)" : ""
+                return .failure(
+                    "Find My Phone failed (\(httpResponse.statusCode)).\(detail)",
+                    isRetryable: isRetryableStatusCode(httpResponse.statusCode)
+                )
+            }
+
+            return .success(bodyText?.isEmpty == false ? bodyText! : "Phone is ringing.")
+        } catch {
+            return .failure(
+                "Could not ring Android phone: \(error.localizedDescription)",
+                isRetryable: true
+            )
+        }
+    }
+
 
     private static func clipboardURL(for endpoint: AndroidReceiverEndpoint) -> URL? {
         url(for: endpoint, path: "/clipboard")
@@ -779,6 +874,10 @@ private enum AndroidClipboardHTTPClient {
 
     private static func mediaControlURL(for endpoint: AndroidReceiverEndpoint) -> URL? {
         url(for: endpoint, path: "/media-control")
+    }
+
+    private static func findPhoneURL(for endpoint: AndroidReceiverEndpoint) -> URL? {
+        url(for: endpoint, path: "/find-phone")
     }
 
     private static func url(for endpoint: AndroidReceiverEndpoint, path: String) -> URL? {
