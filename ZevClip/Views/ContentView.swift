@@ -49,150 +49,153 @@ struct ContentView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            HStack(alignment: .center, spacing: 12) {
-                Circle()
-                    .fill(syncColor)
-                    .frame(width: 11, height: 11)
+        ScrollView(.vertical) {
+            VStack(alignment: .leading, spacing: 20) {
+                HStack(alignment: .center, spacing: 12) {
+                    Circle()
+                        .fill(syncColor)
+                        .frame(width: 11, height: 11)
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("ZevLink")
-                        .font(.title.bold())
-                    Text(syncTitle)
-                        .foregroundStyle(.secondary)
-                }
-
-                Spacer()
-
-                Button(isSyncRunning ? "Stop Sync" : "Start Sync") {
-                    if isSyncRunning {
-                        stopClipboardSync()
-                    } else {
-                        startClipboardSync()
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("ZevLink")
+                            .font(.title.bold())
+                        Text(syncTitle)
+                            .foregroundStyle(.secondary)
                     }
-                }
-                .keyboardShortcut("r", modifiers: [.command])
-                .controlSize(.large)
-            }
 
-            Divider()
+                    Spacer()
 
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Connection")
-                    .font(.headline)
-
-                statusRow("Mac", macStatusText, color: macStatusColor)
-                statusRow("Android", androidStatusText, color: androidStatusColor)
-                statusRow("Last activity", lastActivityText, color: .secondary)
-
-                HStack {
-                    Button("Reconnect Android") {
-                        androidClipboardSender.rediscoverAndroidReceiver()
-                    }
-                    .disabled(androidClipboardSender.isDiscovering)
-
-                    if androidClipboardSender.isDiscovering {
-                        ProgressView()
-                            .scaleEffect(0.65)
-                    }
-                }
-            }
-
-            Divider()
-
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Pair Android")
-                    .font(.headline)
-
-                Text("Scan this once in the Android app.")
-                    .foregroundStyle(.secondary)
-
-                HStack(alignment: .top, spacing: 24) {
-                    PairingQRCodeView(
-                        token: receiver.pairingToken,
-                        deviceId: receiver.deviceId,
-                        transferCertificateSHA256: receiver.transferCertificateSHA256,
-                        showsDetails: false
-                    )
-                    .frame(width: 244, height: 244)
-
-                    VStack(alignment: .leading, spacing: 16) {
-                        Text(receiver.pairingToken.isEmpty ? "Token unavailable" : receiver.pairingToken)
-                            .font(.system(size: 14, design: .monospaced))
-                            .textSelection(.enabled)
-                            .lineLimit(nil)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .padding(12)
-                            .frame(maxWidth: .infinity, alignment: .topLeading)
-                            .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 8))
-
-                        Button("Regenerate Token") {
-                            receiver.regeneratePairingToken()
+                    Button(isSyncRunning ? "Stop Sync" : "Start Sync") {
+                        if isSyncRunning {
+                            stopClipboardSync()
+                        } else {
+                            startClipboardSync()
                         }
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .layoutPriority(1)
+                    .keyboardShortcut("r", modifiers: [.command])
+                    .controlSize(.large)
+                }
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Connection")
+                        .font(.headline)
+
+                    statusRow("Mac", macStatusText, color: macStatusColor)
+                    statusRow("Android", androidStatusText, color: androidStatusColor)
+                    statusRow("Last activity", lastActivityText, color: .secondary)
+
+                    HStack {
+                        Button("Reconnect Android") {
+                            androidClipboardSender.rediscoverAndroidReceiver()
+                        }
+                        .disabled(androidClipboardSender.isDiscovering)
+
+                        if androidClipboardSender.isDiscovering {
+                            ProgressView()
+                                .scaleEffect(0.65)
+                        }
+                    }
+                }
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Pair Android")
+                        .font(.headline)
+
+                    Text("Scan this once in the Android app.")
+                        .foregroundStyle(.secondary)
+
+                    HStack(alignment: .top, spacing: 24) {
+                        PairingQRCodeView(
+                            token: receiver.pairingToken,
+                            deviceId: receiver.deviceId,
+                            transferCertificateSHA256: receiver.transferCertificateSHA256,
+                            showsDetails: false
+                        )
+                        .frame(width: 244, height: 244)
+
+                        VStack(alignment: .leading, spacing: 16) {
+                            Text(receiver.pairingToken.isEmpty ? "Token unavailable" : receiver.pairingToken)
+                                .font(.system(size: 14, design: .monospaced))
+                                .textSelection(.enabled)
+                                .lineLimit(nil)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .padding(12)
+                                .frame(maxWidth: .infinity, alignment: .topLeading)
+                                .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 8))
+
+                            Button("Regenerate Token") {
+                                receiver.regeneratePairingToken()
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .layoutPriority(1)
+                    }
+                }
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Preferences")
+                        .font(.headline)
+
+                    Toggle(
+                        "Show in menu bar",
+                        isOn: Binding(
+                            get: { appSettings.showMenuBarIcon },
+                            set: { appSettings.setShowMenuBarIcon($0) }
+                        )
+                    )
+
+                    Toggle(
+                        "Launch at login",
+                        isOn: Binding(
+                            get: { appSettings.launchAtLoginEnabled },
+                            set: { appSettings.setLaunchAtLoginEnabled($0) }
+                        )
+                    )
+
+                    Text(appSettings.launchAtLoginStatus)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Toggle(
+                        "Allow phone remote control",
+                        isOn: Binding(
+                            get: { appSettings.remoteControlEnabled },
+                            set: { appSettings.setRemoteControlEnabled($0) }
+                        )
+                    )
+
+                    Text(
+                        "Lets your paired Android phone lock, sleep, restart, shut down, adjust volume, control media, and open URLs on this Mac."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                    Toggle(
+                        "Accept incoming file transfers automatically",
+                        isOn: Binding(
+                            get: { appSettings.fileTransferAutoAccept },
+                            set: { appSettings.setFileTransferAutoAccept($0) }
+                        )
+                    )
+
+                    Toggle(
+                        "Skip already verified chunks on resume",
+                        isOn: Binding(
+                            get: { appSettings.fileTransferChunkDeduplication },
+                            set: { appSettings.setFileTransferChunkDeduplication($0) }
+                        )
+                    )
                 }
             }
-
-            Divider()
-
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Preferences")
-                    .font(.headline)
-
-                Toggle(
-                    "Show in menu bar",
-                    isOn: Binding(
-                        get: { appSettings.showMenuBarIcon },
-                        set: { appSettings.setShowMenuBarIcon($0) }
-                    )
-                )
-
-                Toggle(
-                    "Launch at login",
-                    isOn: Binding(
-                        get: { appSettings.launchAtLoginEnabled },
-                        set: { appSettings.setLaunchAtLoginEnabled($0) }
-                    )
-                )
-
-                Text(appSettings.launchAtLoginStatus)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Toggle(
-                    "Allow phone remote control",
-                    isOn: Binding(
-                        get: { appSettings.remoteControlEnabled },
-                        set: { appSettings.setRemoteControlEnabled($0) }
-                    )
-                )
-
-                Text("Lets your paired Android phone lock, sleep, restart, shut down, adjust volume, control media, and open URLs on this Mac.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Toggle(
-                    "Accept incoming file transfers automatically",
-                    isOn: Binding(
-                        get: { appSettings.fileTransferAutoAccept },
-                        set: { appSettings.setFileTransferAutoAccept($0) }
-                    )
-                )
-
-                Toggle(
-                    "Skip already verified chunks on resume",
-                    isOn: Binding(
-                        get: { appSettings.fileTransferChunkDeduplication },
-                        set: { appSettings.setFileTransferChunkDeduplication($0) }
-                    )
-                )
-            }
-
-            Spacer(minLength: 0)
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(24)
         .frame(minWidth: 500, minHeight: 500)
     }
 
