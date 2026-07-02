@@ -24,6 +24,15 @@
         <item name="android:windowDisablePreview">true</item>
     </style>
 
+    <style name="Theme.ZevClip.Scanner" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:statusBarColor">#000000</item>
+        <item name="android:navigationBarColor">#000000</item>
+    </style>
+
     <style name="Animation.ZevAssistantSheet" parent="@android:style/Animation.Dialog">
         <item name="android:windowEnterAnimation">@anim/zev_assistant_sheet_enter</item>
         <item name="android:windowExitAnimation">@anim/zev_assistant_sheet_exit</item>

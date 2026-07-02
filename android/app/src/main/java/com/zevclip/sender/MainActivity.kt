@@ -33,9 +33,6 @@ import android.widget.ScrollView
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
-import com.google.mlkit.vision.barcode.common.Barcode
-import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
-import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import com.zevclip.sender.airplay.AirPlayIdentityStore
 import com.zevclip.sender.airplay.AirPlayPairSetupClient
 import com.zevclip.sender.airplay.AirPlayTarget
@@ -237,7 +234,19 @@ class MainActivity : Activity() {
     @Deprecated("Deprecated in Android framework, but still the compatibility path for this Activity.")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == REQUEST_AIRPLAY_CAPTURE) {
+        if (requestCode == REQUEST_PAIRING_QR_SCAN) {
+            scanPairingQrButton.isEnabled = true
+            if (resultCode == RESULT_OK) {
+                val rawValue = data?.getStringExtra("SCAN_RESULT").orEmpty()
+                if (rawValue.isBlank()) {
+                    showFailure(getString(R.string.qr_scan_empty))
+                } else {
+                    savePairingQrPayload(rawValue)
+                }
+            } else {
+                showFailure(getString(R.string.qr_scan_cancelled))
+            }
+        } else if (requestCode == REQUEST_AIRPLAY_CAPTURE) {
             if (resultCode == RESULT_OK && data != null) {
                 AirPlayAudioCaptureService.start(this, resultCode, data)
                 refreshSyncStatuses()
@@ -644,30 +653,12 @@ class MainActivity : Activity() {
         scanPairingQrButton.isEnabled = false
         showPageStatus(getString(R.string.qr_scan_starting), colors.muted)
 
-        val options = GmsBarcodeScannerOptions.Builder()
-            .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
-            .enableAutoZoom()
-            .build()
-
-        GmsBarcodeScanning.getClient(this, options)
-            .startScan()
-            .addOnSuccessListener { barcode ->
-                scanPairingQrButton.isEnabled = true
-                val rawValue = barcode.rawValue
-                if (rawValue.isNullOrBlank()) {
-                    showFailure(getString(R.string.qr_scan_empty))
-                } else {
-                    savePairingQrPayload(rawValue)
-                }
-            }
-            .addOnCanceledListener {
-                scanPairingQrButton.isEnabled = true
-                showFailure(getString(R.string.qr_scan_cancelled))
-            }
-            .addOnFailureListener { error ->
-                scanPairingQrButton.isEnabled = true
-                showFailure(getString(R.string.qr_scan_failed, error.message ?: "scanner failed"))
-            }
+        try {
+            startActivityForResult(Intent(this, QrScannerActivity::class.java), REQUEST_PAIRING_QR_SCAN)
+        } catch (error: ActivityNotFoundException) {
+            scanPairingQrButton.isEnabled = true
+            showFailure(getString(R.string.qr_scan_failed, error.message ?: "scanner failed"))
+        }
     }
 
     private fun savePairingQrPayload(rawValue: String) {
@@ -2026,6 +2017,7 @@ class MainActivity : Activity() {
         const val REQUEST_AIRPLAY_SCREEN_CAPTURE = 2006
         const val REQUEST_SMS_OTP_MIRROR = 2007
         const val REQUEST_ALARM_AUDIO = 2008
+        const val REQUEST_PAIRING_QR_SCAN = 2009
         val FALLBACK_BACKGROUND: Int = Color.rgb(247, 248, 250)
         val FALLBACK_TEXT: Int = Color.rgb(26, 28, 32)
         val FALLBACK_MUTED: Int = Color.rgb(91, 95, 103)

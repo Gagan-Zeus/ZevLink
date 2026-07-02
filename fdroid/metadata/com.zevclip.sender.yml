@@ -1,0 +1,23 @@
+Categories:
+  - Connectivity
+  - Phone & SMS
+License: MIT
+AuthorName: Gagan Deep S
+SourceCode: https://github.com/Gagan-Zeus/ZevLink
+IssueTracker: https://github.com/Gagan-Zeus/ZevLink/issues
+
+RepoType: git
+Repo: https://github.com/Gagan-Zeus/ZevLink.git
+
+Builds:
+  - versionName: 3.1.1
+    versionCode: 32
+    commit: v3.1.1
+    subdir: android
+    gradle:
+      - yes
+
+AutoUpdateMode: Version
+UpdateCheckMode: Tags
+CurrentVersion: 3.1.1
+CurrentVersionCode: 32

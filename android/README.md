@@ -2,7 +2,7 @@
 
 This native Kotlin Android app connects an Android phone to the ZevLink macOS app over the local network.
 
-Current release version: **3.1.0**.
+Current release version: **3.1.1**.
 
 It includes:
 
@@ -17,7 +17,7 @@ It includes:
 - Shared-token pairing through the compatibility header `X-ZevClip-Token`.
 - Quick Settings **Sync Clipboard** tile as a reliable manual fallback.
 
-The app uses Android platform APIs and `HttpURLConnection`. QR scanning uses Google Play services Code Scanner, which provides the scanner UI without requiring ZevLink to request camera permission.
+The app uses Android platform APIs, `HttpURLConnection`, and ZXing core for local QR pairing. Manual pairing remains available.
 
 The app currently targets Android 16 / API 36. When ZevLink later targets Android 17 / API 37, it must add the new local-network runtime permission:
 <https://developer.android.com/privacy-and-security/local-network-permission>

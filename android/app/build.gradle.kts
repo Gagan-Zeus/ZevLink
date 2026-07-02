@@ -10,8 +10,8 @@ android {
         applicationId = "com.zevclip.sender"
         minSdk = 26
         targetSdk = 36
-        versionCode = 31
-        versionName = "3.1.0"
+        versionCode = 32
+        versionName = "3.1.1"
     }
 
     buildTypes {
@@ -31,7 +31,7 @@ android {
 }
 
 dependencies {
-    implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
+    implementation("com.google.zxing:core:3.5.3")
     implementation("org.bouncycastle:bcprov-jdk18on:1.81")
     testImplementation("junit:junit:4.13.2")
 }

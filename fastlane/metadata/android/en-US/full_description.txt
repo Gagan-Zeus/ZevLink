@@ -1,0 +1,18 @@
+ZevLink connects an Android phone and a Mac directly over your local network.
+
+It provides cross-device conveniences without an account, cloud relay, analytics, or tracking. Pair once with a QR code or manual token entry, then sync clipboard content, send files, mirror Android notifications to macOS, control calls from the Mac, and stream Android audio or screen output to AirPlay-capable receivers.
+
+Features:
+
+* Android-to-Mac clipboard text sync
+* Mac-to-Android clipboard text and image sync
+* File transfer from Android share sheets to the paired Mac
+* Android notification mirroring as native macOS notifications
+* Android call controls from the Mac
+* Android battery and connection presence in the macOS menu bar
+* AirPlay screen mirroring and audio streaming from Android
+* Bonjour/mDNS rediscovery across Wi-Fi, LAN, and hotspot changes
+
+ZevLink is local-first. Clipboard, notification, call, and file-transfer data is exchanged only between your paired devices on networks you control.
+
+Security note: local control traffic currently uses plain HTTP plus a pairing token. Use ZevLink only on trusted networks.

@@ -32,7 +32,7 @@ It works over the same Wi-Fi/LAN, including a phone hotspot. Pair once with the 
 
 ## Downloads
 
-Latest release: **3.1.0**.
+Latest release: **3.1.1**.
 
 Download builds from GitHub Releases.
 
@@ -48,7 +48,7 @@ Download builds from GitHub Releases.
 
 - Android 8.0+ for clipboard, notifications, calls, and local networking.
 - Android 10+ for Android audio/screen capture features.
-- Google Play services for QR code scanning.
+- Camera permission for QR pairing. Manual pairing also works.
 - Accessibility permission for automatic Android to Mac clipboard sync.
 - Notification access for notification mirroring.
 - Phone permissions for call controls.

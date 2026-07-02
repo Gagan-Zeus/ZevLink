@@ -197,10 +197,13 @@
     <string name="qr_pairing_title">QR pairing</string>
     <string name="qr_pairing_instructions">Scan the QR code shown in ZevLink Settings on the Mac to save the Mac identity, host, port, and pairing token automatically.</string>
     <string name="scan_pairing_qr">Scan Mac QR</string>
-    <string name="qr_scan_starting">Opening QR scanner…</string>
+    <string name="qr_scan_starting">Opening QR scanner...</string>
     <string name="qr_scan_empty">QR code did not contain text.</string>
     <string name="qr_scan_cancelled">QR scan cancelled.</string>
     <string name="qr_scan_failed">QR scan failed: %1$s</string>
+    <string name="qr_scanner_camera_needed">Camera permission is needed to scan the Mac QR code.</string>
+    <string name="qr_scanner_align">Align the Mac QR code inside the frame.</string>
+    <string name="cancel">Cancel</string>
     <string name="qr_scan_invalid">QR code is not valid ZevLink pairing data.</string>
     <string name="qr_pairing_checking">Checking Mac reachability…</string>
     <string name="qr_pairing_saved">Saved %1$s at %2$s:%3$d.</string>

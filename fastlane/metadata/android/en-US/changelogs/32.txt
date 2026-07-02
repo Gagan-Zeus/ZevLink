@@ -1,0 +1,1 @@
+Removed the Google Play services QR scanner dependency for F-Droid compatibility. QR pairing now uses ZevLink's built-in local scanner or manual pairing. Local-network clipboard, AirPlay, notification, call, and file-transfer features remain unchanged.
