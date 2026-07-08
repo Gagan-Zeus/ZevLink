@@ -2,10 +2,8 @@ package com.zevclip.sender
 
 import android.app.NotificationManager
 import android.app.Service
-import android.Manifest
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.media.AudioRecord
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
@@ -18,9 +16,7 @@ import android.view.Surface
 import android.view.WindowManager
 import com.zevclip.sender.airplay.AirPlayClock
 import com.zevclip.sender.airplay.AirPlayAlacEncoder
-import com.zevclip.sender.airplay.AirPlayIdentityStore
 import com.zevclip.sender.airplay.AirPlayMirrorSessionController
-import com.zevclip.sender.airplay.AirPlayMirrorStreamClient
 import com.zevclip.sender.airplay.AirPlayPcmStreamer
 import com.zevclip.sender.airplay.AirPlayRtpAudioPacketizer
 import com.zevclip.sender.airplay.AirPlayScreenEncoder
@@ -28,6 +24,7 @@ import com.zevclip.sender.airplay.AirPlaySyncSender
 import com.zevclip.sender.airplay.AirPlayTarget
 import com.zevclip.sender.airplay.AirPlayUdpPacketSender
 import com.zevclip.sender.airplay.CryptoPrimitives
+import com.zevclip.sender.airplay.ZevLinkMirrorStreamClient
 import java.net.DatagramSocket
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
@@ -40,7 +37,7 @@ class AirPlayScreenMirrorService : Service() {
     private var mediaProjection: MediaProjection? = null
     private var projectionCallback: MediaProjection.Callback? = null
     private var encoder: AirPlayScreenEncoder? = null
-    private var mirrorClient: AirPlayMirrorStreamClient? = null
+    private var mirrorClient: ZevLinkMirrorStreamClient? = null
     private var mirrorSession: AirPlayMirrorSessionController? = null
     private var mirrorAudioRecord: AudioRecord? = null
     private var mirrorAudioSetupWorker: Thread? = null
@@ -102,20 +99,13 @@ class AirPlayScreenMirrorService : Service() {
             finishWithStatus(getString(R.string.airplay_capture_android_q_required))
             return
         }
-        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            finishWithStatus(getString(R.string.airplay_capture_record_audio_needed))
-            return
-        }
-
         val endpoint = ZevClipPreferences.endpoint(this)
-        val pairingCode = intent.getStringExtra(EXTRA_SCREEN_CODE).orEmpty().trim()
-        if (endpoint == null || pairingCode.isBlank()) {
-            finishWithStatus(getString(R.string.airplay_screen_code_missing))
+        if (endpoint == null) {
+            finishWithStatus(getString(R.string.airplay_capture_pairing_needed))
             return
         }
 
-        Log.i(TAG, "Starting AirPlay screen mirror; enabling local playback silencer.")
-        localPlaybackSilencer = LocalPlaybackSilencer(this).also { it.start() }
+        Log.i(TAG, "Starting ZevLink windowed screen mirror.")
         running.set(true)
         mirrorFailure = null
         ZevClipPreferences.setAirPlayScreenMirroring(this, true)
@@ -135,15 +125,8 @@ class AirPlayScreenMirrorService : Service() {
                     projection.registerCallback(callback, Handler(Looper.getMainLooper()))
                 }
 
-                val identity = AirPlayIdentityStore.getOrCreate(this)
-                val target = AirPlayTarget(
-                    host = endpoint.ipAddress,
-                    port = AirPlayTarget.DEFAULT_RTSP_PORT,
-                    name = "Paired Mac AirPlay"
-                )
-
                 updateStatus(getString(R.string.airplay_screen_mirror_preparing))
-                startAirPlayPipeline(projection, target, identity, pairingCode, captureSize())
+                startZevLinkWindowPipeline(projection, endpoint.ipAddress, captureSize())
 
                 updateStatus(getString(R.string.airplay_screen_mirror_live))
                 while (running.get()) {
@@ -166,55 +149,88 @@ class AirPlayScreenMirrorService : Service() {
         }
     }
 
-    private fun startAirPlayPipeline(
+    private fun startZevLinkWindowPipeline(
         projection: MediaProjection,
-        target: AirPlayTarget,
-        identity: com.zevclip.sender.airplay.AirPlayIdentity,
-        pairingCode: String,
+        host: String,
         captureSize: MirrorCaptureSize
     ) {
-        val nextMirrorSession = AirPlayMirrorSessionController(target, identity, pairingCode)
-        val audioControlSocket = if (ENABLE_MIRROR_SESSION_AUDIO) DatagramSocket() else null
-        mirrorAudioControlSocket = audioControlSocket
-        val preparedMirror = nextMirrorSession.prepare(audioControlPort = audioControlSocket?.localPort)
-        mirrorSession = nextMirrorSession
-
-        val nextMirrorClient = AirPlayMirrorStreamClient(
-            target = target,
-            identity = identity,
+        val nextMirrorClient = ZevLinkMirrorStreamClient(
+            host = host,
             width = captureSize.width,
             height = captureSize.height,
-            running = running,
-            streamPort = preparedMirror.dataPort,
-            dataStreamKey = preparedMirror.dataStreamKey,
-            onFatalError = { error ->
-                val message = error.message ?: error.javaClass.simpleName
-                mirrorFailure = message
-                updateStatus(getString(R.string.airplay_screen_mirror_failed, message))
-            }
+            running = running
         ).also { it.connect() }
         mirrorClient = nextMirrorClient
-        nextMirrorSession.recordBestEffort()
         startEncoder(projection, nextMirrorClient, captureSize)
-        val preparedAudio = preparedMirror.audio
-        if (ENABLE_MIRROR_SESSION_AUDIO && preparedAudio != null && audioControlSocket != null) {
-            startMirrorAudioAsync(projection, target, identity, preparedAudio, audioControlSocket)
-        } else if (ENABLE_MIRROR_SESSION_AUDIO) {
-            Log.w(TAG, "Mac did not return an AirPlay mirror audio stream; continuing video-only.")
-            runCatching { audioControlSocket?.close() }
-            mirrorAudioControlSocket = null
-            runCatching { localPlaybackSilencer?.close() }
-            localPlaybackSilencer = null
-        }
+        startZevLinkWindowAudio(projection, nextMirrorClient)
     }
 
     private fun closeAirPlayPipeline() {
         stopEncoderOnly()
+        stopMirrorAudio()
         runCatching { mirrorClient?.close() }
         mirrorClient = null
         runCatching { mirrorSession?.close() }
         mirrorSession = null
-        stopMirrorAudio()
+    }
+
+    private fun startZevLinkWindowAudio(
+        projection: MediaProjection,
+        streamClient: ZevLinkMirrorStreamClient
+    ) {
+        runCatching {
+            val record = AirPlayPlaybackCapture.createAudioRecord(projection)
+            mirrorAudioRecord = record
+            if (localPlaybackSilencer == null) {
+                localPlaybackSilencer = LocalPlaybackSilencer(this).also { it.start() }
+            }
+            streamClient.setAudioFormat(
+                sampleRate = AirPlayPlaybackCapture.SAMPLE_RATE,
+                channels = ZEVLINK_AUDIO_CHANNELS
+            )
+            record.startRecording()
+            mirrorAudioWorker = thread(name = "zevlink-screen-window-audio", isDaemon = true) {
+                runCatching {
+                    streamZevLinkWindowAudio(record, streamClient)
+                }.onFailure { error ->
+                    if (running.get()) {
+                        val message = error.message ?: error.javaClass.simpleName
+                        Log.w(TAG, "ZevLink screen mirror audio failed; keeping video mirror alive", error)
+                        stopMirrorAudio()
+                        updateStatus("Screen mirroring live. Audio failed: $message")
+                    }
+                }
+            }
+        }.onFailure { error ->
+            if (running.get()) {
+                val message = error.message ?: error.javaClass.simpleName
+                Log.w(TAG, "ZevLink screen mirror audio setup failed; keeping video mirror alive", error)
+                stopMirrorAudio()
+                updateStatus("Screen mirroring live. Audio failed: $message")
+            }
+        }
+    }
+
+    private fun streamZevLinkWindowAudio(record: AudioRecord, streamClient: ZevLinkMirrorStreamClient) {
+        val source = AirPlayPlaybackCapture.PacketSource(record, running)
+        val buffer = ByteArray(AirPlayPlaybackCapture.PACKET_BYTES)
+        var framesSent = 0L
+        source.use {
+            while (running.get()) {
+                val frameCount = it.readPacket(buffer)
+                if (frameCount < 0) break
+                if (frameCount == 0) continue
+                val bytes = frameCount * AirPlayPlaybackCapture.BYTES_PER_FRAME
+                val presentationTimeUs = framesSent * 1_000_000L / AirPlayPlaybackCapture.SAMPLE_RATE
+                streamClient.writeAudioPcm(
+                    pcm16LittleEndian = buffer.copyOf(bytes),
+                    sampleRate = AirPlayPlaybackCapture.SAMPLE_RATE,
+                    channels = ZEVLINK_AUDIO_CHANNELS,
+                    presentationTimeUs = presentationTimeUs
+                )
+                framesSent += frameCount
+            }
+        }
     }
 
     private fun startMirrorAudioAsync(
@@ -360,7 +376,7 @@ class AirPlayScreenMirrorService : Service() {
 
     private fun startEncoder(
         projection: MediaProjection,
-        streamClient: AirPlayMirrorStreamClient,
+        streamClient: ZevLinkMirrorStreamClient,
         captureSize: MirrorCaptureSize
     ) {
         synchronized(encoderLock) {
@@ -526,23 +542,22 @@ class AirPlayScreenMirrorService : Service() {
         private const val ACTION_STOP = "com.zevclip.sender.airplay.screen.STOP"
         private const val EXTRA_RESULT_CODE = "result_code"
         private const val EXTRA_RESULT_DATA = "result_data"
-        private const val EXTRA_SCREEN_CODE = "screen_code"
         private const val LEGACY_AIRPLAY_NOTIFICATION_ID = 2042
         private const val ENCODER_RESTART_JOIN_MS = 700L
         private const val AUDIO_STOP_JOIN_MS = 700L
         private const val CAPTURE_SIZE_POLL_MS = 300L
+        private const val ZEVLINK_AUDIO_CHANNELS = 2
         private const val ENABLE_MIRROR_SESSION_AUDIO = true
         private const val MIRROR_AUDIO_LATENCY_FRAMES = 8_820L
         private const val MAX_PHONE_CAPTURE_LONG_EDGE = 3840
         private const val MAX_PHONE_CAPTURE_PIXELS = 3840 * 2160
         private const val TAG = "ZevClipAirPlayScreen"
 
-        fun start(context: Context, resultCode: Int, resultData: Intent, screenCode: String) {
+        fun start(context: Context, resultCode: Int, resultData: Intent) {
             val intent = Intent(context, AirPlayScreenMirrorService::class.java)
                 .setAction(ACTION_START)
                 .putExtra(EXTRA_RESULT_CODE, resultCode)
                 .putExtra(EXTRA_RESULT_DATA, resultData)
-                .putExtra(EXTRA_SCREEN_CODE, screenCode.trim())
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
             } else {

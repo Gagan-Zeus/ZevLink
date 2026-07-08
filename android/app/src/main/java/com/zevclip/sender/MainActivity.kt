@@ -33,9 +33,6 @@ import android.widget.ScrollView
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
-import com.zevclip.sender.airplay.AirPlayIdentityStore
-import com.zevclip.sender.airplay.AirPlayPairSetupClient
-import com.zevclip.sender.airplay.AirPlayTarget
 import com.zevclip.sender.filetransfer.FileTransferPeerPinStore
 import java.text.DateFormat
 import java.util.Date
@@ -79,7 +76,6 @@ class MainActivity : Activity() {
     private var airPlayBroadcastReceivers: List<AirPlayDiscoveredReceiver> = emptyList()
     private val selectedAirPlayBroadcastReceivers = linkedSetOf<String>()
     private var pendingAirPlayBroadcastTargets: List<AirPlayBroadcastAudioService.TargetSpec> = emptyList()
-    private var pendingAirPlayScreenCode: String? = null
     private var pendingAirPlayCaptureAfterPermission: PendingAirPlayCapture? = null
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -272,20 +268,9 @@ class MainActivity : Activity() {
             }
         } else if (requestCode == REQUEST_AIRPLAY_SCREEN_CAPTURE) {
             if (resultCode == RESULT_OK && data != null) {
-                val screenCode = pendingAirPlayScreenCode.orEmpty()
-                pendingAirPlayScreenCode = null
-                if (screenCode.isBlank()) {
-                    ZevClipPreferences.setAirPlayTestStatus(
-                        this,
-                        getString(R.string.airplay_screen_code_missing)
-                    )
-                    refreshSyncStatuses()
-                    return
-                }
-                AirPlayScreenMirrorService.start(this, resultCode, data, screenCode)
+                AirPlayScreenMirrorService.start(this, resultCode, data)
                 refreshSyncStatuses()
             } else {
-                pendingAirPlayScreenCode = null
                 ZevClipPreferences.setAirPlayTestStatus(
                     this,
                     getString(R.string.airplay_capture_permission_missing)
@@ -1132,6 +1117,11 @@ class MainActivity : Activity() {
             return
         }
 
+        if (ZevClipPreferences.isAirPlayScreenMirroring(this)) {
+            AirPlayScreenMirrorService.stop(this)
+            ZevClipPreferences.setAirPlayScreenMirroring(this, false)
+        }
+
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             pendingAirPlayCaptureAfterPermission = PendingAirPlayCapture.Audio
             requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), REQUEST_RECORD_AUDIO)
@@ -1163,17 +1153,17 @@ class MainActivity : Activity() {
             return
         }
 
-        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            pendingAirPlayCaptureAfterPermission = PendingAirPlayCapture.Screen
-            requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), REQUEST_RECORD_AUDIO)
-            ZevClipPreferences.setAirPlayTestStatus(this, getString(R.string.airplay_capture_record_audio_needed))
+        val endpoint = ZevClipPreferences.endpoint(this)
+        if (endpoint == null) {
+            ZevClipPreferences.setAirPlayTestStatus(this, getString(R.string.airplay_capture_pairing_needed))
             refreshSyncStatuses()
             return
         }
 
-        val endpoint = ZevClipPreferences.endpoint(this)
-        if (endpoint == null) {
-            ZevClipPreferences.setAirPlayTestStatus(this, getString(R.string.airplay_capture_pairing_needed))
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            pendingAirPlayCaptureAfterPermission = PendingAirPlayCapture.Screen
+            requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), REQUEST_RECORD_AUDIO)
+            ZevClipPreferences.setAirPlayTestStatus(this, getString(R.string.airplay_capture_record_audio_needed))
             refreshSyncStatuses()
             return
         }
@@ -1187,53 +1177,12 @@ class MainActivity : Activity() {
             ZevClipPreferences.setAirPlayBroadcastStatus(this, getString(R.string.airplay_broadcast_stopped))
         }
 
-        requestScreenAirPlayCode(endpoint)
-    }
-
-    private fun requestScreenAirPlayCode(endpoint: Endpoint) {
-        ZevClipPreferences.setAirPlayTestStatus(this, getString(R.string.airplay_screen_code_waiting))
+        ZevClipPreferences.setAirPlayTestStatus(this, getString(R.string.airplay_screen_mirror_connecting))
         refreshSyncStatuses()
-        thread(name = "zevclip-airplay-screen-code", isDaemon = true) {
-            val promptStarted = runCatching {
-                val identity = AirPlayIdentityStore.getOrCreate(applicationContext)
-                val target = AirPlayTarget(
-                    host = endpoint.ipAddress,
-                    port = AirPlayTarget.DEFAULT_RTSP_PORT,
-                    name = "Paired Mac AirPlay"
-                )
-                AirPlayPairSetupClient(target, identity).use { setup ->
-                    setup.pairPinStart()
-                }
-            }.getOrDefault(false)
-            runOnUiThread {
-                showScreenAirPlayCodeDialog(promptStarted)
-            }
-        }
-    }
-
-    private fun showScreenAirPlayCodeDialog(promptStarted: Boolean) {
-        AirPlayScreenCodeDialog.show(
-            activity = this,
-            promptStarted = promptStarted,
-            onCancel = {
-                pendingAirPlayScreenCode = null
-                ZevClipPreferences.setAirPlayTestStatus(this, getString(R.string.airplay_screen_mirror_stopped))
-                refreshSyncStatuses()
-            },
-            onMissingCode = {
-                ZevClipPreferences.setAirPlayTestStatus(this, getString(R.string.airplay_screen_code_missing))
-                refreshSyncStatuses()
-            },
-            onCode = { code ->
-                pendingAirPlayScreenCode = code
-                val projectionManager = getSystemService(MediaProjectionManager::class.java)
-                ZevClipPreferences.setAirPlayTestStatus(this, getString(R.string.airplay_screen_mirror_connecting))
-                refreshSyncStatuses()
-                startActivityForResult(
-                    projectionManager.createScreenCaptureIntent(),
-                    REQUEST_AIRPLAY_SCREEN_CAPTURE
-                )
-            }
+        val projectionManager = getSystemService(MediaProjectionManager::class.java)
+        startActivityForResult(
+            projectionManager.createScreenCaptureIntent(),
+            REQUEST_AIRPLAY_SCREEN_CAPTURE
         )
     }
 

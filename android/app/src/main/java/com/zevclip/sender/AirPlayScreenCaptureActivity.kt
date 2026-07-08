@@ -13,14 +13,9 @@ import android.view.Gravity
 import android.view.View
 import android.view.Window
 import android.view.WindowManager
-import com.zevclip.sender.airplay.AirPlayIdentityStore
-import com.zevclip.sender.airplay.AirPlayPairSetupClient
-import com.zevclip.sender.airplay.AirPlayTarget
-import kotlin.concurrent.thread
 
 class AirPlayScreenCaptureActivity : Activity() {
     private var requestedCapture = false
-    private var screenCode: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         requestWindowFeature(Window.FEATURE_NO_TITLE)
@@ -35,28 +30,12 @@ class AirPlayScreenCaptureActivity : Activity() {
         overridePendingTransition(0, 0)
     }
 
-    override fun onRequestPermissionsResult(
-        requestCode: Int,
-        permissions: Array<out String>,
-        grantResults: IntArray
-    ) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode != REQUEST_RECORD_AUDIO) return
-        if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
-            startScreenMirror()
-        } else {
-            updateStatus(getString(R.string.airplay_capture_record_audio_needed))
-            finish()
-        }
-    }
-
     @Deprecated("Deprecated in Android framework, but still the compatibility path for this Activity.")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode != REQUEST_SCREEN_CAPTURE) return
-        val code = screenCode.orEmpty()
-        if (resultCode == RESULT_OK && data != null && code.length == 4) {
-            AirPlayScreenMirrorService.start(this, resultCode, data, code)
+        if (resultCode == RESULT_OK && data != null) {
+            AirPlayScreenMirrorService.start(this, resultCode, data)
         } else {
             updateStatus(getString(R.string.airplay_capture_permission_missing))
         }
@@ -76,10 +55,6 @@ class AirPlayScreenCaptureActivity : Activity() {
             finish()
             return
         }
-        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), REQUEST_RECORD_AUDIO)
-            return
-        }
         val endpoint = ZevClipPreferences.endpoint(this)
         if (endpoint == null) {
             updateStatus(getString(R.string.airplay_capture_pairing_needed))
@@ -92,45 +67,34 @@ class AirPlayScreenCaptureActivity : Activity() {
         if (ZevClipPreferences.isAirPlayBroadcastStreaming(this)) {
             AirPlayBroadcastAudioService.stop(this)
         }
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), REQUEST_RECORD_AUDIO)
+            updateStatus(getString(R.string.airplay_capture_record_audio_needed))
+            return
+        }
 
         requestedCapture = true
-        updateStatus(getString(R.string.airplay_screen_code_waiting))
-        thread(name = "zevclip-airplay-screen-code", isDaemon = true) {
-            val promptStarted = runCatching {
-                val identity = AirPlayIdentityStore.getOrCreate(applicationContext)
-                val target = AirPlayTarget(
-                    host = endpoint.ipAddress,
-                    port = AirPlayTarget.DEFAULT_RTSP_PORT,
-                    name = "Paired Mac AirPlay"
-                )
-                AirPlayPairSetupClient(target, identity).use { it.pairPinStart() }
-            }.getOrDefault(false)
-            runOnUiThread { showCodeDialog(promptStarted) }
-        }
+        updateStatus(getString(R.string.airplay_screen_mirror_connecting))
+        val projectionManager = getSystemService(MediaProjectionManager::class.java)
+        startActivityForResult(
+            projectionManager.createScreenCaptureIntent(),
+            REQUEST_SCREEN_CAPTURE
+        )
     }
 
-    private fun showCodeDialog(promptStarted: Boolean) {
-        if (isFinishing || isDestroyed) return
-        AirPlayScreenCodeDialog.show(
-            activity = this,
-            promptStarted = promptStarted,
-            onCancel = {
-                updateStatus(getString(R.string.airplay_screen_mirror_stopped))
-                finish()
-            },
-            onMissingCode = {
-                updateStatus(getString(R.string.airplay_screen_code_missing))
-            },
-            onCode = { code ->
-                screenCode = code
-                updateStatus(getString(R.string.airplay_screen_mirror_connecting))
-                val projectionManager = getSystemService(MediaProjectionManager::class.java)
-                startActivityForResult(
-                    projectionManager.createScreenCaptureIntent(),
-                    REQUEST_SCREEN_CAPTURE
-                )
-            }
-        )
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != REQUEST_RECORD_AUDIO) return
+        if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
+            startScreenMirror()
+        } else {
+            updateStatus(getString(R.string.airplay_capture_record_audio_needed))
+            finish()
+        }
     }
 
     private fun updateStatus(message: String) {
@@ -153,7 +117,7 @@ class AirPlayScreenCaptureActivity : Activity() {
     }
 
     companion object {
-        private const val REQUEST_RECORD_AUDIO = 3201
         private const val REQUEST_SCREEN_CAPTURE = 3202
+        private const val REQUEST_RECORD_AUDIO = 3203
     }
 }

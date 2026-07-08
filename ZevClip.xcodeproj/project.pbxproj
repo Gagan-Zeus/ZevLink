@@ -33,6 +33,7 @@
 		F1A2B3C4D5E6F708192A3B4D /* FileTransferStateMachine.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A2B3C4D5E6F708192A3B4F /* FileTransferStateMachine.swift */; };
 		F35C75705FE3D682B27E4964 /* AndroidClipboardSender.swift in Sources */ = {isa = PBXBuildFile; fileRef = 216D04B84726F014340F6DE2 /* AndroidClipboardSender.swift */; };
 		F720DDC4973512A61918258B /* ClipboardHTTPServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BAF94C62FB5C5E506492DFD /* ClipboardHTTPServer.swift */; };
+		F8C1A5019B75456C8AE50101 /* ScreenMirrorReceiver.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8C1A5009B75456C8AE50101 /* ScreenMirrorReceiver.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -64,6 +65,7 @@
 		F1A2B3C4D5E6F708192A3B56 /* FileTransferSender.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTransferSender.swift; sourceTree = "<group>"; };
 		F1A2B3C4D5E6F708192A3B4F /* FileTransferStateMachine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTransferStateMachine.swift; sourceTree = "<group>"; };
 		F1A2B3C4D5E6F708192A3B52 /* FileTransferSecurity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTransferSecurity.swift; sourceTree = "<group>"; };
+		F8C1A5009B75456C8AE50101 /* ScreenMirrorReceiver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenMirrorReceiver.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -161,6 +163,7 @@
 				1077912024FDF76610651B40 /* MacClipboardWatcher.swift */,
 				7FDB42DA0110186B4DAEAF31 /* MacNotificationPresenter.swift */,
 				D349EA03D0A76DC6B676F25E /* PairingTokenKeychain.swift */,
+				F8C1A5009B75456C8AE50101 /* ScreenMirrorReceiver.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -254,6 +257,7 @@
 				A4082A7C2B57560785213E49 /* MenuBarContentView.swift in Sources */,
 				A801C940E295D9F6D3AE997A /* PairingQRCodeView.swift in Sources */,
 				3F129658B18A045EB75D744E /* PairingTokenKeychain.swift in Sources */,
+				F8C1A5019B75456C8AE50101 /* ScreenMirrorReceiver.swift in Sources */,
 				C405F78AD025A73FDB6198B8 /* ZevClipApp.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

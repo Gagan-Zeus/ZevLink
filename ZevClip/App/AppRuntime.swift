@@ -7,6 +7,14 @@ final class ZevClipRuntime {
     static let shared = ZevClipRuntime()
 
     let receiver = ClipboardReceiver()
+    private let screenMirrorWindowController = ScreenMirrorWindowController()
+    private lazy var screenMirrorReceiver: ScreenMirrorReceiver = {
+        let receiver = ScreenMirrorReceiver(windowController: screenMirrorWindowController)
+        screenMirrorWindowController.onUserClose = { [weak receiver] in
+            receiver?.stopActiveStreamFromWindowClose()
+        }
+        return receiver
+    }()
     let macClipboardWatcher = MacClipboardWatcher()
     let fileTransferService = FileTransferService()
     lazy var androidClipboardSender = AndroidClipboardSender(
@@ -132,6 +140,7 @@ final class ZevClipRuntime {
 
     private func startClipboardSync() {
         receiver.startServer()
+        screenMirrorReceiver.start()
         macClipboardWatcher.start()
         androidClipboardSender.startStatusMonitoring()
         androidClipboardSender.rediscoverAndroidReceiver()
