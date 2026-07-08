@@ -163,7 +163,7 @@ class AirPlayMirrorSessionController(
         }
     }
 
-    fun setAudioVolumeBestEffort(volume: Double = 0.0) {
+    fun setAudioVolumeBestEffort(volume: Double = DEFAULT_AUDIO_VOLUME) {
         val session = connected ?: return
         runCatching {
             synchronized(requestLock) {
@@ -394,6 +394,7 @@ class AirPlayMirrorSessionController(
         const val AUDIO_FRAMES_PER_PACKET = 352
         const val AUDIO_CONTENT_TYPE_ALAC = 2L
         const val AUDIO_FORMAT_ALAC_44100_16_2 = 1L shl 18
+        const val DEFAULT_AUDIO_VOLUME = -15.0
         const val AUDIO_LATENCY_MIN = 6_615L
         const val AUDIO_LATENCY_MAX = 33_075L
         const val EVENT_CHANNEL_ATTEMPTS = 6

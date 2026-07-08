@@ -1,5 +1,7 @@
 package com.zevclip.sender.airplay
 
+import kotlin.concurrent.thread
+
 class AirPlayPreparedAudioSession(
     private val target: AirPlayTarget,
     private val pairVerifySession: AirPlayPairVerifier.Session,
@@ -29,6 +31,9 @@ class AirPlayPreparedAudioSession(
     private var timingServer: AirPlayTimingServer? = null
     private var syncSender: AirPlaySyncSender? = null
     private var eventChannel: AirPlayEventChannel? = null
+    @Volatile
+    private var keepAliveRunning = false
+    private var keepAliveThread: Thread? = null
 
     fun start(
         controlPort: Int,
@@ -94,6 +99,7 @@ class AirPlayPreparedAudioSession(
             )
             controller.setVolume(setup.setup.sessionIds)
             controller.feedback(setup.setup.sessionIds)
+            startKeepAlive(controller, setup.setup.sessionIds)
 
             Result.Success(
                 RunningSession(
@@ -108,12 +114,44 @@ class AirPlayPreparedAudioSession(
         }
     }
 
+    private fun startKeepAlive(
+        controller: AirPlayAudioSessionController,
+        ids: AirPlayAudioSetup.SessionIds
+    ) {
+        if (keepAliveRunning) return
+        keepAliveRunning = true
+        keepAliveThread = thread(name = "zevclip-airplay-audio-rtsp-keepalive", isDaemon = true) {
+            var lastParameterAt = 0L
+            while (keepAliveRunning) {
+                try {
+                    Thread.sleep(FEEDBACK_INTERVAL_MS)
+                } catch (_: InterruptedException) {
+                    break
+                }
+                runCatching { controller.feedback(ids) }
+                val now = System.currentTimeMillis()
+                if (now - lastParameterAt >= GET_PARAMETER_INTERVAL_MS) {
+                    runCatching { controller.getParameter(ids) }
+                    lastParameterAt = now
+                }
+            }
+        }
+    }
+
     fun stop() {
+        keepAliveRunning = false
+        keepAliveThread?.interrupt()
+        keepAliveThread = null
         runCatching { eventChannel?.stop() }
         eventChannel = null
         runCatching { syncSender?.stop() }
         syncSender = null
         runCatching { timingServer?.stop() }
         timingServer = null
+    }
+
+    private companion object {
+        const val FEEDBACK_INTERVAL_MS = 2_000L
+        const val GET_PARAMETER_INTERVAL_MS = 15_000L
     }
 }

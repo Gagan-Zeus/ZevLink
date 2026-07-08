@@ -1,9 +1,11 @@
 package com.zevclip.sender.airplay
 
+import java.io.Closeable
+
 class AirPlayPcmStreamer(
     private val packetizer: AirPlayRtpAudioPacketizer,
     private val sink: AirPlayPacketSink
-) {
+) : Closeable {
     fun sendPcm(pcm16LittleEndian: ByteArray): Int {
         var count = 0
         packetizer.consumePcm(pcm16LittleEndian).forEach { packet ->
@@ -24,5 +26,9 @@ class AirPlayPcmStreamer(
             count++
         }
         return count
+    }
+
+    override fun close() {
+        (sink as? Closeable)?.close()
     }
 }

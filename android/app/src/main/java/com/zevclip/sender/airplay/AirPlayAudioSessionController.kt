@@ -143,6 +143,16 @@ class AirPlayAudioSessionController(
         )
     }
 
+    fun getParameter(ids: AirPlayAudioSetup.SessionIds): AirPlayRtspClient.Response {
+        return rtsp(
+            method = "GET_PARAMETER",
+            body = ByteArray(0),
+            contentType = null,
+            ids = ids,
+            extraHeaders = mapOf("Session" to "0")
+        )
+    }
+
     private fun rtsp(
         method: String,
         body: ByteArray,

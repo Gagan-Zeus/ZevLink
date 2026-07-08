@@ -1,5 +1,6 @@
 package com.zevclip.sender.airplay
 
+import android.os.Process
 import android.util.Log
 import java.io.ByteArrayOutputStream
 import java.io.Closeable
@@ -102,6 +103,7 @@ class AirPlayMirrorStreamClient(
             }
         }
         videoWriterWorker = thread(name = "zevclip-airplay-mirror-video-writer", isDaemon = true) {
+            Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_DISPLAY)
             while (running.get()) {
                 runCatching {
                     val frame = videoQueue.take()
@@ -308,8 +310,8 @@ class AirPlayMirrorStreamClient(
     private companion object {
         const val DEFAULT_TIMEOUT_MS = 4_000
         const val PACKET_HEADER_SIZE = 128
-        const val STREAM_SEND_BUFFER_SIZE = 2 * 1024 * 1024
-        const val MAX_PENDING_VIDEO_FRAMES = 5
+        const val STREAM_SEND_BUFFER_SIZE = 8 * 1024 * 1024
+        const val MAX_PENDING_VIDEO_FRAMES = 3
         const val TYPE_VIDEO: Byte = 0
         const val TYPE_CODEC: Byte = 1
         const val TYPE_HEARTBEAT: Byte = 2

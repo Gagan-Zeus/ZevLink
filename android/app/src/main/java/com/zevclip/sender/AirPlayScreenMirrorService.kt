@@ -14,6 +14,7 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.util.Log
+import android.view.Surface
 import android.view.WindowManager
 import com.zevclip.sender.airplay.AirPlayClock
 import com.zevclip.sender.airplay.AirPlayAlacEncoder
@@ -146,7 +147,8 @@ class AirPlayScreenMirrorService : Service() {
 
                 updateStatus(getString(R.string.airplay_screen_mirror_live))
                 while (running.get()) {
-                    Thread.sleep(1_000L)
+                    Thread.sleep(CAPTURE_SIZE_POLL_MS)
+                    resizeAirPlayCaptureIfNeeded(captureSize())
                 }
             }.onSuccess {
                 mirrorFailure?.let { failure ->
@@ -365,6 +367,7 @@ class AirPlayScreenMirrorService : Service() {
             stopEncoderOnlyLocked()
 
             streamClient.updateVideoSize(captureSize.width, captureSize.height)
+            Log.i(TAG, "Using AirPlay capture size ${captureSize.width}x${captureSize.height}")
             activeCaptureSize = captureSize
             val screenEncoder = AirPlayScreenEncoder(
                 captureSize.width,
@@ -376,6 +379,7 @@ class AirPlayScreenMirrorService : Service() {
             val generation = ++encoderGeneration
             encoder = screenEncoder
             encoderWorker = thread(name = "zevclip-airplay-screen-encoder", isDaemon = true) {
+                android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_DISPLAY)
                 runCatching { screenEncoder.start(projection) }
                     .onFailure { error ->
                         if (running.get() && generation == encoderGeneration && encoder === screenEncoder && !restartingEncoder) {
@@ -388,6 +392,27 @@ class AirPlayScreenMirrorService : Service() {
                     }
             }
             restartingEncoder = false
+        }
+    }
+
+    private fun resizeAirPlayCaptureIfNeeded(captureSize: MirrorCaptureSize) {
+        synchronized(encoderLock) {
+            val currentSize = activeCaptureSize
+            val screenEncoder = encoder
+            val streamClient = mirrorClient
+            if (
+                currentSize == null ||
+                screenEncoder == null ||
+                streamClient == null ||
+                !currentSize.needsRebuildFor(captureSize)
+            ) {
+                return
+            }
+
+            Log.i(TAG, "Resizing AirPlay capture from ${currentSize.width}x${currentSize.height} to ${captureSize.width}x${captureSize.height}")
+            streamClient.updateVideoSize(captureSize.width, captureSize.height)
+            activeCaptureSize = captureSize
+            screenEncoder.requestResize(captureSize.width, captureSize.height, captureSize.densityDpi)
         }
     }
 
@@ -416,9 +441,33 @@ class AirPlayScreenMirrorService : Service() {
 
     private fun captureSize(): MirrorCaptureSize {
         val metrics = resources.displayMetrics
+        val display = getSystemService(WindowManager::class.java).defaultDisplay
+        val supportedMode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            display.supportedModes
+                .maxWithOrNull(compareBy({ it.physicalWidth.toLong() * it.physicalHeight.toLong() }, { it.refreshRate }))
+        } else {
+            null
+        }
+        val modeWidth = supportedMode?.physicalWidth ?: metrics.widthPixels
+        val modeHeight = supportedMode?.physicalHeight ?: metrics.heightPixels
+        val isCurrentLandscape = when (display.rotation) {
+            Surface.ROTATION_90, Surface.ROTATION_270 -> true
+            Surface.ROTATION_0, Surface.ROTATION_180 -> false
+            else -> metrics.widthPixels > metrics.heightPixels
+        }
+        val longEdge = maxOf(modeWidth, modeHeight)
+        val shortEdge = minOf(modeWidth, modeHeight)
+        val sourceWidth = if (isCurrentLandscape) longEdge else shortEdge
+        val sourceHeight = if (isCurrentLandscape) shortEdge else longEdge
+        val (width, height) = AirPlayScreenEncoder.scaledSize(
+            sourceWidth = sourceWidth,
+            sourceHeight = sourceHeight,
+            maxLongEdge = MAX_PHONE_CAPTURE_LONG_EDGE,
+            maxPixels = MAX_PHONE_CAPTURE_PIXELS
+        )
         return MirrorCaptureSize(
-            MACBOOK_MIRROR_WIDTH,
-            MACBOOK_MIRROR_HEIGHT,
+            width,
+            height,
             metrics.densityDpi
         )
     }
@@ -481,10 +530,11 @@ class AirPlayScreenMirrorService : Service() {
         private const val LEGACY_AIRPLAY_NOTIFICATION_ID = 2042
         private const val ENCODER_RESTART_JOIN_MS = 700L
         private const val AUDIO_STOP_JOIN_MS = 700L
+        private const val CAPTURE_SIZE_POLL_MS = 300L
         private const val ENABLE_MIRROR_SESSION_AUDIO = true
         private const val MIRROR_AUDIO_LATENCY_FRAMES = 8_820L
-        private const val MACBOOK_MIRROR_WIDTH = 1440
-        private const val MACBOOK_MIRROR_HEIGHT = 900
+        private const val MAX_PHONE_CAPTURE_LONG_EDGE = 3840
+        private const val MAX_PHONE_CAPTURE_PIXELS = 3840 * 2160
         private const val TAG = "ZevClipAirPlayScreen"
 
         fun start(context: Context, resultCode: Int, resultData: Intent, screenCode: String) {
