@@ -158,7 +158,10 @@ class AirPlayScreenMirrorService : Service() {
             host = host,
             width = captureSize.width,
             height = captureSize.height,
-            running = running
+            running = running,
+            onControlCommand = { command ->
+                ZevPlayInputController.dispatch(this, command)
+            }
         ).also { it.connect() }
         mirrorClient = nextMirrorClient
         startEncoder(projection, nextMirrorClient, captureSize)

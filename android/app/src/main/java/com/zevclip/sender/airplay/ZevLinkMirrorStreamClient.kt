@@ -4,7 +4,9 @@ import android.os.Process
 import android.util.Log
 import java.io.ByteArrayOutputStream
 import java.io.Closeable
+import java.io.DataInputStream
 import java.io.DataOutputStream
+import java.io.EOFException
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.util.concurrent.ArrayBlockingQueue
@@ -17,10 +19,12 @@ class ZevLinkMirrorStreamClient(
     height: Int,
     private val running: AtomicBoolean,
     private val port: Int = DEFAULT_PORT,
-    private val connectTimeoutMs: Int = DEFAULT_TIMEOUT_MS
+    private val connectTimeoutMs: Int = DEFAULT_TIMEOUT_MS,
+    private val onControlCommand: (String) -> Unit = {}
 ) : AirPlayScreenSampleSink, Closeable {
     private val outputLock = Any()
     private var socket: Socket? = null
+    private var input: DataInputStream? = null
     private var output: DataOutputStream? = null
     @Volatile
     private var contentWidth = width
@@ -28,6 +32,7 @@ class ZevLinkMirrorStreamClient(
     private var contentHeight = height
     private var codecConfig: ByteArray? = null
     private var writerWorker: Thread? = null
+    private var readerWorker: Thread? = null
     private val packetQueue = ArrayBlockingQueue<PendingMirrorPacket>(MAX_PENDING_PACKETS)
     private var packetsDropped = 0
 
@@ -37,6 +42,7 @@ class ZevLinkMirrorStreamClient(
         nextSocket.sendBufferSize = SEND_BUFFER_SIZE
         nextSocket.connect(InetSocketAddress(host, port), connectTimeoutMs)
         socket = nextSocket
+        input = DataInputStream(nextSocket.getInputStream())
         output = DataOutputStream(nextSocket.getOutputStream())
         writerWorker = thread(name = "zevlink-screen-window-writer", isDaemon = true) {
             Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_DISPLAY)
@@ -49,8 +55,11 @@ class ZevLinkMirrorStreamClient(
                             running.set(false)
                         }
                         return@thread
-                    }
+                }
             }
+        }
+        readerWorker = thread(name = "zevlink-screen-window-control", isDaemon = true) {
+            readControlPackets()
         }
         sendSize()
         Log.i(TAG, "Connected ZevLink screen mirror stream to $host:$port")
@@ -139,13 +148,58 @@ class ZevLinkMirrorStreamClient(
     }
 
     override fun close() {
+        readerWorker?.interrupt()
+        readerWorker = null
         writerWorker?.interrupt()
         writerWorker = null
         packetQueue.clear()
+        runCatching { input?.close() }
+        input = null
         runCatching { output?.close() }
         output = null
         runCatching { socket?.close() }
         socket = null
+    }
+
+    private fun readControlPackets() {
+        val activeInput = input ?: return
+        while (running.get()) {
+            try {
+                val magic = activeInput.readInt()
+                if (magic != MAGIC) {
+                    Log.w(TAG, "ZevLink screen control stream had invalid magic")
+                    running.set(false)
+                    return
+                }
+                val type = activeInput.readUnsignedByte()
+                activeInput.readUnsignedByte()
+                activeInput.readUnsignedShort()
+                activeInput.readInt()
+                activeInput.readInt()
+                activeInput.readLong()
+                val payloadLength = activeInput.readInt()
+                if (payloadLength < 0 || payloadLength > MAX_CONTROL_PAYLOAD_BYTES) {
+                    Log.w(TAG, "ZevLink screen control payload is invalid: $payloadLength")
+                    running.set(false)
+                    return
+                }
+                val payload = ByteArray(payloadLength)
+                activeInput.readFully(payload)
+                if (type.toByte() == TYPE_CONTROL && payload.isNotEmpty()) {
+                    onControlCommand(String(payload, Charsets.UTF_8))
+                }
+            } catch (_: EOFException) {
+                return
+            } catch (_: InterruptedException) {
+                return
+            } catch (error: Exception) {
+                if (running.get()) {
+                    Log.w(TAG, "ZevLink screen control reader failed", error)
+                    running.set(false)
+                }
+                return
+            }
+        }
     }
 
     private companion object {
@@ -159,7 +213,9 @@ class ZevLinkMirrorStreamClient(
         const val TYPE_SIZE: Byte = 3
         const val TYPE_AUDIO_CONFIG: Byte = 4
         const val TYPE_AUDIO_PCM: Byte = 5
+        const val TYPE_CONTROL: Byte = 6
         const val FLAG_KEY_FRAME: Byte = 1
+        const val MAX_CONTROL_PAYLOAD_BYTES = 16 * 1024
         const val TAG = "ZevLinkMirrorStream"
     }
 }

@@ -8,10 +8,17 @@ import QuartzCore
 final class ScreenMirrorWindowController: NSObject, NSWindowDelegate {
     private var window: NSWindow?
     private var videoView: ScreenMirrorVideoView?
+    private var controlPanel: ScreenMirrorControlPanel?
     private var isClosingProgrammatically = false
     private var userClosedWindow = false
 
     var onUserClose: (() -> Void)?
+    var onControlCommand: ((Data) -> Void)? {
+        didSet {
+            videoView?.onControlCommand = onControlCommand
+            controlPanel?.onControlCommand = onControlCommand
+        }
+    }
 
     func connectionDidStart() {
         userClosedWindow = false
@@ -23,14 +30,18 @@ final class ScreenMirrorWindowController: NSObject, NSWindowDelegate {
         let mirrorWindow = window ?? makeWindow(width: width, height: height)
         window = mirrorWindow
         videoView = mirrorWindow.contentView as? ScreenMirrorVideoView
+        videoView?.onControlCommand = onControlCommand
+        videoView?.updateVideoSize(width: width, height: height)
         resizeWindowIfNeeded(width: width, height: height)
         if isNewWindow {
             setDockIconVisible(true)
             mirrorWindow.makeKeyAndOrderFront(nil)
+            mirrorWindow.makeFirstResponder(videoView)
             NSApp.activate(ignoringOtherApps: true)
         } else if !mirrorWindow.isVisible {
             mirrorWindow.orderFrontRegardless()
         }
+        showControls(attachedTo: mirrorWindow)
     }
 
     func updateFormat(_ format: CMVideoFormatDescription, width: Int, height: Int) {
@@ -52,13 +63,33 @@ final class ScreenMirrorWindowController: NSObject, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
+        controlPanel?.close()
+        controlPanel = nil
         videoView?.flushAndRemoveImage()
         window = nil
         videoView = nil
+        onControlCommand = nil
         setDockIconVisible(false)
         guard !isClosingProgrammatically else { return }
         userClosedWindow = true
         onUserClose?()
+    }
+
+    func windowDidMove(_ notification: Notification) {
+        repositionControls()
+    }
+
+    func windowDidResize(_ notification: Notification) {
+        repositionControls()
+    }
+
+    func windowDidMiniaturize(_ notification: Notification) {
+        controlPanel?.orderOut()
+    }
+
+    func windowDidDeminiaturize(_ notification: Notification) {
+        guard let window else { return }
+        showControls(attachedTo: window)
     }
 
     private func setDockIconVisible(_ isVisible: Bool) {
@@ -68,6 +99,8 @@ final class ScreenMirrorWindowController: NSObject, NSWindowDelegate {
     private func makeWindow(width: Int, height: Int) -> NSWindow {
         let contentSize = Self.windowSize(width: width, height: height)
         let view = ScreenMirrorVideoView(frame: NSRect(origin: .zero, size: contentSize))
+        view.onControlCommand = onControlCommand
+        view.updateVideoSize(width: width, height: height)
         let mirrorWindow = NSWindow(
             contentRect: NSRect(origin: .zero, size: contentSize),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
@@ -78,8 +111,21 @@ final class ScreenMirrorWindowController: NSObject, NSWindowDelegate {
         mirrorWindow.contentView = view
         mirrorWindow.isReleasedWhenClosed = false
         mirrorWindow.delegate = self
+        mirrorWindow.acceptsMouseMovedEvents = true
         mirrorWindow.center()
         return mirrorWindow
+    }
+
+    private func showControls(attachedTo mirrorWindow: NSWindow) {
+        let panel = controlPanel ?? ScreenMirrorControlPanel()
+        controlPanel = panel
+        panel.onControlCommand = onControlCommand
+        panel.show(attachedTo: mirrorWindow)
+    }
+
+    private func repositionControls() {
+        guard let window else { return }
+        controlPanel?.position(attachedTo: window)
     }
 
     private func resizeWindowIfNeeded(width: Int, height: Int) {
@@ -91,6 +137,7 @@ final class ScreenMirrorWindowController: NSObject, NSWindowDelegate {
         }
         window.setContentSize(targetSize)
         window.center()
+        repositionControls()
     }
 
     private static func windowSize(width: Int, height: Int) -> NSSize {
@@ -108,8 +155,141 @@ final class ScreenMirrorWindowController: NSObject, NSWindowDelegate {
     }
 }
 
+private final class ScreenMirrorControlPanel: NSObject {
+    private static let panelSize = NSSize(width: 208, height: 48)
+    private static let windowGap: CGFloat = 10
+    private let backButton = ScreenMirrorControlButton(symbolName: "chevron.backward", tooltip: "Back")
+    private let homeButton = ScreenMirrorControlButton(symbolName: "circle", tooltip: "Home")
+    private let recentsButton = ScreenMirrorControlButton(symbolName: "rectangle.on.rectangle", tooltip: "Recents")
+    private let panel: NSPanel
+    private weak var parentWindow: NSWindow?
+
+    var onControlCommand: ((Data) -> Void)?
+
+    override init() {
+        panel = NSPanel(
+            contentRect: NSRect(origin: .zero, size: Self.panelSize),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        super.init()
+        configurePanel()
+    }
+
+    func show(attachedTo mirrorWindow: NSWindow) {
+        if parentWindow !== mirrorWindow {
+            parentWindow?.removeChildWindow(panel)
+            mirrorWindow.addChildWindow(panel, ordered: .above)
+            parentWindow = mirrorWindow
+        }
+        position(attachedTo: mirrorWindow)
+        panel.orderFront(nil)
+    }
+
+    func position(attachedTo mirrorWindow: NSWindow) {
+        let parentFrame = mirrorWindow.frame
+        let visibleFrame = mirrorWindow.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? parentFrame
+        let preferredX = parentFrame.midX - Self.panelSize.width / 2
+        let minX = visibleFrame.minX + 8
+        let maxX = visibleFrame.maxX - Self.panelSize.width - 8
+        let x = min(max(preferredX, minX), maxX)
+        var y = parentFrame.minY - Self.panelSize.height - Self.windowGap
+        if y < visibleFrame.minY + 8 {
+            y = parentFrame.maxY + Self.windowGap
+        }
+        if y + Self.panelSize.height > visibleFrame.maxY - 8 {
+            y = max(visibleFrame.minY + 8, visibleFrame.maxY - Self.panelSize.height - 8)
+        }
+        panel.setFrameOrigin(NSPoint(x: x, y: y))
+    }
+
+    func orderOut() {
+        panel.orderOut(nil)
+    }
+
+    func close() {
+        parentWindow?.removeChildWindow(panel)
+        parentWindow = nil
+        panel.orderOut(nil)
+    }
+
+    private func configurePanel() {
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        panel.hidesOnDeactivate = false
+        panel.isReleasedWhenClosed = false
+        panel.collectionBehavior = [.transient, .ignoresCycle]
+        panel.level = .floating
+
+        let root = NSVisualEffectView(frame: NSRect(origin: .zero, size: Self.panelSize))
+        root.material = .hudWindow
+        root.blendingMode = .behindWindow
+        root.state = .active
+        root.wantsLayer = true
+        root.layer?.cornerRadius = 22
+        root.layer?.masksToBounds = true
+        panel.contentView = root
+
+        [
+            (backButton, "back"),
+            (homeButton, "home"),
+            (recentsButton, "recents")
+        ].forEach { button, action in
+            button.target = self
+            button.action = #selector(navigationButtonPressed(_:))
+            button.identifier = NSUserInterfaceItemIdentifier(action)
+            root.addSubview(button)
+        }
+        layoutButtons()
+    }
+
+    private func layoutButtons() {
+        let buttonSize = NSSize(width: 46, height: 34)
+        let spacing: CGFloat = 18
+        let totalWidth = buttonSize.width * 3 + spacing * 2
+        let startX = (Self.panelSize.width - totalWidth) / 2
+        let y = (Self.panelSize.height - buttonSize.height) / 2
+        [backButton, homeButton, recentsButton].enumerated().forEach { index, button in
+            button.frame = NSRect(
+                x: startX + CGFloat(index) * (buttonSize.width + spacing),
+                y: y,
+                width: buttonSize.width,
+                height: buttonSize.height
+            )
+        }
+    }
+
+    @objc private func navigationButtonPressed(_ sender: NSButton) {
+        guard let action = sender.identifier?.rawValue else { return }
+        sendControl(["type": "nav", "action": action])
+        parentWindow?.makeFirstResponder(parentWindow?.contentView as? ScreenMirrorVideoView)
+    }
+
+    private func sendControl(_ payload: [String: Any]) {
+        guard
+            JSONSerialization.isValidJSONObject(payload),
+            let data = try? JSONSerialization.data(withJSONObject: payload)
+        else {
+            return
+        }
+        onControlCommand?(data)
+    }
+}
+
 final class ScreenMirrorVideoView: NSView {
     private let displayLayer = AVSampleBufferDisplayLayer()
+    private var videoSize = NSSize(width: 1, height: 1)
+    private var touchIsActive = false
+    private var lastTouchPoint: CGPoint?
+    private var lastTouchSentAt: TimeInterval = 0
+    private var scrollTouchIsActive = false
+    private var scrollTouchPoint: CGPoint?
+    private var pendingScrollTouchDelta = CGSize.zero
+    private var scrollTouchEndWorkItem: DispatchWorkItem?
+
+    var onControlCommand: ((Data) -> Void)?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -126,9 +306,16 @@ final class ScreenMirrorVideoView: NSView {
         nil
     }
 
+    override var acceptsFirstResponder: Bool { true }
+
     override func layout() {
         super.layout()
         displayLayer.frame = bounds
+    }
+
+    func updateVideoSize(width: Int, height: Int) {
+        guard width > 0, height > 0 else { return }
+        videoSize = NSSize(width: width, height: height)
     }
 
     func updateFormat(_ format: CMVideoFormatDescription) {
@@ -152,6 +339,269 @@ final class ScreenMirrorVideoView: NSView {
 
     func flushAndRemoveImage() {
         displayLayer.flushAndRemoveImage()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        finishScrollTouch()
+        window?.makeFirstResponder(self)
+        guard let point = normalizedPoint(for: event) else {
+            touchIsActive = false
+            lastTouchPoint = nil
+            return
+        }
+        touchIsActive = true
+        lastTouchPoint = point
+        lastTouchSentAt = event.timestamp
+        sendTouch(action: "down", point: point)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard touchIsActive, let point = normalizedPoint(for: event, clamped: true) else { return }
+        let elapsed = event.timestamp - lastTouchSentAt
+        let movedEnough = lastTouchPoint.map { hypot(point.x - $0.x, point.y - $0.y) >= 0.0015 } ?? true
+        guard movedEnough && elapsed >= Self.touchMoveInterval else { return }
+        lastTouchPoint = point
+        lastTouchSentAt = event.timestamp
+        sendTouch(action: "move", point: point)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard touchIsActive else { return }
+        guard let point = normalizedPoint(for: event, clamped: true) ?? lastTouchPoint else {
+            cancelTouch()
+            return
+        }
+        sendTouch(action: "up", point: point)
+        touchIsActive = false
+        lastTouchPoint = nil
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        sendControl(["type": "nav", "action": "back"])
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        guard !touchIsActive else { return }
+        guard event.momentumPhase == [] else {
+            finishScrollTouch()
+            return
+        }
+        guard let cursorPoint = normalizedPoint(for: event) else {
+            finishScrollTouch()
+            return
+        }
+        let rawX = event.hasPreciseScrollingDeltas ? event.scrollingDeltaX : event.deltaX * 12
+        let rawY = event.hasPreciseScrollingDeltas ? event.scrollingDeltaY : event.deltaY * 12
+        if event.phase.intersection([.ended, .cancelled]).isEmpty == false {
+            finishScrollTouch()
+            pendingScrollTouchDelta = .zero
+            return
+        }
+
+        let delta: CGVector
+        if scrollTouchIsActive {
+            delta = scrollTouchDelta(rawX: rawX, rawY: rawY)
+        } else {
+            if event.phase.contains(.began) {
+                pendingScrollTouchDelta = .zero
+            }
+            pendingScrollTouchDelta.width += rawX
+            pendingScrollTouchDelta.height += rawY
+            delta = scrollTouchDelta(
+                rawX: pendingScrollTouchDelta.width,
+                rawY: pendingScrollTouchDelta.height
+            )
+            guard hypot(delta.dx, delta.dy) >= Self.scrollTouchStartThreshold else {
+                return
+            }
+            beginScrollTouch(near: cursorPoint)
+            pendingScrollTouchDelta = .zero
+        }
+        guard abs(delta.dx) >= Self.minimumScrollTouchDelta || abs(delta.dy) >= Self.minimumScrollTouchDelta else {
+            scheduleScrollTouchEnd()
+            return
+        }
+
+        moveScrollTouch(by: delta, near: cursorPoint)
+        scheduleScrollTouchEnd()
+    }
+
+    private func beginScrollTouch(near cursorPoint: CGPoint) {
+        scrollTouchEndWorkItem?.cancel()
+        let point = scrollTouchAnchor(near: cursorPoint)
+        scrollTouchIsActive = true
+        scrollTouchPoint = point
+        sendTouch(action: "down", point: point)
+    }
+
+    private func moveScrollTouch(by delta: CGVector, near cursorPoint: CGPoint) {
+        scrollTouchEndWorkItem?.cancel()
+        if !scrollTouchIsActive {
+            beginScrollTouch(near: cursorPoint)
+        }
+        guard let currentPoint = scrollTouchPoint else { return }
+        let nextPoint = CGPoint(
+            x: max(Self.scrollTouchInset, min(1 - Self.scrollTouchInset, currentPoint.x + delta.dx)),
+            y: max(Self.scrollTouchInset, min(1 - Self.scrollTouchInset, currentPoint.y + delta.dy))
+        )
+        guard hypot(nextPoint.x - currentPoint.x, nextPoint.y - currentPoint.y) >= Self.minimumScrollTouchDelta else {
+            return
+        }
+        scrollTouchPoint = nextPoint
+        sendTouch(action: "move", point: nextPoint)
+    }
+
+    private func finishScrollTouch() {
+        scrollTouchEndWorkItem?.cancel()
+        scrollTouchEndWorkItem = nil
+        guard scrollTouchIsActive else { return }
+        sendTouch(action: "up", point: scrollTouchPoint ?? CGPoint(x: 0.5, y: 0.5))
+        scrollTouchIsActive = false
+        scrollTouchPoint = nil
+        pendingScrollTouchDelta = .zero
+    }
+
+    private func scheduleScrollTouchEnd() {
+        scrollTouchEndWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.finishScrollTouch()
+        }
+        scrollTouchEndWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.scrollTouchEndDelay, execute: workItem)
+    }
+
+    private func scrollTouchAnchor(near point: CGPoint) -> CGPoint {
+        CGPoint(
+            x: max(Self.scrollTouchInset, min(1 - Self.scrollTouchInset, point.x)),
+            y: max(Self.scrollTouchInset, min(1 - Self.scrollTouchInset, point.y))
+        )
+    }
+
+    private func scrollTouchDelta(rawX: CGFloat, rawY: CGFloat) -> CGVector {
+        CGVector(
+            dx: max(-Self.maxHorizontalScrollTouchDelta, min(Self.maxHorizontalScrollTouchDelta, rawX * Self.horizontalScrollTouchScale)),
+            dy: max(-Self.maxVerticalScrollTouchDelta, min(Self.maxVerticalScrollTouchDelta, rawY * Self.verticalScrollTouchScale))
+        )
+    }
+
+    override func keyDown(with event: NSEvent) {
+        guard event.modifierFlags.intersection([.command, .control, .option]).isEmpty else {
+            super.keyDown(with: event)
+            return
+        }
+
+        switch event.keyCode {
+        case 51, 117:
+            sendControl(["type": "key", "key": "delete"])
+        case 36, 76:
+            sendControl(["type": "key", "key": "enter"])
+        case 48:
+            sendControl(["type": "key", "key": "tab"])
+        case 53:
+            sendControl(["type": "nav", "action": "back"])
+        default:
+            if let characters = event.characters, !characters.isEmpty {
+                sendControl(["type": "text", "text": characters])
+            } else {
+                super.keyDown(with: event)
+            }
+        }
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        guard touchIsActive, let point = normalizedPoint(for: event, clamped: true) else { return }
+        lastTouchPoint = point
+        sendTouch(action: "move", point: point)
+    }
+
+    private func normalizedPoint(for event: NSEvent, clamped: Bool = false) -> CGPoint? {
+        let location = convert(event.locationInWindow, from: nil)
+        let visibleRect = displayedVideoRect()
+        guard visibleRect.contains(location), visibleRect.width > 0, visibleRect.height > 0 else {
+            guard clamped, visibleRect.width > 0, visibleRect.height > 0 else {
+                return nil
+            }
+            let clampedLocation = CGPoint(
+                x: max(visibleRect.minX, min(visibleRect.maxX, location.x)),
+                y: max(visibleRect.minY, min(visibleRect.maxY, location.y))
+            )
+            return normalizedPoint(for: clampedLocation, in: visibleRect)
+        }
+        return normalizedPoint(for: location, in: visibleRect)
+    }
+
+    private func normalizedPoint(for location: CGPoint, in visibleRect: NSRect) -> CGPoint {
+        CGPoint(
+            x: max(0, min(1, (location.x - visibleRect.minX) / visibleRect.width)),
+            y: max(0, min(1, (visibleRect.maxY - location.y) / visibleRect.height))
+        )
+    }
+
+    private func cancelTouch() {
+        if let point = lastTouchPoint {
+            sendTouch(action: "cancel", point: point)
+        }
+        touchIsActive = false
+        lastTouchPoint = nil
+    }
+
+    private func sendTouch(action: String, point: CGPoint) {
+        sendControl([
+            "type": "touch",
+            "action": action,
+            "x": point.x,
+            "y": point.y
+        ])
+    }
+
+    private static let touchMoveInterval: TimeInterval = 1.0 / 60.0
+    private static let scrollTouchEndDelay: TimeInterval = 2.0
+    private static let scrollTouchInset: CGFloat = 0.025
+    private static let horizontalScrollTouchScale: CGFloat = 0.0032
+    private static let verticalScrollTouchScale: CGFloat = 0.0014
+    private static let maxHorizontalScrollTouchDelta: CGFloat = 0.075
+    private static let maxVerticalScrollTouchDelta: CGFloat = 0.035
+    private static let minimumScrollTouchDelta: CGFloat = 0.001
+    private static let scrollTouchStartThreshold: CGFloat = 0.004
+
+    private func displayedVideoRect() -> NSRect {
+        guard videoSize.width > 0, videoSize.height > 0, bounds.width > 0, bounds.height > 0 else {
+            return bounds
+        }
+        let scale = min(bounds.width / videoSize.width, bounds.height / videoSize.height)
+        let size = NSSize(width: videoSize.width * scale, height: videoSize.height * scale)
+        return NSRect(
+            x: bounds.midX - size.width / 2,
+            y: bounds.midY - size.height / 2,
+            width: size.width,
+            height: size.height
+        )
+    }
+
+    private func sendControl(_ payload: [String: Any]) {
+        guard
+            JSONSerialization.isValidJSONObject(payload),
+            let data = try? JSONSerialization.data(withJSONObject: payload)
+        else {
+            return
+        }
+        onControlCommand?(data)
+    }
+}
+
+private final class ScreenMirrorControlButton: NSButton {
+    init(symbolName: String, tooltip: String) {
+        super.init(frame: .zero)
+        image = NSImage(systemSymbolName: symbolName, accessibilityDescription: tooltip)
+        title = ""
+        toolTip = tooltip
+        bezelStyle = .rounded
+        isBordered = true
+        imagePosition = .imageOnly
+    }
+
+    required init?(coder: NSCoder) {
+        nil
     }
 }
 
@@ -350,6 +800,11 @@ final class ScreenMirrorReceiver {
         )
         connections[id] = mirrorConnection
         mirrorConnection.start()
+        Task { @MainActor in
+            self.windowController.onControlCommand = { [weak mirrorConnection] payload in
+                mirrorConnection?.sendControl(payload)
+            }
+        }
         oldConnections.forEach { $0.cancel() }
         audioPlayer.stop()
     }
@@ -359,6 +814,7 @@ final class ScreenMirrorReceiver {
         connections[id] = nil
         audioPlayer.stop()
         Task { @MainActor in
+            self.windowController.onControlCommand = nil
             self.windowController.connectionDidClose()
         }
     }
@@ -373,6 +829,7 @@ private final class ScreenMirrorConnection {
     private static let typeVideoSize: UInt8 = 3
     private static let typeAudioConfig: UInt8 = 4
     private static let typeAudioPcm: UInt8 = 5
+    private static let typeControl: UInt8 = 6
 
     private let connection: NWConnection
     private let queue: DispatchQueue
@@ -414,6 +871,19 @@ private final class ScreenMirrorConnection {
     func cancel() {
         connection.cancel()
         finish()
+    }
+
+    func sendControl(_ payload: Data) {
+        guard !payload.isEmpty && payload.count <= 16 * 1024 else { return }
+        let packet = Self.packet(type: Self.typeControl, payload: payload)
+        queue.async { [weak self] in
+            guard let self, !self.didClose else { return }
+            self.connection.send(content: packet, completion: .contentProcessed { error in
+                if let error {
+                    NSLog("ZevLink screen control send failed: \(error.localizedDescription)")
+                }
+            })
+        }
     }
 
     private func receiveMore() {
@@ -589,6 +1059,20 @@ private final class ScreenMirrorConnection {
         connection.cancel()
         onClose()
     }
+
+    private static func packet(type: UInt8, payload: Data) -> Data {
+        var data = Data(capacity: headerLength + payload.count)
+        data.appendUInt32BE(magic)
+        data.append(type)
+        data.append(0)
+        data.appendUInt16BE(0)
+        data.appendUInt32BE(0)
+        data.appendUInt32BE(0)
+        data.appendUInt64BE(0)
+        data.appendUInt32BE(UInt32(payload.count))
+        data.append(payload)
+        return data
+    }
 }
 
 private struct H264AvcCParameterSets {
@@ -635,5 +1119,28 @@ private extension Data {
         guard offset + length <= count else { return nil }
         defer { offset += length }
         return subdata(in: offset..<(offset + length))
+    }
+
+    mutating func appendUInt16BE(_ value: UInt16) {
+        append(UInt8((value >> 8) & 0xFF))
+        append(UInt8(value & 0xFF))
+    }
+
+    mutating func appendUInt32BE(_ value: UInt32) {
+        append(UInt8((value >> 24) & 0xFF))
+        append(UInt8((value >> 16) & 0xFF))
+        append(UInt8((value >> 8) & 0xFF))
+        append(UInt8(value & 0xFF))
+    }
+
+    mutating func appendUInt64BE(_ value: UInt64) {
+        append(UInt8((value >> 56) & 0xFF))
+        append(UInt8((value >> 48) & 0xFF))
+        append(UInt8((value >> 40) & 0xFF))
+        append(UInt8((value >> 32) & 0xFF))
+        append(UInt8((value >> 24) & 0xFF))
+        append(UInt8((value >> 16) & 0xFF))
+        append(UInt8((value >> 8) & 0xFF))
+        append(UInt8(value & 0xFF))
     }
 }
