@@ -60,6 +60,15 @@ class ClipboardAccessibilityService : AccessibilityService() {
     private var zevPlayTouchPendingEnd = false
     private var zevPlayTouchSegmentInFlight = false
     private var zevPlayTouchSequence = 0
+    private var zevPlayZoomStrokeA: GestureDescription.StrokeDescription? = null
+    private var zevPlayZoomStrokeB: GestureDescription.StrokeDescription? = null
+    private var zevPlayZoomCenter: Pair<Float, Float>? = null
+    private var zevPlayZoomRadius = 0f
+    private var zevPlayZoomPendingCenter: Pair<Float, Float>? = null
+    private var zevPlayZoomPendingRadius: Float? = null
+    private var zevPlayZoomPendingEnd = false
+    private var zevPlayZoomSegmentInFlight = false
+    private var zevPlayZoomSequence = 0
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -229,6 +238,7 @@ class ClipboardAccessibilityService : AccessibilityService() {
     }
 
     private fun startZevPlayTouch(point: Pair<Float, Float>): Boolean {
+        resetZevPlayZoom()
         zevPlayTouchSequence++
         zevPlayTouchPendingPoint = null
         zevPlayTouchPendingEnd = false
@@ -361,6 +371,219 @@ class ClipboardAccessibilityService : AccessibilityService() {
         )
     }
 
+    private fun injectZoom(action: String, x: Double, y: Double, magnification: Double): Boolean {
+        val center = boundedZoomCenter(x, y) ?: return false
+        return when (action) {
+            "begin" -> startZevPlayZoom(center)
+            "move" -> continueZevPlayZoom(center, magnification, willContinue = true)
+            "end", "cancel" -> continueZevPlayZoom(center, 0.0, willContinue = false)
+            else -> false
+        }
+    }
+
+    private fun startZevPlayZoom(center: Pair<Float, Float>): Boolean {
+        resetZevPlayTouch()
+        val radius = initialZoomRadius(center) ?: return false
+        zevPlayZoomSequence++
+        zevPlayZoomPendingCenter = null
+        zevPlayZoomPendingRadius = null
+        zevPlayZoomPendingEnd = false
+        zevPlayZoomSegmentInFlight = false
+        val strokeA = zoomStroke(center, radius, -1f, willContinue = true)
+        val strokeB = zoomStroke(center, radius, 1f, willContinue = true)
+        zevPlayZoomStrokeA = strokeA
+        zevPlayZoomStrokeB = strokeB
+        zevPlayZoomCenter = center
+        zevPlayZoomRadius = radius
+        return dispatchZevPlayZoomStrokes(strokeA, strokeB, zevPlayZoomSequence)
+    }
+
+    private fun continueZevPlayZoom(
+        center: Pair<Float, Float>,
+        magnification: Double,
+        willContinue: Boolean
+    ): Boolean {
+        if (zevPlayZoomStrokeA == null || zevPlayZoomStrokeB == null) {
+            return if (willContinue) startZevPlayZoom(center) else false
+        }
+        val nextRadius = nextZoomRadius(center, magnification) ?: return false
+        zevPlayZoomPendingCenter = center
+        zevPlayZoomPendingRadius = nextRadius
+        zevPlayZoomPendingEnd = zevPlayZoomPendingEnd || !willContinue
+        if (!zevPlayZoomSegmentInFlight) {
+            dispatchNextZevPlayZoomSegment()
+        }
+        return true
+    }
+
+    private fun dispatchNextZevPlayZoomSegment() {
+        val targetCenter = zevPlayZoomPendingCenter ?: return
+        val targetRadius = zevPlayZoomPendingRadius ?: return
+        val shouldEnd = zevPlayZoomPendingEnd
+        zevPlayZoomPendingCenter = null
+        zevPlayZoomPendingRadius = null
+        zevPlayZoomPendingEnd = false
+        val previousStrokeA = zevPlayZoomStrokeA ?: return
+        val previousStrokeB = zevPlayZoomStrokeB ?: return
+        val previousCenter = zevPlayZoomCenter ?: targetCenter
+        val previousRadius = zevPlayZoomRadius
+        val pathA = zoomPath(previousCenter, previousRadius, targetCenter, targetRadius, -1f)
+        val pathB = zoomPath(previousCenter, previousRadius, targetCenter, targetRadius, 1f)
+        val distance = kotlin.math.abs(targetRadius - previousRadius) +
+            kotlin.math.abs(targetCenter.first - previousCenter.first) +
+            kotlin.math.abs(targetCenter.second - previousCenter.second)
+        val duration = if (distance < 1f) 1L else ZEVPLAY_ZOOM_SEGMENT_MS
+        val nextStrokeA = runCatching {
+            previousStrokeA.continueStroke(pathA, 0, duration, !shouldEnd)
+        }.getOrElse { error ->
+            Log.w(TAG, "Could not continue first ZevPlay zoom stroke", error)
+            resetZevPlayZoom()
+            return
+        }
+        val nextStrokeB = runCatching {
+            previousStrokeB.continueStroke(pathB, 0, duration, !shouldEnd)
+        }.getOrElse { error ->
+            Log.w(TAG, "Could not continue second ZevPlay zoom stroke", error)
+            resetZevPlayZoom()
+            return
+        }
+
+        if (shouldEnd) {
+            zevPlayZoomStrokeA = null
+            zevPlayZoomStrokeB = null
+            zevPlayZoomCenter = null
+            zevPlayZoomRadius = 0f
+        } else {
+            zevPlayZoomStrokeA = nextStrokeA
+            zevPlayZoomStrokeB = nextStrokeB
+            zevPlayZoomCenter = targetCenter
+            zevPlayZoomRadius = targetRadius
+        }
+        dispatchZevPlayZoomStrokes(nextStrokeA, nextStrokeB, zevPlayZoomSequence)
+    }
+
+    private fun dispatchZevPlayZoomStrokes(
+        strokeA: GestureDescription.StrokeDescription,
+        strokeB: GestureDescription.StrokeDescription,
+        sequence: Int
+    ): Boolean {
+        zevPlayZoomSegmentInFlight = true
+        val dispatched = dispatchGesture(
+            GestureDescription.Builder()
+                .addStroke(strokeA)
+                .addStroke(strokeB)
+                .build(),
+            object : GestureResultCallback() {
+                override fun onCompleted(gestureDescription: GestureDescription?) {
+                    onZevPlayZoomSegmentFinished(sequence)
+                }
+
+                override fun onCancelled(gestureDescription: GestureDescription?) {
+                    if (sequence == zevPlayZoomSequence) {
+                        resetZevPlayZoom()
+                    }
+                }
+            },
+            handler
+        )
+        if (!dispatched) {
+            resetZevPlayZoom()
+        }
+        return dispatched
+    }
+
+    private fun onZevPlayZoomSegmentFinished(sequence: Int) {
+        if (sequence != zevPlayZoomSequence) return
+        zevPlayZoomSegmentInFlight = false
+        if (zevPlayZoomStrokeA == null || zevPlayZoomStrokeB == null) {
+            zevPlayZoomPendingCenter = null
+            zevPlayZoomPendingRadius = null
+            zevPlayZoomPendingEnd = false
+            return
+        }
+        dispatchNextZevPlayZoomSegment()
+    }
+
+    private fun resetZevPlayZoom() {
+        zevPlayZoomStrokeA = null
+        zevPlayZoomStrokeB = null
+        zevPlayZoomCenter = null
+        zevPlayZoomRadius = 0f
+        zevPlayZoomPendingCenter = null
+        zevPlayZoomPendingRadius = null
+        zevPlayZoomPendingEnd = false
+        zevPlayZoomSegmentInFlight = false
+    }
+
+    private fun boundedZoomCenter(x: Double, y: Double): Pair<Float, Float>? {
+        val bounds = displayBounds()
+        val minDimension = minOf(bounds.width(), bounds.height()).toFloat()
+        if (minDimension <= 0f) return null
+        val margin = maxOf(12f, minDimension * 0.08f)
+        val center = absolutePoint(x, y) ?: return null
+        return center.first.coerceIn(bounds.left + margin, bounds.right - margin) to
+            center.second.coerceIn(bounds.top + margin, bounds.bottom - margin)
+    }
+
+    private fun initialZoomRadius(center: Pair<Float, Float>): Float? {
+        val bounds = displayBounds()
+        val availableRadius = availableZoomRadius(bounds, center)
+        if (availableRadius < ZEVPLAY_ZOOM_MIN_RADIUS_PX) return null
+        val minDimension = minOf(bounds.width(), bounds.height()).toFloat()
+        return (minDimension * 0.18f).coerceIn(ZEVPLAY_ZOOM_MIN_RADIUS_PX, availableRadius)
+    }
+
+    private fun nextZoomRadius(center: Pair<Float, Float>, magnification: Double): Float? {
+        val bounds = displayBounds()
+        val availableRadius = availableZoomRadius(bounds, center)
+        if (availableRadius < ZEVPLAY_ZOOM_MIN_RADIUS_PX) return null
+        val minDimension = minOf(bounds.width(), bounds.height()).toFloat()
+        val radiusDelta = (minDimension * magnification * ZEVPLAY_ZOOM_RADIUS_SCALE).toFloat()
+        return (zevPlayZoomRadius + radiusDelta).coerceIn(ZEVPLAY_ZOOM_MIN_RADIUS_PX, availableRadius)
+    }
+
+    private fun availableZoomRadius(bounds: Rect, center: Pair<Float, Float>): Float {
+        return minOf(
+            center.first - bounds.left - 8f,
+            bounds.right - center.first - 8f,
+            center.second - bounds.top - 8f,
+            bounds.bottom - center.second - 8f
+        ).coerceAtLeast(0f)
+    }
+
+    private fun zoomStroke(
+        center: Pair<Float, Float>,
+        radius: Float,
+        direction: Float,
+        willContinue: Boolean
+    ): GestureDescription.StrokeDescription {
+        val point = zoomPoint(center, radius, direction)
+        val path = Path().apply {
+            moveTo(point.first, point.second)
+        }
+        return GestureDescription.StrokeDescription(path, 0, 1, willContinue)
+    }
+
+    private fun zoomPath(
+        startCenter: Pair<Float, Float>,
+        startRadius: Float,
+        endCenter: Pair<Float, Float>,
+        endRadius: Float,
+        direction: Float
+    ): Path {
+        val start = zoomPoint(startCenter, startRadius, direction)
+        val end = zoomPoint(endCenter, endRadius, direction)
+        return Path().apply {
+            moveTo(start.first, start.second)
+            lineTo(end.first, end.second)
+        }
+    }
+
+    private fun zoomPoint(center: Pair<Float, Float>, radius: Float, direction: Float): Pair<Float, Float> {
+        val offset = radius * ZEVPLAY_ZOOM_DIAGONAL
+        return center.first + direction * offset to center.second + direction * offset
+    }
+
     private fun injectNavigation(action: String): Boolean {
         val globalAction = when (action) {
             "back" -> GLOBAL_ACTION_BACK
@@ -382,7 +605,7 @@ class ClipboardAccessibilityService : AccessibilityService() {
         return setNodeText(node, next).also { success ->
             if (success) {
                 setNodeSelection(node, nextCursor)
-                zevPlayTextState = ZevPlayTextState(edit.signature, next, nextCursor, SystemClock.elapsedRealtime())
+                rememberZevPlayText(edit.signature, next, nextCursor, nextCursor)
             }
         }
     }
@@ -407,7 +630,7 @@ class ClipboardAccessibilityService : AccessibilityService() {
                 setNodeText(node, next).also { success ->
                     if (success) {
                         setNodeSelection(node, nextCursor)
-                        zevPlayTextState = ZevPlayTextState(edit.signature, next, nextCursor, SystemClock.elapsedRealtime())
+                        rememberZevPlayText(edit.signature, next, nextCursor, nextCursor)
                     }
                 }
             }
@@ -420,7 +643,94 @@ class ClipboardAccessibilityService : AccessibilityService() {
                 injectText("\n")
             }
             "tab" -> injectText("\t")
+            "arrow_left" -> moveCursor(node, -1, extendSelection = false)
+            "arrow_right" -> moveCursor(node, 1, extendSelection = false)
+            "arrow_up" -> moveCursorToBoundary(node, toStart = true)
+            "arrow_down" -> moveCursorToBoundary(node, toStart = false)
             else -> false
+        }
+    }
+
+    private fun injectShortcut(action: String): Boolean {
+        val node = focusedEditableNode() ?: return false
+        return when (action) {
+            "select_all" -> {
+                val edit = zevPlayEditableState(node)
+                setNodeSelection(node, 0, edit.text.length).also { success ->
+                    if (success) {
+                        rememberZevPlayText(edit.signature, edit.text, 0, edit.text.length)
+                    }
+                }
+            }
+            "copy" -> node.performAction(AccessibilityNodeInfo.ACTION_COPY)
+            "cut" -> {
+                val edit = zevPlayEditableState(node)
+                node.performAction(AccessibilityNodeInfo.ACTION_CUT).also { success ->
+                    if (success) {
+                        val low = minOf(edit.selectionStart, edit.selectionEnd).coerceIn(0, edit.text.length)
+                        val high = maxOf(edit.selectionStart, edit.selectionEnd).coerceIn(0, edit.text.length)
+                        if (low != high) {
+                            val next = edit.text.removeRange(low, high)
+                            rememberZevPlayText(edit.signature, next, low, low, allowStaleActual = true)
+                        } else {
+                            zevPlayTextState = null
+                        }
+                    }
+                }
+            }
+            "paste" -> {
+                val edit = zevPlayEditableState(node)
+                val pasteText = clipboardTextForPaste()
+                node.performAction(AccessibilityNodeInfo.ACTION_PASTE).also { success ->
+                    if (success) {
+                        if (pasteText != null) {
+                            val low = minOf(edit.selectionStart, edit.selectionEnd).coerceIn(0, edit.text.length)
+                            val high = maxOf(edit.selectionStart, edit.selectionEnd).coerceIn(0, edit.text.length)
+                            val next = edit.text.replaceRange(low, high, pasteText)
+                            val nextCursor = (low + pasteText.length).coerceIn(0, next.length)
+                            rememberZevPlayText(
+                                edit.signature,
+                                next,
+                                nextCursor,
+                                nextCursor,
+                                allowStaleActual = true
+                            )
+                        } else {
+                            zevPlayTextState = null
+                        }
+                    }
+                }
+            }
+            else -> false
+        }
+    }
+
+    private fun moveCursor(node: AccessibilityNodeInfo?, delta: Int, extendSelection: Boolean): Boolean {
+        node ?: return false
+        val edit = zevPlayEditableState(node)
+        val anchor = if (delta < 0) {
+            minOf(edit.selectionStart, edit.selectionEnd)
+        } else {
+            maxOf(edit.selectionStart, edit.selectionEnd)
+        }
+        val next = (anchor + delta).coerceIn(0, edit.text.length)
+        val start = if (extendSelection) edit.selectionStart else next
+        val end = next
+        return setNodeSelection(node, start, end).also { success ->
+            if (success) {
+                rememberZevPlayText(edit.signature, edit.text, start, end)
+            }
+        }
+    }
+
+    private fun moveCursorToBoundary(node: AccessibilityNodeInfo?, toStart: Boolean): Boolean {
+        node ?: return false
+        val edit = zevPlayEditableState(node)
+        val next = if (toStart) 0 else edit.text.length
+        return setNodeSelection(node, next, next).also { success ->
+            if (success) {
+                rememberZevPlayText(edit.signature, edit.text, next, next)
+            }
         }
     }
 
@@ -434,21 +744,25 @@ class ClipboardAccessibilityService : AccessibilityService() {
         }
         val isShowingHint = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && node.isShowingHintText
         val hasSelection = node.textSelectionStart >= 0 && node.textSelectionEnd >= 0
-        val accessibleTextIsHint = isShowingHint || hintText.isNotEmpty() && rawText == hintText
+        val accessibleTextIsHint = isShowingHint ||
+            hintText.isNotEmpty() && rawText == hintText ||
+            looksLikeEditablePlaceholder(rawText, hintText, node, hasSelection)
         val visibleText = if (accessibleTextIsHint || (!hasSelection && zevPlayTextState?.signature != signature)) {
             ""
         } else {
             rawText
         }
 
+        val now = SystemClock.elapsedRealtime()
         val remembered = zevPlayTextState?.takeIf {
             it.signature == signature &&
-                SystemClock.elapsedRealtime() - it.updatedAtMillis <= ZEVPLAY_TEXT_STATE_MAX_AGE_MS &&
-                (accessibleTextIsHint || visibleText.isEmpty() || visibleText == it.text)
+                now - it.updatedAtMillis <= ZEVPLAY_TEXT_STATE_MAX_AGE_MS &&
+                (accessibleTextIsHint || visibleText.isEmpty() || visibleText == it.text || now <= it.allowStaleActualUntilMillis)
         }
         if (remembered != null) {
-            val cursor = remembered.cursor.coerceIn(0, remembered.text.length)
-            return ZevPlayEditableState(signature, remembered.text, cursor, cursor)
+            val start = remembered.selectionStart.coerceIn(0, remembered.text.length)
+            val end = remembered.selectionEnd.coerceIn(0, remembered.text.length)
+            return ZevPlayEditableState(signature, remembered.text, start, end)
         }
 
         val start = if (hasSelection) node.textSelectionStart else visibleText.length
@@ -459,6 +773,41 @@ class ClipboardAccessibilityService : AccessibilityService() {
             selectionStart = start.coerceIn(0, visibleText.length),
             selectionEnd = end.coerceIn(0, visibleText.length)
         )
+    }
+
+    private fun rememberZevPlayText(
+        signature: String,
+        text: String,
+        selectionStart: Int,
+        selectionEnd: Int,
+        allowStaleActual: Boolean = false
+    ) {
+        val now = SystemClock.elapsedRealtime()
+        zevPlayTextState = ZevPlayTextState(
+            signature = signature,
+            text = text,
+            selectionStart = selectionStart.coerceIn(0, text.length),
+            selectionEnd = selectionEnd.coerceIn(0, text.length),
+            updatedAtMillis = now,
+            allowStaleActualUntilMillis = if (allowStaleActual) {
+                now + ZEVPLAY_TEXT_STALE_ACTUAL_GRACE_MS
+            } else {
+                0L
+            }
+        )
+    }
+
+    private fun clipboardTextForPaste(): String? {
+        return try {
+            getSystemService(ClipboardManager::class.java).primaryClip
+                ?.takeIf { it.itemCount > 0 }
+                ?.getItemAt(0)
+                ?.coerceToText(this)
+                ?.toString()
+        } catch (error: SecurityException) {
+            Log.w(TAG, "Could not read clipboard while predicting ZevPlay paste", error)
+            null
+        }
     }
 
     private fun zevPlayNodeSignature(node: AccessibilityNodeInfo): String {
@@ -487,11 +836,31 @@ class ClipboardAccessibilityService : AccessibilityService() {
     }
 
     private fun setNodeSelection(node: AccessibilityNodeInfo, cursor: Int): Boolean {
+        return setNodeSelection(node, cursor, cursor)
+    }
+
+    private fun setNodeSelection(node: AccessibilityNodeInfo, start: Int, end: Int): Boolean {
         val args = Bundle().apply {
-            putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, cursor)
-            putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, cursor)
+            putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, start)
+            putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, end)
         }
         return node.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, args)
+    }
+
+    private fun looksLikeEditablePlaceholder(
+        rawText: String,
+        hintText: String,
+        node: AccessibilityNodeInfo,
+        hasSelection: Boolean
+    ): Boolean {
+        val normalized = rawText.trim().lowercase()
+            .replace(Regex("\\s+"), " ")
+            .trim('.', ':')
+        if (normalized.isEmpty()) return false
+        val hintNormalized = hintText.trim().lowercase().replace(Regex("\\s+"), " ").trim('.', ':')
+        if (hintNormalized.isNotEmpty() && normalized == hintNormalized) return true
+        val selectionAtStart = !hasSelection || node.textSelectionStart <= 0 && node.textSelectionEnd <= 0
+        return selectionAtStart && normalized in ZEVPLAY_PLACEHOLDER_TEXTS
     }
 
     private fun absolutePoint(x: Double, y: Double): Pair<Float, Float>? {
@@ -526,14 +895,14 @@ class ClipboardAccessibilityService : AccessibilityService() {
 
     private fun eventCandidates(event: AccessibilityEvent): List<String> {
         val candidates = buildList {
-            event.text.mapTo(this) { it.toString() }
-            event.contentDescription?.toString()?.let(::add)
-            event.className?.toString()?.let(::add)
+            event.text.forEach { addCandidate(it) }
+            addCandidate(event.contentDescription)
+            addCandidate(event.className)
 
             event.source?.let { source ->
-                source.text?.toString()?.let(::add)
-                source.contentDescription?.toString()?.let(::add)
-                source.className?.toString()?.let(::add)
+                addCandidate(source.text)
+                addCandidate(source.contentDescription)
+                addCandidate(source.className)
             }
         }
 
@@ -541,6 +910,10 @@ class ClipboardAccessibilityService : AccessibilityService() {
             .map { it.trim().lowercase() }
             .filter { it.isNotEmpty() }
             .distinct()
+    }
+
+    private fun MutableList<String>.addCandidate(value: Any?) {
+        value?.toString()?.takeIf { it.isNotBlank() }?.let(::add)
     }
 
     private fun looksLikeClipboardExportAction(candidate: String): Boolean {
@@ -675,9 +1048,9 @@ class ClipboardAccessibilityService : AccessibilityService() {
     private fun trustedEventText(event: AccessibilityEvent): String? {
         val source = event.source
         val candidates = buildList {
-            source?.text?.toString()?.let(::add)
-            event.text.mapTo(this) { it.toString() }
-            source?.contentDescription?.toString()?.let(::add)
+            addCandidate(source?.text)
+            event.text.forEach { addCandidate(it) }
+            addCandidate(source?.contentDescription)
             source?.directChildTextCandidates()?.let(::addAll)
         }
 
@@ -778,8 +1151,16 @@ class ClipboardAccessibilityService : AccessibilityService() {
             return activeService?.postInput { injectScroll(x, y, deltaX, deltaY) } ?: false
         }
 
+        fun injectZevPlayZoom(action: String, x: Double, y: Double, magnification: Double): Boolean {
+            return activeService?.postInput { injectZoom(action, x, y, magnification) } ?: false
+        }
+
         fun injectZevPlayNavigation(action: String): Boolean {
             return activeService?.postInput { injectNavigation(action) } ?: false
+        }
+
+        fun injectZevPlayShortcut(action: String): Boolean {
+            return activeService?.postInput { injectShortcut(action) } ?: false
         }
 
         fun injectZevPlayText(text: String): Boolean {
@@ -807,14 +1188,28 @@ class ClipboardAccessibilityService : AccessibilityService() {
         const val LONG_PRESS_TEXT_MAX_AGE_MS = 12_000L
         const val AIRPLAY_VOLUME_TOAST_THROTTLE_MS = 2_000L
         const val ZEVPLAY_TEXT_STATE_MAX_AGE_MS = 15_000L
+        const val ZEVPLAY_TEXT_STALE_ACTUAL_GRACE_MS = 1_500L
         const val ZEVPLAY_TOUCH_SEGMENT_MS = 16L
         const val ZEVPLAY_SCROLL_TICK_MS = 55L
+        const val ZEVPLAY_ZOOM_SEGMENT_MS = 16L
+        const val ZEVPLAY_ZOOM_MIN_RADIUS_PX = 36f
+        const val ZEVPLAY_ZOOM_RADIUS_SCALE = 0.95f
+        const val ZEVPLAY_ZOOM_DIAGONAL = 0.70710677f
         const val MIN_TRUSTED_FALLBACK_LENGTH = 3
         const val MAX_TRUSTED_FALLBACK_LENGTH = 20_000
 
         val COPY_READ_DELAYS_MS = longArrayOf(90L, 220L)
         val TRUSTED_PUNCTUATION = setOf('.', ',', '?', '!', ':', ';', '-', '_', '/', '@', '#')
         val TELEGRAM_MESSAGE_PREFIXES = listOf("Message,", "message,", "Message:", "message:")
+        val ZEVPLAY_PLACEHOLDER_TEXTS = setOf(
+            "search",
+            "search…",
+            "search...",
+            "search or start a new chat",
+            "type a message",
+            "message",
+            "write a message"
+        )
         val GENERIC_ACCESSIBILITY_LABELS = setOf(
             "message",
             "messages",
@@ -850,7 +1245,9 @@ class ClipboardAccessibilityService : AccessibilityService() {
     private data class ZevPlayTextState(
         val signature: String,
         val text: String,
-        val cursor: Int,
-        val updatedAtMillis: Long
+        val selectionStart: Int,
+        val selectionEnd: Int,
+        val updatedAtMillis: Long,
+        val allowStaleActualUntilMillis: Long
     )
 }

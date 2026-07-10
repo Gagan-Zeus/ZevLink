@@ -33,7 +33,16 @@ object ZevPlayInputController {
                 deltaX = json.optDouble("deltaX", 0.0),
                 deltaY = json.optDouble("deltaY", 0.0)
             )
+            "zoom" -> ClipboardAccessibilityService.injectZevPlayZoom(
+                action = json.optString("action").trim().lowercase(Locale.US),
+                x = json.optDouble("x", 0.5),
+                y = json.optDouble("y", 0.5),
+                magnification = json.optDouble("magnification", json.optDouble("scale", 1.0) - 1.0)
+            )
             "nav" -> ClipboardAccessibilityService.injectZevPlayNavigation(
+                action = json.optString("action").trim().lowercase(Locale.US)
+            )
+            "shortcut" -> ClipboardAccessibilityService.injectZevPlayShortcut(
                 action = json.optString("action").trim().lowercase(Locale.US)
             )
             "text" -> ClipboardAccessibilityService.injectZevPlayText(

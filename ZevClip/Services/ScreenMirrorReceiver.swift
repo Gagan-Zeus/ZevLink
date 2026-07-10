@@ -288,6 +288,10 @@ final class ScreenMirrorVideoView: NSView {
     private var scrollTouchPoint: CGPoint?
     private var pendingScrollTouchDelta = CGSize.zero
     private var scrollTouchEndWorkItem: DispatchWorkItem?
+    private var zoomIsActive = false
+    private var pendingZoomMagnification: CGFloat = 0
+    private var pendingZoomCenter: CGPoint?
+    private var lastZoomMoveSentAt: TimeInterval = 0
 
     var onControlCommand: ((Data) -> Void)?
 
@@ -426,6 +430,82 @@ final class ScreenMirrorVideoView: NSView {
         scheduleScrollTouchEnd()
     }
 
+    override func magnify(with event: NSEvent) {
+        guard !touchIsActive else { return }
+        finishScrollTouch()
+        guard let center = normalizedPoint(for: event, clamped: true) else {
+            finishZoom()
+            return
+        }
+
+        if event.phase.contains(.began) {
+            beginZoom(at: center, timestamp: event.timestamp)
+        }
+
+        if !zoomIsActive {
+            beginZoom(at: center, timestamp: event.timestamp)
+        }
+
+        pendingZoomCenter = center
+        pendingZoomMagnification += event.magnification
+        if event.phase.intersection([.ended, .cancelled]).isEmpty == false {
+            sendPendingZoomMove(force: true, timestamp: event.timestamp)
+            finishZoom(at: center)
+            return
+        }
+
+        sendPendingZoomMove(force: false, timestamp: event.timestamp)
+    }
+
+    private func beginZoom(at center: CGPoint, timestamp: TimeInterval) {
+        zoomIsActive = true
+        pendingZoomMagnification = 0
+        pendingZoomCenter = center
+        lastZoomMoveSentAt = timestamp
+        sendControl([
+            "type": "zoom",
+            "action": "begin",
+            "x": center.x,
+            "y": center.y
+        ])
+    }
+
+    private func sendPendingZoomMove(force: Bool, timestamp: TimeInterval) {
+        guard zoomIsActive else { return }
+        guard let center = pendingZoomCenter else { return }
+        let elapsed = timestamp - lastZoomMoveSentAt
+        let readyByDistance = abs(pendingZoomMagnification) >= Self.zoomMagnificationThreshold
+        let readyByTime = elapsed >= Self.zoomMoveInterval
+        guard force || (readyByDistance && readyByTime) else { return }
+        guard abs(pendingZoomMagnification) >= Self.minimumZoomMagnification else { return }
+
+        let magnification = max(-Self.maxZoomMagnificationStep, min(Self.maxZoomMagnificationStep, pendingZoomMagnification))
+        pendingZoomMagnification -= magnification
+        lastZoomMoveSentAt = timestamp
+        sendControl([
+            "type": "zoom",
+            "action": "move",
+            "x": center.x,
+            "y": center.y,
+            "magnification": magnification
+        ])
+    }
+
+    private func finishZoom(at center: CGPoint? = nil) {
+        guard zoomIsActive else { return }
+        let endCenter = center ?? pendingZoomCenter ?? CGPoint(x: 0.5, y: 0.5)
+        sendControl([
+            "type": "zoom",
+            "action": "end",
+            "x": endCenter.x,
+            "y": endCenter.y
+        ])
+        zoomIsActive = false
+        pendingZoomMagnification = 0
+        pendingZoomCenter = nil
+        lastZoomMoveSentAt = 0
+    }
+
     private func beginScrollTouch(near cursorPoint: CGPoint) {
         scrollTouchEndWorkItem?.cancel()
         let point = scrollTouchAnchor(near: cursorPoint)
@@ -485,8 +565,7 @@ final class ScreenMirrorVideoView: NSView {
     }
 
     override func keyDown(with event: NSEvent) {
-        guard event.modifierFlags.intersection([.command, .control, .option]).isEmpty else {
-            super.keyDown(with: event)
+        if event.modifierFlags.contains(.command), sendCommandShortcut(event) {
             return
         }
 
@@ -499,13 +578,46 @@ final class ScreenMirrorVideoView: NSView {
             sendControl(["type": "key", "key": "tab"])
         case 53:
             sendControl(["type": "nav", "action": "back"])
+        case 123:
+            sendControl(["type": "key", "key": "arrow_left"])
+        case 124:
+            sendControl(["type": "key", "key": "arrow_right"])
+        case 125:
+            sendControl(["type": "key", "key": "arrow_down"])
+        case 126:
+            sendControl(["type": "key", "key": "arrow_up"])
         default:
+            guard event.modifierFlags.intersection([.control, .option]).isEmpty else {
+                super.keyDown(with: event)
+                return
+            }
             if let characters = event.characters, !characters.isEmpty {
                 sendControl(["type": "text", "text": characters])
             } else {
                 super.keyDown(with: event)
             }
         }
+    }
+
+    private func sendCommandShortcut(_ event: NSEvent) -> Bool {
+        guard let characters = event.charactersIgnoringModifiers?.lowercased(), characters.count == 1 else {
+            return false
+        }
+        let action: String
+        switch characters {
+        case "a":
+            action = "select_all"
+        case "c":
+            action = "copy"
+        case "v":
+            action = "paste"
+        case "x":
+            action = "cut"
+        default:
+            return false
+        }
+        sendControl(["type": "shortcut", "action": action])
+        return true
     }
 
     override func mouseExited(with event: NSEvent) {
@@ -563,6 +675,10 @@ final class ScreenMirrorVideoView: NSView {
     private static let maxVerticalScrollTouchDelta: CGFloat = 0.035
     private static let minimumScrollTouchDelta: CGFloat = 0.001
     private static let scrollTouchStartThreshold: CGFloat = 0.004
+    private static let zoomMoveInterval: TimeInterval = 1.0 / 60.0
+    private static let minimumZoomMagnification: CGFloat = 0.0015
+    private static let zoomMagnificationThreshold: CGFloat = 0.012
+    private static let maxZoomMagnificationStep: CGFloat = 0.035
 
     private func displayedVideoRect() -> NSRect {
         guard videoSize.width > 0, videoSize.height > 0, bounds.width > 0, bounds.height > 0 else {

@@ -161,6 +161,8 @@
     <string name="airplay_capture_permission_missing">Android audio capture permission was not granted.</string>
     <string name="airplay_capture_android_q_required">Phone audio capture needs Android 10 or newer.</string>
     <string name="airplay_capture_record_audio_needed">Enable microphone/audio recording permission for phone audio capture.</string>
+    <string name="airplay_brightness_permission_needed">Allow ZevClip to modify system settings so ZevPlay can dim and restore the Android screen.</string>
+    <string name="airplay_overlay_permission_needed">Allow ZevClip to display over other apps so ZevPlay can force the Android screen dim while mirroring.</string>
     <string name="airplay_capture_pairing_needed">Pair your Mac first.</string>
     <string name="pair_mac_title">Mac Connection</string>
     <string name="pair_mac_description">Scan the QR code from ZevLink on Mac once. Use Reconnect Mac if your network changes.</string>

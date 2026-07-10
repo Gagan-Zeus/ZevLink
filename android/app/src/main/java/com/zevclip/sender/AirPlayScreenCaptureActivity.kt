@@ -7,8 +7,10 @@ import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
 import android.media.projection.MediaProjectionManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.view.Gravity
 import android.view.View
 import android.view.Window
@@ -16,6 +18,10 @@ import android.view.WindowManager
 
 class AirPlayScreenCaptureActivity : Activity() {
     private var requestedCapture = false
+    private var requestedWriteSettings = false
+    private var requestedOverlay = false
+    private var leftForWriteSettings = false
+    private var leftForOverlay = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         requestWindowFeature(Window.FEATURE_NO_TITLE)
@@ -23,6 +29,42 @@ class AirPlayScreenCaptureActivity : Activity() {
         super.onCreate(savedInstanceState)
         configureTransparentHandoffWindow()
         startScreenMirror()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        when {
+            requestedWriteSettings && leftForWriteSettings -> {
+                requestedWriteSettings = false
+                leftForWriteSettings = false
+                if (Settings.System.canWrite(this)) {
+                    startScreenMirror()
+                } else {
+                    updateStatus(getString(R.string.airplay_brightness_permission_needed))
+                    finish()
+                }
+            }
+            requestedOverlay && leftForOverlay -> {
+                requestedOverlay = false
+                leftForOverlay = false
+                if (Settings.canDrawOverlays(this)) {
+                    startScreenMirror()
+                } else {
+                    updateStatus(getString(R.string.airplay_overlay_permission_needed))
+                    finish()
+                }
+            }
+        }
+    }
+
+    override fun onPause() {
+        if (requestedWriteSettings) {
+            leftForWriteSettings = true
+        }
+        if (requestedOverlay) {
+            leftForOverlay = true
+        }
+        super.onPause()
     }
 
     override fun finish() {
@@ -67,6 +109,14 @@ class AirPlayScreenCaptureActivity : Activity() {
         if (ZevClipPreferences.isAirPlayBroadcastStreaming(this)) {
             AirPlayBroadcastAudioService.stop(this)
         }
+        if (!Settings.System.canWrite(this)) {
+            requestWriteSettingsPermission()
+            return
+        }
+        if (!Settings.canDrawOverlays(this)) {
+            requestOverlayPermission()
+            return
+        }
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), REQUEST_RECORD_AUDIO)
             updateStatus(getString(R.string.airplay_capture_record_audio_needed))
@@ -100,6 +150,40 @@ class AirPlayScreenCaptureActivity : Activity() {
     private fun updateStatus(message: String) {
         ZevClipPreferences.setAirPlayTestStatus(this, message)
         ZevClipStatusNotification.update(this)
+    }
+
+    private fun requestWriteSettingsPermission() {
+        requestedWriteSettings = true
+        updateStatus(getString(R.string.airplay_brightness_permission_needed))
+        runCatching {
+            startActivity(
+                Intent(
+                    Settings.ACTION_MANAGE_WRITE_SETTINGS,
+                    Uri.parse("package:$packageName")
+                )
+            )
+        }.onFailure {
+            requestedWriteSettings = false
+            leftForWriteSettings = false
+            startScreenMirror()
+        }
+    }
+
+    private fun requestOverlayPermission() {
+        requestedOverlay = true
+        updateStatus(getString(R.string.airplay_overlay_permission_needed))
+        runCatching {
+            startActivity(
+                Intent(
+                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:$packageName")
+                )
+            )
+        }.onFailure {
+            requestedOverlay = false
+            leftForOverlay = false
+            startScreenMirror()
+        }
     }
 
     private fun configureTransparentHandoffWindow() {

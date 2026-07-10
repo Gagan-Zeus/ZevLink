@@ -4,6 +4,8 @@ import android.app.NotificationManager
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.graphics.Color
+import android.graphics.PixelFormat
 import android.media.AudioRecord
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
@@ -11,8 +13,11 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.provider.Settings
 import android.util.Log
+import android.view.Gravity
 import android.view.Surface
+import android.view.View
 import android.view.WindowManager
 import com.zevclip.sender.airplay.AirPlayClock
 import com.zevclip.sender.airplay.AirPlayAlacEncoder
@@ -48,6 +53,10 @@ class AirPlayScreenMirrorService : Service() {
     private var mirrorAudioStreamer: AirPlayPcmStreamer? = null
     private var localPlaybackSilencer: LocalPlaybackSilencer? = null
     private var dacpControlServer: AirPlayDacpControlServer? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val brightnessLock = Any()
+    private var brightnessRestoreState: ScreenBrightnessState? = null
+    private var dimOverlayView: View? = null
     private var encoderGeneration = 0
     @Volatile
     private var restartingEncoder = false
@@ -126,6 +135,7 @@ class AirPlayScreenMirrorService : Service() {
                 }
 
                 updateStatus(getString(R.string.airplay_screen_mirror_preparing))
+                dimScreenForMirror()
                 startZevLinkWindowPipeline(projection, endpoint.ipAddress, captureSize())
 
                 updateStatus(getString(R.string.airplay_screen_mirror_live))
@@ -509,6 +519,7 @@ class AirPlayScreenMirrorService : Service() {
         projectionCallback = null
         runCatching { mediaProjection?.stop() }
         mediaProjection = null
+        restoreScreenBrightness()
         ZevClipPreferences.setAirPlayScreenMirroring(this, false)
     }
 
@@ -540,6 +551,176 @@ class AirPlayScreenMirrorService : Service() {
         getSystemService(NotificationManager::class.java).cancel(LEGACY_AIRPLAY_NOTIFICATION_ID)
     }
 
+    private fun dimScreenForMirror() {
+        synchronized(brightnessLock) {
+            if (!Settings.System.canWrite(this)) {
+                Log.i(TAG, "Skipping ZevPlay brightness dimming because WRITE_SETTINGS is not granted.")
+                return
+            }
+
+            val resolver = contentResolver
+            if (brightnessRestoreState == null) {
+                brightnessRestoreState = loadBrightnessRestoreState()?.also {
+                    Log.i(TAG, "Keeping existing ZevPlay brightness restore checkpoint.")
+                }
+            }
+
+            runCatching {
+                if (brightnessRestoreState == null) {
+                    val originalMode = Settings.System.getInt(
+                        resolver,
+                        Settings.System.SCREEN_BRIGHTNESS_MODE,
+                        Settings.System.SCREEN_BRIGHTNESS_MODE_AUTOMATIC
+                    )
+                    val originalBrightness = Settings.System.getInt(
+                        resolver,
+                        Settings.System.SCREEN_BRIGHTNESS,
+                        DEFAULT_RESTORE_BRIGHTNESS
+                    ).coerceIn(MIN_SCREEN_BRIGHTNESS, MAX_SCREEN_BRIGHTNESS)
+                    val restoreState = ScreenBrightnessState(
+                        mode = originalMode,
+                        brightness = originalBrightness
+                    )
+                    if (!saveBrightnessRestoreState(restoreState)) {
+                        error("Could not persist ZevPlay brightness restore checkpoint.")
+                    }
+                    brightnessRestoreState = restoreState
+                }
+
+                Settings.System.putInt(
+                    resolver,
+                    Settings.System.SCREEN_BRIGHTNESS_MODE,
+                    Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL
+                )
+                Settings.System.putInt(
+                    resolver,
+                    Settings.System.SCREEN_BRIGHTNESS,
+                    MIN_SCREEN_BRIGHTNESS
+                )
+                showDimOverlay()
+                Log.i(TAG, "Dimmed Android screen for ZevPlay mirroring.")
+            }.onFailure { error ->
+                brightnessRestoreState = null
+                Log.w(TAG, "Could not dim Android screen for ZevPlay mirroring.", error)
+            }
+        }
+    }
+
+    private fun restoreScreenBrightness() {
+        synchronized(brightnessLock) {
+            hideDimOverlay()
+            val state = brightnessRestoreState ?: loadBrightnessRestoreState() ?: return
+            if (!Settings.System.canWrite(this)) {
+                Log.i(TAG, "Skipping ZevPlay brightness restore because WRITE_SETTINGS is not granted.")
+                return
+            }
+
+            val resolver = contentResolver
+            runCatching {
+                Settings.System.putInt(
+                    resolver,
+                    Settings.System.SCREEN_BRIGHTNESS,
+                    state.brightness.coerceIn(MIN_SCREEN_BRIGHTNESS, MAX_SCREEN_BRIGHTNESS)
+                )
+                Settings.System.putInt(
+                    resolver,
+                    Settings.System.SCREEN_BRIGHTNESS_MODE,
+                    state.mode
+                )
+                brightnessRestoreState = null
+                clearBrightnessRestoreState()
+                Log.i(TAG, "Restored Android screen brightness after ZevPlay mirroring.")
+            }.onFailure { error ->
+                Log.w(TAG, "Could not restore Android screen brightness after ZevPlay mirroring.", error)
+            }
+        }
+    }
+
+    private fun saveBrightnessRestoreState(state: ScreenBrightnessState): Boolean {
+        return ZevClipPreferences.preferences(this).edit()
+            .putBoolean(KEY_BRIGHTNESS_RESTORE_PENDING, true)
+            .putInt(KEY_BRIGHTNESS_RESTORE_MODE, state.mode)
+            .putInt(KEY_BRIGHTNESS_RESTORE_VALUE, state.brightness)
+            .commit()
+    }
+
+    private fun loadBrightnessRestoreState(): ScreenBrightnessState? {
+        val preferences = ZevClipPreferences.preferences(this)
+        if (!preferences.getBoolean(KEY_BRIGHTNESS_RESTORE_PENDING, false)) return null
+        return ScreenBrightnessState(
+            mode = preferences.getInt(
+                KEY_BRIGHTNESS_RESTORE_MODE,
+                Settings.System.SCREEN_BRIGHTNESS_MODE_AUTOMATIC
+            ),
+            brightness = preferences.getInt(
+                KEY_BRIGHTNESS_RESTORE_VALUE,
+                DEFAULT_RESTORE_BRIGHTNESS
+            )
+        )
+    }
+
+    private fun clearBrightnessRestoreState() {
+        ZevClipPreferences.preferences(this).edit()
+            .remove(KEY_BRIGHTNESS_RESTORE_PENDING)
+            .remove(KEY_BRIGHTNESS_RESTORE_MODE)
+            .remove(KEY_BRIGHTNESS_RESTORE_VALUE)
+            .apply()
+    }
+
+    private fun showDimOverlay() {
+        if (!Settings.canDrawOverlays(this)) return
+        mainHandler.post {
+            synchronized(brightnessLock) {
+                if (!running.get() || dimOverlayView != null) return@synchronized
+                val overlay = View(this).apply {
+                    setBackgroundColor(Color.BLACK)
+                    alpha = DIM_OVERLAY_ALPHA
+                }
+                val params = WindowManager.LayoutParams(
+                    WindowManager.LayoutParams.MATCH_PARENT,
+                    WindowManager.LayoutParams.MATCH_PARENT,
+                    WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                        WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                        WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                    PixelFormat.TRANSLUCENT
+                ).apply {
+                    gravity = Gravity.TOP or Gravity.START
+                    screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_OFF
+                    dimAmount = 0f
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                        layoutInDisplayCutoutMode =
+                            WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+                    }
+                }
+
+                runCatching {
+                    getSystemService(WindowManager::class.java).addView(overlay, params)
+                    dimOverlayView = overlay
+                    Log.i(TAG, "Showing ZevPlay dim overlay.")
+                }.onFailure { error ->
+                    Log.w(TAG, "Could not show ZevPlay dim overlay.", error)
+                }
+            }
+        }
+    }
+
+    private fun hideDimOverlay() {
+        mainHandler.post {
+            synchronized(brightnessLock) {
+                val overlay = dimOverlayView ?: return@synchronized
+                dimOverlayView = null
+                runCatching {
+                    getSystemService(WindowManager::class.java).removeView(overlay)
+                    Log.i(TAG, "Hidden ZevPlay dim overlay.")
+                }.onFailure { error ->
+                    Log.w(TAG, "Could not hide ZevPlay dim overlay.", error)
+                }
+            }
+        }
+    }
+
     companion object {
         private const val ACTION_START = "com.zevclip.sender.airplay.screen.START"
         private const val ACTION_STOP = "com.zevclip.sender.airplay.screen.STOP"
@@ -554,6 +735,13 @@ class AirPlayScreenMirrorService : Service() {
         private const val MIRROR_AUDIO_LATENCY_FRAMES = 8_820L
         private const val MAX_PHONE_CAPTURE_LONG_EDGE = 3840
         private const val MAX_PHONE_CAPTURE_PIXELS = 3840 * 2160
+        private const val MIN_SCREEN_BRIGHTNESS = 0
+        private const val MAX_SCREEN_BRIGHTNESS = 255
+        private const val DEFAULT_RESTORE_BRIGHTNESS = 128
+        private const val DIM_OVERLAY_ALPHA = 0.01f
+        private const val KEY_BRIGHTNESS_RESTORE_PENDING = "zevplay_brightness_restore_pending"
+        private const val KEY_BRIGHTNESS_RESTORE_MODE = "zevplay_brightness_restore_mode"
+        private const val KEY_BRIGHTNESS_RESTORE_VALUE = "zevplay_brightness_restore_value"
         private const val TAG = "ZevClipAirPlayScreen"
 
         fun start(context: Context, resultCode: Int, resultData: Intent) {
@@ -577,6 +765,11 @@ class AirPlayScreenMirrorService : Service() {
         }
     }
 }
+
+private data class ScreenBrightnessState(
+    val mode: Int,
+    val brightness: Int
+)
 
 private data class MirrorCaptureSize(
     val width: Int,
