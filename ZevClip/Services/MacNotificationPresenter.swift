@@ -986,7 +986,7 @@ private final class AndroidNotificationShadeStackController {
     }
 
     private func reposition(orderFront: Bool) {
-        var nextTopY = initialTopY() - scrollOffset
+        var nextTopY = initialTopY() + scrollOffset
         for id in order {
             guard let panel = panels[id] else { continue }
             if orderFront {
