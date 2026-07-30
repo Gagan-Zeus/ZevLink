@@ -19,10 +19,16 @@ Builds:
     subdir: android/app
     gradle:
       - yes
+  - versionName: 3.1.2
+    versionCode: 33
+    commit: 8050ccd39cf3b6067740abfe3604f08ba1192c3e
+    subdir: android/app
+    gradle:
+      - yes
 
 AllowedAPKSigningKeys: cb82eb88fc46c63e8057b958ae13b5e8aa4e6a50d95012a9fe0e5b1bdfbddb30
 
 AutoUpdateMode: Version
 UpdateCheckMode: Tags
-CurrentVersion: 3.1.1
-CurrentVersionCode: 32
+CurrentVersion: 3.1.2
+CurrentVersionCode: 33
