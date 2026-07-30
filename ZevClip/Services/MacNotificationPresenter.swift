@@ -1043,6 +1043,7 @@ private final class AndroidNotificationShadeStackController {
 
 private final class AndroidNotificationPanelController: NSObject {
     private let panel: NotificationInteractionPanel
+    private let closeButton = NotificationActionButton(title: "", target: nil, action: nil)
     private let iconView = NSImageView()
     private let titleLabel = NSTextField(labelWithString: "")
     private let bodyLabel = NSTextField(labelWithString: "")
@@ -1111,6 +1112,11 @@ private final class AndroidNotificationPanelController: NSObject {
     private weak var trackingContentView: HoverTrackingView?
     private var replyCursorBlinkTimer: Timer?
     private static let panelWidth: CGFloat = 352
+    private static let closeButtonSize: CGFloat = 20
+    private static let closeButtonBackgroundInset: CGFloat = 1
+    private static let closeButtonGutterWidth: CGFloat = closeButtonSize / 2
+    private static let outerPanelWidth: CGFloat = panelWidth + closeButtonGutterWidth
+    private static let closeButtonTopInset: CGFloat = 2
     private static let textColumnWidth: CGFloat = 240
     private static let mediaTextColumnWidth: CGFloat = 190
     private static let regularIconSize: CGFloat = 40
@@ -1156,7 +1162,7 @@ private final class AndroidNotificationPanelController: NSObject {
             contentRect: NSRect(
                 x: 0,
                 y: 0,
-                width: Self.panelWidth,
+                width: Self.outerPanelWidth,
                 height: notification.isMediaPinnedNotification ? Self.mediaPanelHeight : Self.collapsedHeight
             ),
             styleMask: [.borderless, .nonactivatingPanel],
@@ -1327,7 +1333,7 @@ private final class AndroidNotificationPanelController: NSObject {
 
     private func configureContent() {
         let contentView = HoverTrackingView(
-            frame: panel.contentView?.bounds ?? NSRect(
+            frame: NSRect(
                 x: 0,
                 y: 0,
                 width: Self.panelWidth,
@@ -1374,6 +1380,7 @@ private final class AndroidNotificationPanelController: NSObject {
             self?.onHideAll()
         }
         contentView.allowsScrollWheelSwipeUp = shouldAutoClose
+        configureDismissButton()
         configurePanelContentView(contentView)
         panel.acceptsMouseMovedEvents = true
 
@@ -1674,26 +1681,86 @@ private final class AndroidNotificationPanelController: NSObject {
     }
 
     private func configurePanelContentView(_ contentView: HoverTrackingView) {
+        let rootView = NSView(
+            frame: NSRect(
+                x: 0,
+                y: 0,
+                width: Self.outerPanelWidth,
+                height: contentView.frame.height
+            )
+        )
+        rootView.autoresizingMask = [.width, .height]
+        panel.contentView = rootView
+
         if #available(macOS 26.0, *) {
-            let glassView = NSGlassEffectView(frame: contentView.frame)
+            let glassView = NSGlassEffectView(
+                frame: NSRect(
+                    x: Self.closeButtonGutterWidth,
+                    y: 0,
+                    width: Self.panelWidth,
+                    height: contentView.frame.height
+                )
+            )
             glassView.cornerRadius = 18
-            glassView.autoresizingMask = [.width, .height]
+            glassView.autoresizingMask = [.height]
             contentView.frame = glassView.bounds
             contentView.autoresizingMask = [.width, .height]
             glassView.contentView = contentView
-            panel.contentView = glassView
+            rootView.addSubview(glassView)
 
             contentView.wantsLayer = true
             contentView.layer?.backgroundColor = NSColor.clear.cgColor
             contentView.layer?.masksToBounds = true
             contentView.focusRingType = .none
         } else {
-            panel.contentView = contentView
+            contentView.frame = NSRect(
+                x: Self.closeButtonGutterWidth,
+                y: 0,
+                width: Self.panelWidth,
+                height: contentView.frame.height
+            )
+            contentView.autoresizingMask = [.height]
+            rootView.addSubview(contentView)
             contentView.wantsLayer = true
             contentView.layer?.backgroundColor = NSColor(calibratedWhite: 0.07, alpha: 0.96).cgColor
             contentView.layer?.cornerRadius = 18
             contentView.layer?.masksToBounds = true
             contentView.focusRingType = .none
+        }
+
+        closeButton.translatesAutoresizingMaskIntoConstraints = false
+        rootView.addSubview(closeButton)
+        NSLayoutConstraint.activate([
+            closeButton.leadingAnchor.constraint(equalTo: rootView.leadingAnchor),
+            closeButton.topAnchor.constraint(equalTo: rootView.topAnchor, constant: Self.closeButtonTopInset),
+            closeButton.widthAnchor.constraint(equalToConstant: Self.closeButtonSize),
+            closeButton.heightAnchor.constraint(equalToConstant: Self.closeButtonSize)
+        ])
+    }
+
+    private func configureDismissButton() {
+        closeButton.target = self
+        closeButton.action = #selector(dismissButtonPressed)
+        closeButton.isBordered = false
+        closeButton.bezelStyle = .regularSquare
+        closeButton.setButtonType(.momentaryChange)
+        closeButton.wantsLayer = true
+        closeButton.layer?.backgroundColor = NSColor.clear.cgColor
+        closeButton.circularBackgroundColor = NSColor.white.withAlphaComponent(0.18)
+        closeButton.circularBackgroundInset = Self.closeButtonBackgroundInset
+        closeButton.focusRingType = .none
+        closeButton.contentTintColor = .white
+        closeButton.imagePosition = .imageOnly
+        closeButton.imageScaling = .scaleProportionallyDown
+        closeButton.toolTip = "Dismiss"
+        closeButton.translatesAutoresizingMaskIntoConstraints = false
+        closeButton.pressAnimationScale = 1
+        closeButton.layer?.transform = CATransform3DMakeScale(0.9, 0.9, 1)
+        if let image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Dismiss notification") {
+            closeButton.image = image.withSymbolConfiguration(.init(pointSize: 8, weight: .medium))
+        } else {
+            closeButton.title = "x"
+            closeButton.font = .systemFont(ofSize: 10, weight: .medium)
         }
     }
 
@@ -1730,6 +1797,10 @@ private final class AndroidNotificationPanelController: NSObject {
         isExpanded.toggle()
         applyDisplayState(animated: true)
         restartAutoCloseTimer(after: Self.defaultVisibleDuration)
+    }
+
+    @objc private func dismissButtonPressed() {
+        dismissFromAndroid()
     }
 
     private func applyDisplayState(animated: Bool) {
@@ -3270,14 +3341,50 @@ private extension Comparable {
 
 private final class NotificationActionButton: NSButton {
     var pressAnimationScale: CGFloat = 1
+    var circularBackgroundColor: NSColor? {
+        didSet {
+            wantsLayer = true
+            needsLayout = true
+        }
+    }
+    var circularBackgroundInset: CGFloat = 0 {
+        didSet {
+            wantsLayer = true
+            needsLayout = true
+        }
+    }
+    private let circularBackgroundLayer = CALayer()
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override var canBecomeKeyView: Bool { false }
+
+    override func layout() {
+        super.layout()
+        updateCircularBackgroundLayer()
+    }
 
     override func mouseDown(with event: NSEvent) {
         animatePress(isPressed: true)
         super.mouseDown(with: event)
         animatePress(isPressed: false)
+    }
+
+    private func updateCircularBackgroundLayer() {
+        guard let circularBackgroundColor, let layer else {
+            circularBackgroundLayer.removeFromSuperlayer()
+            return
+        }
+
+        if circularBackgroundLayer.superlayer == nil {
+            layer.insertSublayer(circularBackgroundLayer, at: 0)
+        }
+
+        let circleFrame = bounds.insetBy(dx: circularBackgroundInset, dy: circularBackgroundInset)
+        circularBackgroundLayer.frame = circleFrame
+        circularBackgroundLayer.cornerRadius = min(circleFrame.width, circleFrame.height) / 2
+        circularBackgroundLayer.backgroundColor = circularBackgroundColor.cgColor
+        circularBackgroundLayer.masksToBounds = true
+        circularBackgroundLayer.contentsScale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
     }
 
     private func animatePress(isPressed: Bool) {
