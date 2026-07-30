@@ -31,6 +31,9 @@ final class ScreenMirrorWindowController: NSObject, NSWindowDelegate {
         window = mirrorWindow
         videoView = mirrorWindow.contentView as? ScreenMirrorVideoView
         videoView?.onControlCommand = onControlCommand
+        videoView?.onPointerActivity = { [weak self] in
+            self?.handlePointerActivity()
+        }
         videoView?.updateVideoSize(width: width, height: height)
         resizeWindowIfNeeded(width: width, height: height)
         if isNewWindow {
@@ -66,6 +69,7 @@ final class ScreenMirrorWindowController: NSObject, NSWindowDelegate {
         controlPanel?.close()
         controlPanel = nil
         videoView?.flushAndRemoveImage()
+        videoView?.onPointerActivity = nil
         window = nil
         videoView = nil
         onControlCommand = nil
@@ -80,6 +84,17 @@ final class ScreenMirrorWindowController: NSObject, NSWindowDelegate {
     }
 
     func windowDidResize(_ notification: Notification) {
+        videoView?.resizeVideoLayerToCurrentBounds()
+        repositionControls()
+    }
+
+    func windowDidEnterFullScreen(_ notification: Notification) {
+        repositionControls()
+        controlPanel?.scheduleAutoHideIfNeeded()
+    }
+
+    func windowDidExitFullScreen(_ notification: Notification) {
+        controlPanel?.showPinned()
         repositionControls()
     }
 
@@ -123,6 +138,11 @@ final class ScreenMirrorWindowController: NSObject, NSWindowDelegate {
         panel.show(attachedTo: mirrorWindow)
     }
 
+    private func handlePointerActivity() {
+        guard let window else { return }
+        controlPanel?.reveal(attachedTo: window)
+    }
+
     private func repositionControls() {
         guard let window else { return }
         controlPanel?.position(attachedTo: window)
@@ -130,6 +150,11 @@ final class ScreenMirrorWindowController: NSObject, NSWindowDelegate {
 
     private func resizeWindowIfNeeded(width: Int, height: Int) {
         guard let window else { return }
+        guard !window.styleMask.contains(.fullScreen) else {
+            videoView?.resizeVideoLayerToCurrentBounds()
+            repositionControls()
+            return
+        }
         let targetSize = Self.windowSize(width: width, height: height)
         let currentSize = window.contentLayoutRect.size
         guard abs(currentSize.width - targetSize.width) > 2 || abs(currentSize.height - targetSize.height) > 2 else {
@@ -158,11 +183,21 @@ final class ScreenMirrorWindowController: NSObject, NSWindowDelegate {
 private final class ScreenMirrorControlPanel: NSObject {
     private static let panelSize = NSSize(width: 208, height: 48)
     private static let windowGap: CGFloat = 10
+    private static let screenEdgeInset: CGFloat = 16
+    private static let fullScreenBottomInset: CGFloat = 28
+    private static let autoHideDelay: TimeInterval = 5
+    private static let fadeDuration: TimeInterval = 0.18
+    private static let savedFullScreenPanelXKey = "screenMirror.fullScreenControlPanel.originX"
+    private static let savedFullScreenPanelYKey = "screenMirror.fullScreenControlPanel.originY"
     private let backButton = ScreenMirrorControlButton(symbolName: "chevron.backward", tooltip: "Back")
     private let homeButton = ScreenMirrorControlButton(symbolName: "circle", tooltip: "Home")
     private let recentsButton = ScreenMirrorControlButton(symbolName: "rectangle.on.rectangle", tooltip: "Recents")
     private let panel: NSPanel
     private weak var parentWindow: NSWindow?
+    private var dragOriginInScreen: NSPoint?
+    private var dragPanelOrigin: NSPoint?
+    private var userPlacedFullScreenOriginFraction: CGPoint?
+    private var autoHideWorkItem: DispatchWorkItem?
 
     var onControlCommand: ((Data) -> Void)?
 
@@ -174,6 +209,7 @@ private final class ScreenMirrorControlPanel: NSObject {
             defer: false
         )
         super.init()
+        userPlacedFullScreenOriginFraction = Self.loadSavedFullScreenOriginFraction()
         configurePanel()
     }
 
@@ -184,10 +220,19 @@ private final class ScreenMirrorControlPanel: NSObject {
             parentWindow = mirrorWindow
         }
         position(attachedTo: mirrorWindow)
-        panel.orderFront(nil)
+        revealPanel(animated: false)
+        scheduleAutoHideIfNeeded()
     }
 
     func position(attachedTo mirrorWindow: NSWindow) {
+        if mirrorWindow.styleMask.contains(.fullScreen) {
+            let targetOrigin = userPlacedFullScreenOriginFraction.map {
+                fullScreenOrigin(for: $0, attachedTo: mirrorWindow)
+            } ?? defaultFullScreenOrigin(attachedTo: mirrorWindow)
+            setPanelOrigin(targetOrigin, attachedTo: mirrorWindow, remembersUserPlacement: false)
+            return
+        }
+
         let parentFrame = mirrorWindow.frame
         let visibleFrame = mirrorWindow.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? parentFrame
         let preferredX = parentFrame.midX - Self.panelSize.width / 2
@@ -204,32 +249,71 @@ private final class ScreenMirrorControlPanel: NSObject {
         panel.setFrameOrigin(NSPoint(x: x, y: y))
     }
 
+    func reveal(attachedTo mirrorWindow: NSWindow) {
+        position(attachedTo: mirrorWindow)
+        revealPanel(animated: true)
+        scheduleAutoHideIfNeeded()
+    }
+
+    func scheduleAutoHideIfNeeded() {
+        autoHideWorkItem?.cancel()
+        guard parentWindow?.styleMask.contains(.fullScreen) == true else { return }
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.hidePanel(animated: true)
+        }
+        autoHideWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.autoHideDelay, execute: workItem)
+    }
+
+    func showPinned() {
+        autoHideWorkItem?.cancel()
+        autoHideWorkItem = nil
+        revealPanel(animated: false)
+    }
+
     func orderOut() {
-        panel.orderOut(nil)
+        hidePanel(animated: false)
     }
 
     func close() {
+        autoHideWorkItem?.cancel()
+        autoHideWorkItem = nil
         parentWindow?.removeChildWindow(panel)
         parentWindow = nil
-        panel.orderOut(nil)
+        hidePanel(animated: false)
     }
 
     private func configurePanel() {
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        panel.hasShadow = true
+        panel.hasShadow = false
         panel.hidesOnDeactivate = false
         panel.isReleasedWhenClosed = false
         panel.collectionBehavior = [.transient, .ignoresCycle]
         panel.level = .floating
+        panel.alphaValue = 0
 
-        let root = NSVisualEffectView(frame: NSRect(origin: .zero, size: Self.panelSize))
+        let root = DraggableControlPanelView(frame: NSRect(origin: .zero, size: Self.panelSize))
+        root.onDragBegan = { [weak self] screenPoint in
+            self?.beginDrag(at: screenPoint)
+        }
+        root.onDragged = { [weak self] screenPoint in
+            self?.drag(to: screenPoint)
+        }
+        root.onDragEnded = { [weak self] in
+            self?.finishDrag()
+        }
+        root.onPointerActivity = { [weak self] in
+            self?.scheduleAutoHideIfNeeded()
+        }
         root.material = .hudWindow
         root.blendingMode = .behindWindow
         root.state = .active
         root.wantsLayer = true
         root.layer?.cornerRadius = 22
         root.layer?.masksToBounds = true
+        root.layer?.borderColor = NSColor.white.withAlphaComponent(0.16).cgColor
+        root.layer?.borderWidth = 0.5
         panel.contentView = root
 
         [
@@ -263,8 +347,149 @@ private final class ScreenMirrorControlPanel: NSObject {
 
     @objc private func navigationButtonPressed(_ sender: NSButton) {
         guard let action = sender.identifier?.rawValue else { return }
+        scheduleAutoHideIfNeeded()
         sendControl(["type": "nav", "action": action])
         parentWindow?.makeFirstResponder(parentWindow?.contentView as? ScreenMirrorVideoView)
+    }
+
+    private func beginDrag(at screenPoint: NSPoint) {
+        guard parentWindow?.styleMask.contains(.fullScreen) == true else { return }
+        autoHideWorkItem?.cancel()
+        dragOriginInScreen = screenPoint
+        dragPanelOrigin = panel.frame.origin
+    }
+
+    private func drag(to screenPoint: NSPoint) {
+        guard
+            let parentWindow,
+            parentWindow.styleMask.contains(.fullScreen),
+            let dragOriginInScreen,
+            let dragPanelOrigin
+        else {
+            return
+        }
+        let origin = NSPoint(
+            x: dragPanelOrigin.x + screenPoint.x - dragOriginInScreen.x,
+            y: dragPanelOrigin.y + screenPoint.y - dragOriginInScreen.y
+        )
+        setPanelOrigin(origin, attachedTo: parentWindow, remembersUserPlacement: true)
+    }
+
+    private func finishDrag() {
+        dragOriginInScreen = nil
+        dragPanelOrigin = nil
+        scheduleAutoHideIfNeeded()
+        parentWindow?.makeFirstResponder(parentWindow?.contentView as? ScreenMirrorVideoView)
+    }
+
+    private func defaultFullScreenOrigin(attachedTo mirrorWindow: NSWindow) -> NSPoint {
+        let frame = mirrorWindow.frame
+        return NSPoint(
+            x: frame.midX - Self.panelSize.width / 2,
+            y: frame.minY + Self.fullScreenBottomInset
+        )
+    }
+
+    private func setPanelOrigin(
+        _ origin: NSPoint,
+        attachedTo mirrorWindow: NSWindow,
+        remembersUserPlacement: Bool
+    ) {
+        let frame = mirrorWindow.frame
+        let x = min(
+            max(origin.x, frame.minX + Self.screenEdgeInset),
+            frame.maxX - Self.panelSize.width - Self.screenEdgeInset
+        )
+        let y = min(
+            max(origin.y, frame.minY + Self.screenEdgeInset),
+            frame.maxY - Self.panelSize.height - Self.screenEdgeInset
+        )
+        let clampedOrigin = NSPoint(x: x, y: y)
+        panel.setFrameOrigin(clampedOrigin)
+        if remembersUserPlacement {
+            userPlacedFullScreenOriginFraction = fullScreenFraction(
+                for: clampedOrigin,
+                attachedTo: mirrorWindow
+            )
+            saveFullScreenOriginFraction(userPlacedFullScreenOriginFraction)
+        }
+    }
+
+    private func revealPanel(animated: Bool) {
+        guard panel.alphaValue < 1 || !panel.isVisible else { return }
+        panel.orderFront(nil)
+        if animated {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = Self.fadeDuration
+                context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                panel.animator().alphaValue = 1
+            }
+        } else {
+            panel.alphaValue = 1
+        }
+    }
+
+    private func hidePanel(animated: Bool) {
+        autoHideWorkItem?.cancel()
+        autoHideWorkItem = nil
+        guard panel.isVisible else { return }
+        guard animated else {
+            panel.alphaValue = 0
+            panel.orderOut(nil)
+            return
+        }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = Self.fadeDuration
+            context.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            panel.animator().alphaValue = 0
+        } completionHandler: { [weak panel] in
+            guard let panel, panel.alphaValue <= 0.01 else { return }
+            panel.orderOut(nil)
+        }
+    }
+
+    private func fullScreenOrigin(for fraction: CGPoint, attachedTo mirrorWindow: NSWindow) -> NSPoint {
+        let frame = mirrorWindow.frame
+        let availableWidth = max(1, frame.width - Self.panelSize.width - Self.screenEdgeInset * 2)
+        let availableHeight = max(1, frame.height - Self.panelSize.height - Self.screenEdgeInset * 2)
+        return NSPoint(
+            x: frame.minX + Self.screenEdgeInset + min(max(fraction.x, 0), 1) * availableWidth,
+            y: frame.minY + Self.screenEdgeInset + min(max(fraction.y, 0), 1) * availableHeight
+        )
+    }
+
+    private func fullScreenFraction(for origin: NSPoint, attachedTo mirrorWindow: NSWindow) -> CGPoint {
+        let frame = mirrorWindow.frame
+        let availableWidth = max(1, frame.width - Self.panelSize.width - Self.screenEdgeInset * 2)
+        let availableHeight = max(1, frame.height - Self.panelSize.height - Self.screenEdgeInset * 2)
+        return CGPoint(
+            x: min(max((origin.x - frame.minX - Self.screenEdgeInset) / availableWidth, 0), 1),
+            y: min(max((origin.y - frame.minY - Self.screenEdgeInset) / availableHeight, 0), 1)
+        )
+    }
+
+    private static func loadSavedFullScreenOriginFraction() -> CGPoint? {
+        let defaults = UserDefaults.standard
+        guard
+            defaults.object(forKey: savedFullScreenPanelXKey) != nil,
+            defaults.object(forKey: savedFullScreenPanelYKey) != nil
+        else {
+            return nil
+        }
+        let x = defaults.double(forKey: savedFullScreenPanelXKey)
+        let y = defaults.double(forKey: savedFullScreenPanelYKey)
+        guard x.isFinite, y.isFinite else { return nil }
+        return CGPoint(
+            x: min(max(CGFloat(x), 0), 1),
+            y: min(max(CGFloat(y), 0), 1)
+        )
+    }
+
+    private func saveFullScreenOriginFraction(_ fraction: CGPoint?) {
+        guard let fraction else { return }
+        let defaults = UserDefaults.standard
+        defaults.set(Double(fraction.x), forKey: Self.savedFullScreenPanelXKey)
+        defaults.set(Double(fraction.y), forKey: Self.savedFullScreenPanelYKey)
     }
 
     private func sendControl(_ payload: [String: Any]) {
@@ -278,9 +503,37 @@ private final class ScreenMirrorControlPanel: NSObject {
     }
 }
 
+private final class DraggableControlPanelView: NSVisualEffectView {
+    var onDragBegan: ((NSPoint) -> Void)?
+    var onDragged: ((NSPoint) -> Void)?
+    var onDragEnded: (() -> Void)?
+    var onPointerActivity: (() -> Void)?
+
+    override func mouseDown(with event: NSEvent) {
+        onPointerActivity?()
+        onDragBegan?(NSEvent.mouseLocation)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        onPointerActivity?()
+        onDragged?(NSEvent.mouseLocation)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        onPointerActivity?()
+        onDragEnded?()
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        onPointerActivity?()
+        super.mouseMoved(with: event)
+    }
+}
+
 final class ScreenMirrorVideoView: NSView {
     private let displayLayer = AVSampleBufferDisplayLayer()
     private var videoSize = NSSize(width: 1, height: 1)
+    private var pointerTrackingArea: NSTrackingArea?
     private var touchIsActive = false
     private var lastTouchPoint: CGPoint?
     private var lastTouchSentAt: TimeInterval = 0
@@ -294,15 +547,20 @@ final class ScreenMirrorVideoView: NSView {
     private var lastZoomMoveSentAt: TimeInterval = 0
 
     var onControlCommand: ((Data) -> Void)?
+    var onPointerActivity: (() -> Void)?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
         let rootLayer = CALayer()
         rootLayer.backgroundColor = NSColor.black.cgColor
+        rootLayer.contentsScale = NSScreen.main?.backingScaleFactor ?? 2
         layer = rootLayer
         displayLayer.videoGravity = .resizeAspect
         displayLayer.backgroundColor = NSColor.black.cgColor
+        displayLayer.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
+        displayLayer.contentsScale = rootLayer.contentsScale
+        displayLayer.frame = bounds
         rootLayer.addSublayer(displayLayer)
     }
 
@@ -312,14 +570,56 @@ final class ScreenMirrorVideoView: NSView {
 
     override var acceptsFirstResponder: Bool { true }
 
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let pointerTrackingArea {
+            removeTrackingArea(pointerTrackingArea)
+        }
+        let trackingArea = NSTrackingArea(
+            rect: bounds,
+            options: [.activeInKeyWindow, .mouseMoved, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(trackingArea)
+        pointerTrackingArea = trackingArea
+    }
+
     override func layout() {
         super.layout()
+        resizeVideoLayerToCurrentBounds()
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        resizeVideoLayerToCurrentBounds()
+    }
+
+    override func setBoundsSize(_ newSize: NSSize) {
+        super.setBoundsSize(newSize)
+        resizeVideoLayerToCurrentBounds()
+    }
+
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        resizeVideoLayerToCurrentBounds()
+    }
+
+    func resizeVideoLayerToCurrentBounds() {
+        guard bounds.width > 0, bounds.height > 0 else { return }
+        let backingScale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer?.contentsScale = backingScale
+        displayLayer.contentsScale = backingScale
         displayLayer.frame = bounds
+        CATransaction.commit()
     }
 
     func updateVideoSize(width: Int, height: Int) {
         guard width > 0, height > 0 else { return }
         videoSize = NSSize(width: width, height: height)
+        resizeVideoLayerToCurrentBounds()
     }
 
     func updateFormat(_ format: CMVideoFormatDescription) {
@@ -345,7 +645,13 @@ final class ScreenMirrorVideoView: NSView {
         displayLayer.flushAndRemoveImage()
     }
 
+    override func mouseMoved(with event: NSEvent) {
+        onPointerActivity?()
+        super.mouseMoved(with: event)
+    }
+
     override func mouseDown(with event: NSEvent) {
+        onPointerActivity?()
         finishScrollTouch()
         window?.makeFirstResponder(self)
         guard let point = normalizedPoint(for: event) else {
