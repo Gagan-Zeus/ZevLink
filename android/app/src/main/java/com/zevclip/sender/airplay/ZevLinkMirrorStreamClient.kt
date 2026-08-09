@@ -43,7 +43,7 @@ class ZevLinkMirrorStreamClient(
         nextSocket.connect(InetSocketAddress(host, port), connectTimeoutMs)
         socket = nextSocket
         input = DataInputStream(nextSocket.getInputStream())
-        output = DataOutputStream(nextSocket.getOutputStream())
+        output = DataOutputStream(java.io.BufferedOutputStream(nextSocket.getOutputStream(), 65536))
         writerWorker = thread(name = "zevlink-screen-window-writer", isDaemon = true) {
             Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_DISPLAY)
             while (running.get()) {
@@ -122,12 +122,10 @@ class ZevLinkMirrorStreamClient(
     }
 
     private fun enqueue(packet: PendingMirrorPacket) {
-        while (!packetQueue.offer(packet)) {
-            packetQueue.poll()
-            packetsDropped++
-            if (packetsDropped == 1 || packetsDropped % 30 == 0) {
-                Log.i(TAG, "Dropped $packetsDropped stale ZevLink mirror packet(s)")
-            }
+        try {
+            packetQueue.put(packet)
+        } catch (_: InterruptedException) {
+            // Thread interrupted, ignore
         }
     }
 
@@ -251,19 +249,25 @@ private fun ByteArray.toAvcDecoderConfigurationRecord(): ByteArray {
 }
 
 private fun ByteArray.toAvccSample(): ByteArray {
-    if (isEmpty()) return this
-    if (!startsWithAnnexBStartCode()) return this
-    val nals = splitAnnexBNals()
-        .filterNot { nal ->
-            val type = nal.firstOrNull()?.toInt()?.and(0x1F) ?: return@filterNot true
-            type == 6 || type == 7 || type == 8 || type == 9
+    if (isEmpty() || !startsWithAnnexBStartCode()) return this
+    val outputStream = ByteArrayOutputStream(size)
+    var start = findStartCode(0)
+    while (start >= 0) {
+        val startLen = startCodeLength(start)
+        val nalStart = start + startLen
+        val nextStart = findStartCode(nalStart)
+        val nalEnd = if (nextStart >= 0) nextStart else size
+        if (nalEnd > nalStart) {
+            val type = this[nalStart].toInt() and 0x1F
+            if (type != 6 && type != 7 && type != 8 && type != 9) {
+                val nalSize = nalEnd - nalStart
+                outputStream.writeIntBe(nalSize)
+                outputStream.write(this, nalStart, nalSize)
+            }
         }
-    return ByteArrayOutputStream().apply {
-        nals.forEach { nal ->
-            writeIntBe(nal.size)
-            write(nal)
-        }
-    }.toByteArray()
+        start = nextStart
+    }
+    return outputStream.toByteArray()
 }
 
 private fun ByteArray.splitAnnexBNals(): List<ByteArray> {

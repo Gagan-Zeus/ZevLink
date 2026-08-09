@@ -19,9 +19,10 @@ Builds:
     subdir: android/app
     gradle:
       - yes
+
   - versionName: 3.1.2
     versionCode: 33
-    commit: 8050ccd39cf3b6067740abfe3604f08ba1192c3e
+    commit: 6c512c710b2e9f3df9b0b2459e9486cd4d530719
     subdir: android/app
     gradle:
       - yes
