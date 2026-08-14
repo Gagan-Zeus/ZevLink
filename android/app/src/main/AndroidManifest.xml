@@ -25,6 +25,7 @@
 
     <queries>
         <package android:name="com.android.deskclock" />
+        <package android:name="com.zevlink.keyboard" />
         <package android:name="com.whatsapp" />
         <package android:name="com.whatsapp.w4b" />
         <intent>
@@ -273,5 +274,13 @@
         <receiver
             android:name=".FileTransferNotificationActionReceiver"
             android:exported="false" />
+
+        <receiver
+            android:name=".ZevBoardClipboardReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.zevclip.sender.action.ZEVBOARD_CLIPBOARD" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

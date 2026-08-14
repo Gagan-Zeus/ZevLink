@@ -24,6 +24,7 @@ object ZevClipPreferences {
     const val KEY_ANDROID_RECEIVER_LAST_RECEIVED_AT = "android_receiver_last_received_at"
     const val KEY_ANDROID_RECEIVER_LAST_RECEIVED_STATUS = "android_receiver_last_received_status"
     const val KEY_CLIPBOARD_SYNC_ENABLED = "clipboard_sync_enabled"
+    const val KEY_ZEVBOARD_ENABLED = "zevboard_enabled"
     const val KEY_FILE_TRANSFER_AUTO_ACCEPT = "file_transfer_auto_accept"
     const val KEY_NOTIFICATION_MIRROR_CONNECTED = "notification_mirror_connected"
     const val KEY_NOTIFICATION_MIRROR_STATUS = "notification_mirror_status"
@@ -205,6 +206,16 @@ object ZevClipPreferences {
     fun setClipboardSyncEnabled(context: Context, isEnabled: Boolean) {
         preferences(context).edit()
             .putBoolean(KEY_CLIPBOARD_SYNC_ENABLED, isEnabled)
+            .apply()
+    }
+
+    fun isZevBoardEnabled(context: Context): Boolean {
+        return preferences(context).getBoolean(KEY_ZEVBOARD_ENABLED, false)
+    }
+
+    fun setZevBoardEnabled(context: Context, isEnabled: Boolean) {
+        preferences(context).edit()
+            .putBoolean(KEY_ZEVBOARD_ENABLED, isEnabled)
             .apply()
     }
 

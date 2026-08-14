@@ -441,6 +441,41 @@ class MainActivity : Activity() {
         })
 
         content.addView(card(colors.surface).apply {
+            addView(cardTitle("Clipboard Capture Method"))
+            addView(textView("ZevBoard provides a seamless, native keyboard experience while automatically copying your text to your Mac over the local network.", 14f, colors.muted).apply {
+                setPadding(0, dp(6), 0, dp(8))
+                setLineSpacing(0f, 1.06f)
+            })
+
+            addView(Switch(this@MainActivity).apply {
+                text = "Use ZevBoard (Recommended)"
+                textSize = 16f
+                setTextColor(colors.text)
+                isChecked = ZevClipPreferences.isZevBoardEnabled(this@MainActivity)
+                setPadding(0, dp(6), 0, dp(6))
+                setOnCheckedChangeListener { buttonView, isChecked ->
+                    if (isChecked) {
+                        try {
+                            packageManager.getPackageInfo("com.zevlink.keyboard", 0)
+                            ZevClipPreferences.setZevBoardEnabled(this@MainActivity, true)
+                        } catch (e: PackageManager.NameNotFoundException) {
+                            buttonView.isChecked = false
+                            Toast.makeText(this@MainActivity, "ZevBoard is not installed. Redirecting...", Toast.LENGTH_SHORT).show()
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/Gagan-Zeus/florisboard"))
+                            startActivity(intent)
+                        }
+                    } else {
+                        ZevClipPreferences.setZevBoardEnabled(this@MainActivity, false)
+                    }
+                }
+            }, matchWidth())
+
+            addView(textView("Alternatively, you can use the legacy Accessibility Service below.", 13f, colors.muted).apply {
+                setPadding(0, dp(4), 0, dp(8))
+            })
+        }, matchWidth(topMargin = 2))
+
+        content.addView(card(colors.surface).apply {
             addView(cardTitle(getString(R.string.permissions_title)))
             addView(textView(getString(R.string.permissions_description), 14f, colors.muted).apply {
                 setPadding(0, dp(6), 0, dp(8))

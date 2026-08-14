@@ -20,6 +20,10 @@ import android.widget.Toast
 class ClipboardAccessibilityService : AccessibilityService() {
     private val handler = Handler(Looper.getMainLooper())
     private val clipboardChangedListener = ClipboardManager.OnPrimaryClipChangedListener {
+        if (ZevClipPreferences.isZevBoardEnabled(this)) {
+            Log.d(TAG, "ZevBoard method is enabled; ignoring accessibility clipboard signal.")
+            return@OnPrimaryClipChangedListener
+        }
         val now = SystemClock.elapsedRealtime()
         if (now - lastClipboardSignalAt < DEBOUNCE_MS) {
             return@OnPrimaryClipChangedListener
