@@ -1,0 +1,1 @@
+Added ZevBoard clipboard capture integration as the recommended Android-to-Mac clipboard method, while keeping the legacy Accessibility Service fallback. ZevLink can now receive clipboard text from ZevBoard, ignore duplicate accessibility clipboard signals when ZevBoard is enabled, and uses smoother ZevLink-native mirror stream buffering.
