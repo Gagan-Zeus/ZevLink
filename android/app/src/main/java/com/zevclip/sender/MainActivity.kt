@@ -14,6 +14,7 @@ import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.Icon
 import android.media.projection.MediaProjectionManager
+import android.net.ConnectivityManager
 import android.util.TypedValue
 import android.net.Uri
 import android.os.Build
@@ -33,6 +34,9 @@ import android.widget.ScrollView
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
+import com.google.mlkit.vision.barcode.common.Barcode
+import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
+import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import com.zevclip.sender.filetransfer.FileTransferPeerPinStore
 import java.text.DateFormat
 import java.util.Date
@@ -66,6 +70,11 @@ class MainActivity : Activity() {
     private lateinit var remoteStatusText: TextView
     private lateinit var remoteUrlInput: EditText
     private lateinit var lastAutoStatusText: TextView
+    private lateinit var transportModeBadge: TextView
+    private lateinit var bluetoothStatusText: TextView
+    private lateinit var bluetoothSavedAddressText: TextView
+    private lateinit var bluetoothConnectButton: Button
+    private lateinit var bluetoothForgetButton: Button
     private lateinit var discoveryManager: MacDiscoveryManager
     private lateinit var airPlayReceiverDiscoveryManager: AirPlayReceiverDiscoveryManager
     private lateinit var colors: DynamicPalette
@@ -103,9 +112,16 @@ class MainActivity : Activity() {
             key == ZevClipPreferences.KEY_AIRPLAY_STREAMING ||
             key == ZevClipPreferences.KEY_AIRPLAY_SCREEN_MIRRORING ||
             key == ZevClipPreferences.KEY_AIRPLAY_BROADCAST_STATUS ||
-            key == ZevClipPreferences.KEY_AIRPLAY_BROADCAST_STREAMING
+            key == ZevClipPreferences.KEY_AIRPLAY_BROADCAST_STREAMING ||
+            key == ZevClipPreferences.KEY_BLUETOOTH_STATUS ||
+            key == ZevClipPreferences.KEY_BLUETOOTH_MAC_ADDRESS ||
+            key == ZevClipPreferences.KEY_BLUETOOTH_LAST_RECEIVED ||
+            key == ZevClipPreferences.KEY_ACTIVE_TRANSPORT_MODE
         ) {
-            runOnUiThread { refreshSyncStatuses() }
+            runOnUiThread {
+                refreshSyncStatuses()
+                refreshBluetoothStatus()
+            }
         }
     }
 
@@ -190,9 +206,19 @@ class MainActivity : Activity() {
             }
             AndroidClipboardReceiverService.start(this)
             AndroidCallMirrorService.start(this)
+            if (hasBluetoothPermissions()) {
+                BluetoothClientManager.connect(this)
+            }
         }
         refreshSyncStatuses()
         scheduleAccessibilityRechecks()
+        BluetoothClientManager.onStatusChanged = {
+            runOnUiThread { refreshBluetoothStatus() }
+        }
+        BluetoothClientManager.onMessageReceived = {
+            runOnUiThread { refreshBluetoothStatus() }
+        }
+        refreshBluetoothStatus()
     }
 
     override fun onRequestPermissionsResult(
@@ -224,6 +250,13 @@ class MainActivity : Activity() {
                 }
             }
             refreshSyncStatuses()
+        } else if (requestCode == REQUEST_BLUETOOTH_PERMISSIONS) {
+            if (grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }) {
+                BluetoothClientManager.connect(this)
+                refreshBluetoothStatus()
+            } else {
+                Toast.makeText(this, "Bluetooth permission is required for offline sync", Toast.LENGTH_SHORT).show()
+            }
         }
     }
 
@@ -281,6 +314,8 @@ class MainActivity : Activity() {
     }
 
     override fun onPause() {
+        BluetoothClientManager.onStatusChanged = null
+        BluetoothClientManager.onMessageReceived = null
         mainHandler.removeCallbacksAndMessages(null)
         if (::ipAddressInput.isInitialized && ::portInput.isInitialized) {
             ZevClipPreferences.saveEndpoint(
@@ -410,6 +445,7 @@ class MainActivity : Activity() {
         })
 
         content.addView(syncCard(), matchWidth(topMargin = 2))
+        content.addView(bluetoothCard(), matchWidth(topMargin = 16))
         content.addView(airPlayCard(), matchWidth(topMargin = 16))
 
         return scrollPage(content)
@@ -624,6 +660,12 @@ class MainActivity : Activity() {
         AndroidCallMirrorService.start(this)
         discoveryManager.discover()
 
+        if (hasBluetoothPermissions()) {
+            BluetoothClientManager.connect(this)
+        } else {
+            checkAndRequestBluetoothPermissions()
+        }
+
         val accessibilityState = AccessibilityServiceStatus.currentState(this)
         if (accessibilityState.enabled) {
             showSuccess(getString(R.string.sync_started))
@@ -651,6 +693,11 @@ class MainActivity : Activity() {
         ZevClipPreferences.setClipboardSyncEnabled(this, false)
         AndroidClipboardReceiverService.stop(this)
         AndroidCallMirrorService.stop(this)
+        discoveryManager.stop()
+        BluetoothClientManager.disconnect(this)
+        ZevClipPreferences.setMacBatteryStatus(this, -1, isCharging = false, isAvailable = false, seenAtMillis = 0L)
+        ZevClipPreferences.setActiveTransportMode(this, "Disconnected")
+        ZevClipStatusNotification.update(this)
         ZevClipPreferences.setLastAutoStatus(this, getString(R.string.sync_stopped))
         showSuccess(getString(R.string.sync_stopped))
         refreshSyncStatuses()
@@ -674,8 +721,31 @@ class MainActivity : Activity() {
         showPageStatus(getString(R.string.qr_scan_starting), colors.muted)
 
         try {
-            startActivityForResult(Intent(this, QrScannerActivity::class.java), REQUEST_PAIRING_QR_SCAN)
-        } catch (error: ActivityNotFoundException) {
+            val options = GmsBarcodeScannerOptions.Builder()
+                .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
+                .enableAutoZoom()
+                .build()
+
+            val scanner = GmsBarcodeScanning.getClient(this, options)
+            scanner.startScan()
+                .addOnSuccessListener { barcode ->
+                    scanPairingQrButton.isEnabled = true
+                    val rawValue = barcode.rawValue.orEmpty()
+                    if (rawValue.isBlank()) {
+                        showFailure(getString(R.string.qr_scan_empty))
+                    } else {
+                        savePairingQrPayload(rawValue)
+                    }
+                }
+                .addOnCanceledListener {
+                    scanPairingQrButton.isEnabled = true
+                    showFailure(getString(R.string.qr_scan_cancelled))
+                }
+                .addOnFailureListener { error ->
+                    scanPairingQrButton.isEnabled = true
+                    showFailure(getString(R.string.qr_scan_failed, error.message ?: "scanner failed"))
+                }
+        } catch (error: Exception) {
             scanPairingQrButton.isEnabled = true
             showFailure(getString(R.string.qr_scan_failed, error.message ?: "scanner failed"))
         }
@@ -703,12 +773,23 @@ class MainActivity : Activity() {
                         if (::pairingTokenInput.isInitialized) {
                             pairingTokenInput.setText(payload.token)
                         }
+                        val previousDeviceId = ZevClipPreferences.deviceId(this)
+                        if (previousDeviceId.isNotBlank() && previousDeviceId != payload.deviceId) {
+                            ZevClipPreferences.saveBluetoothMacAddress(this, "")
+                        }
+                        if (!payload.btAddress.isNullOrBlank()) {
+                            ZevClipPreferences.saveBluetoothMacAddress(this, payload.btAddress)
+                        }
                         ZevClipPreferences.saveEndpoint(this, selectedHost, payload.port.toString())
                         ZevClipPreferences.savePairingToken(this, payload.token)
-                        ZevClipPreferences.saveDeviceId(this, payload.deviceId)
+                        payload.deviceId?.let { ZevClipPreferences.saveDeviceId(this, it) }
                         FileTransferPeerPinStore.savePinnedMacCertificateSha256(this, payload.transferCert)
                         ZevClipPreferences.setClipboardSyncEnabled(this, true)
                         AndroidClipboardReceiverService.start(this)
+
+                        if (hasBluetoothPermissions()) {
+                            BluetoothClientManager.connect(this)
+                        }
                         ZevClipPreferences.setDiscoveryStatus(
                             this,
                             getString(
@@ -795,6 +876,54 @@ class MainActivity : Activity() {
                 syncEnabled && !hasToken -> getString(R.string.sync_needs_pairing)
                 syncEnabled -> getString(R.string.sync_starting_summary)
                 else -> getString(R.string.sync_off_summary)
+            }
+        }
+
+        if (::transportModeBadge.isInitialized) {
+            if (!syncEnabled) {
+                transportModeBadge.text = "Mode: Disconnected"
+                transportModeBadge.setTextColor(colors.muted)
+            } else {
+                val connectivityManager = getSystemService(ConnectivityManager::class.java)
+                val hasLocalNetwork = LocalNetworkAccess.canReachLocalPeers(connectivityManager)
+                val btConnected = BluetoothClientManager.isConnected()
+                val wifiEndpoint = endpoint != null
+                val mode = ZevClipPreferences.activeTransportMode(this)
+
+                val displayMode = when {
+                    mode == "Wi-Fi" -> "Mode: Wi-Fi"
+                    mode == "Bluetooth" -> "Mode: Bluetooth"
+                    hasLocalNetwork && wifiEndpoint -> "Mode: Wi-Fi"
+                    btConnected -> "Mode: Bluetooth"
+                    else -> "Mode: Disconnected"
+                }
+
+                transportModeBadge.text = displayMode
+                transportModeBadge.setTextColor(
+                    when (displayMode) {
+                        "Mode: Wi-Fi" -> colors.success
+                        "Mode: Bluetooth" -> colors.primary
+                        else -> colors.muted
+                    }
+                )
+
+                if (hasLocalNetwork && wifiEndpoint && mode != "Wi-Fi") {
+                    thread(name = "ZevClipLiveReachability") {
+                        val reachable = EndpointSelector.isReachable(endpoint.ipAddress, endpoint.port)
+                        runOnUiThread {
+                            if (isDestroyed || !ZevClipPreferences.isClipboardSyncEnabled(this)) return@runOnUiThread
+                            val newMode = if (reachable) "Wi-Fi" else if (BluetoothClientManager.isConnected()) "Bluetooth" else "Disconnected"
+                            if (ZevClipPreferences.activeTransportMode(this) != newMode) {
+                                ZevClipPreferences.setActiveTransportMode(this, newMode)
+                            }
+                        }
+                    }
+                } else if (!hasLocalNetwork) {
+                    val newMode = if (btConnected) "Bluetooth" else "Disconnected"
+                    if (mode != newMode) {
+                        ZevClipPreferences.setActiveTransportMode(this, newMode)
+                    }
+                }
             }
         }
 
@@ -1411,9 +1540,10 @@ class MainActivity : Activity() {
 
     private fun sendRemoteAction(action: String, label: String, url: String? = null) {
         val endpoint = ZevClipPreferences.endpoint(this)
+        val btConnected = BluetoothClientManager.isConnected()
         val token = ZevClipPreferences.pairingToken(this)
 
-        if (endpoint == null) {
+        if (endpoint == null && !btConnected) {
             updateRemoteStatus(getString(R.string.remote_pairing_needed), colors.error)
             discoveryManager.discover()
             return
@@ -1433,12 +1563,9 @@ class MainActivity : Activity() {
         val connectionDropFeedback = remoteConnectionDropFeedback(action)
         updateRemoteStatus(getString(R.string.remote_sending, label), colors.muted)
         thread(name = "ZevClipMacRemote") {
-            val result = MacRemoteSender.send(
+            val result = MacRemoteSender.sendSavedEndpoint(
                 context = applicationContext,
-                ipAddress = endpoint.ipAddress,
-                port = endpoint.port,
                 action = action,
-                pairingToken = token,
                 url = url
             )
 
@@ -1680,6 +1807,12 @@ class MainActivity : Activity() {
                 textSize = 24f
             })
 
+            transportModeBadge = textView("", 14f, colors.primary).apply {
+                setTypeface(typeface, Typeface.BOLD)
+                setPadding(0, 0, 0, dp(6))
+            }
+            addView(transportModeBadge)
+
             statusText = textView(getString(R.string.ready), 18f, colors.primary).apply {
                 setTypeface(typeface, Typeface.BOLD)
                 setPadding(0, dp(10), 0, dp(16))
@@ -1699,6 +1832,121 @@ class MainActivity : Activity() {
             addView(tonalButton(getString(R.string.open_mac_remote)) {
                 showMacRemotePage()
             }, matchWidth(topMargin = 10))
+        }
+    }
+
+    private fun bluetoothCard(): LinearLayout {
+        return card(colors.surface).apply {
+            addView(cardTitle("Bluetooth"))
+
+            val subtitle = textView(
+                "Direct sync without Wi-Fi or hotspot.",
+                14f,
+                colors.muted
+            ).apply {
+                setPadding(0, dp(4), 0, dp(12))
+            }
+            addView(subtitle)
+
+            bluetoothStatusText = textView("", 16f, colors.primary).apply {
+                setTypeface(typeface, Typeface.BOLD)
+                setPadding(0, dp(2), 0, dp(4))
+            }
+            addView(bluetoothStatusText)
+
+            bluetoothSavedAddressText = textView("", 13f, colors.muted).apply {
+                setPadding(0, 0, 0, dp(14))
+            }
+            addView(bluetoothSavedAddressText)
+
+            bluetoothConnectButton = primaryButton("Connect") {
+                if (checkAndRequestBluetoothPermissions()) {
+                    if (!ZevClipPreferences.isClipboardSyncEnabled(this@MainActivity)) {
+                        startClipboardSync()
+                    } else {
+                        BluetoothClientManager.connect(this@MainActivity, forceScan = !BluetoothClientManager.isConnected())
+                        refreshBluetoothStatus()
+                    }
+                }
+            }
+            addView(bluetoothConnectButton, matchWidth())
+
+            bluetoothForgetButton = quietButton("Reset Pairing") {
+                BluetoothClientManager.forgetMac(this@MainActivity)
+                refreshBluetoothStatus()
+            }
+            addView(bluetoothForgetButton, matchWidth(topMargin = 8))
+        }
+    }
+
+    private fun hasBluetoothPermissions(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED &&
+            checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
+        } else {
+            checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        }
+    }
+
+    private fun checkAndRequestBluetoothPermissions(): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val permissions = arrayOf(
+                Manifest.permission.BLUETOOTH_SCAN,
+                Manifest.permission.BLUETOOTH_CONNECT
+            )
+            val missing = permissions.filter {
+                checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED
+            }
+            if (missing.isNotEmpty()) {
+                requestPermissions(missing.toTypedArray(), REQUEST_BLUETOOTH_PERMISSIONS)
+                return false
+            }
+        } else {
+            if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), REQUEST_BLUETOOTH_PERMISSIONS)
+                return false
+            }
+        }
+        return true
+    }
+
+    private fun refreshBluetoothStatus() {
+        if (!::bluetoothStatusText.isInitialized) return
+        val isConnected = BluetoothClientManager.isConnected()
+        val syncEnabled = ZevClipPreferences.isClipboardSyncEnabled(this)
+        val rawStatus = ZevClipPreferences.bluetoothStatus(this)
+        val saved = ZevClipPreferences.bluetoothMacAddress(this)
+
+        val cleanStatus = when {
+            isConnected -> "Connected to Mac"
+            !syncEnabled -> "Sync is off"
+            rawStatus.contains("Connecting", ignoreCase = true) -> "Connecting…"
+            rawStatus.contains("Scanning", ignoreCase = true) -> "Searching for Mac…"
+            saved.isNotBlank() -> "Ready (Auto-connect)"
+            else -> "Not connected"
+        }
+
+        bluetoothStatusText.text = cleanStatus
+        bluetoothStatusText.setTextColor(
+            when (cleanStatus) {
+                "Connected to Mac" -> colors.success
+                "Connecting…", "Searching for Mac…" -> colors.primary
+                else -> colors.muted
+            }
+        )
+
+        bluetoothSavedAddressText.text = if (saved.isNotBlank()) {
+            "Paired device: $saved"
+        } else {
+            "Not paired yet • Pairs automatically when synced"
+        }
+
+        if (::bluetoothConnectButton.isInitialized) {
+            bluetoothConnectButton.text = if (isConnected) "Connected" else "Connect"
+            bluetoothConnectButton.isEnabled = !isConnected
+        }
+        if (::bluetoothForgetButton.isInitialized) {
+            bluetoothForgetButton.visibility = if (saved.isNotBlank()) View.VISIBLE else View.GONE
         }
     }
 
@@ -2002,6 +2250,7 @@ class MainActivity : Activity() {
         const val REQUEST_SMS_OTP_MIRROR = 2007
         const val REQUEST_ALARM_AUDIO = 2008
         const val REQUEST_PAIRING_QR_SCAN = 2009
+        const val REQUEST_BLUETOOTH_PERMISSIONS = 2010
         val FALLBACK_BACKGROUND: Int = Color.rgb(247, 248, 250)
         val FALLBACK_TEXT: Int = Color.rgb(26, 28, 32)
         val FALLBACK_MUTED: Int = Color.rgb(91, 95, 103)

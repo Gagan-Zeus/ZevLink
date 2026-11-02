@@ -9,6 +9,7 @@ class ZevClipApplication : Application(), Application.ActivityLifecycleCallbacks
 
     override fun onCreate() {
         super.onCreate()
+        instance = this
         registerActivityLifecycleCallbacks(this)
     }
 
@@ -27,6 +28,9 @@ class ZevClipApplication : Application(), Application.ActivityLifecycleCallbacks
     override fun onActivityDestroyed(activity: Activity) = Unit
 
     companion object {
+        lateinit var instance: ZevClipApplication
+            private set
+
         fun isUiVisible(application: Application): Boolean {
             return (application as? ZevClipApplication)?.resumedActivityCount?.let { it > 0 }
                 ?: false

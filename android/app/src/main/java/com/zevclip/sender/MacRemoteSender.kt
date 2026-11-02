@@ -1,6 +1,7 @@
 package com.zevclip.sender
 
 import android.content.Context
+import android.net.ConnectivityManager
 import android.util.Log
 import org.json.JSONObject
 import java.io.IOException
@@ -23,57 +24,81 @@ object MacRemoteSender {
     ): SendResult {
         val appContext = context.applicationContext
         val endpoint = ZevClipPreferences.endpoint(appContext)
-            ?: return SendResult.Failure("Pair or reconnect your Mac first.")
         val pairingToken = ZevClipPreferences.pairingToken(appContext)
-        if (pairingToken.isBlank()) {
-            return SendResult.Failure("Pair or reconnect your Mac first.")
+
+        val connectivityManager = appContext.getSystemService(ConnectivityManager::class.java)
+        val hasLocalNetwork = LocalNetworkAccess.canReachLocalPeers(connectivityManager)
+        val activeMode = ZevClipPreferences.activeTransportMode(appContext)
+
+        // Fast-path: If active transport mode is Bluetooth and BT is connected, send via Bluetooth directly
+        if (activeMode == "Bluetooth" && BluetoothClientManager.isConnected()) {
+            val sent = BluetoothClientManager.sendRemote(appContext, action, url)
+            if (sent) {
+                return SendResult.Success("Sent remote action via Bluetooth.")
+            }
         }
 
-        val firstResult = send(appContext, endpoint.ipAddress, endpoint.port, action, pairingToken, url)
-        if (firstResult !is SendResult.Failure || !firstResult.retryableWithDiscovery) {
-            return firstResult
+        // Fast-path: If local network is not available (no Wi-Fi/Hotspot), try Bluetooth directly
+        if (!hasLocalNetwork) {
+            if (BluetoothClientManager.isConnected()) {
+                val sent = BluetoothClientManager.sendRemote(appContext, action, url)
+                if (sent) {
+                    ZevClipPreferences.setActiveTransportMode(appContext, "Bluetooth")
+                    return SendResult.Success("Sent remote action via Bluetooth.")
+                }
+            }
         }
 
-        val deviceId = ZevClipPreferences.deviceId(appContext)
-        if (deviceId.isBlank()) {
-            Log.i(TAG, "Mac remote failed, but no paired deviceId is saved; skipping rediscovery")
-            return firstResult
+        // Priority 1: Try Wi-Fi first if local network is available and endpoint is present
+        if (hasLocalNetwork && endpoint != null && pairingToken.isNotBlank()) {
+            val firstResult = send(appContext, endpoint.ipAddress, endpoint.port, action, pairingToken, url)
+            if (firstResult is SendResult.Success) {
+                ZevClipPreferences.setActiveTransportMode(appContext, "Wi-Fi")
+                return firstResult
+            }
+
+            val failure = firstResult as? SendResult.Failure
+            val deviceId = ZevClipPreferences.deviceId(appContext)
+            if (deviceId.isNotBlank() && failure?.retryableWithDiscovery == true) {
+                Log.i(TAG, "Saved Mac remote endpoint failed. Rediscovering paired Mac by deviceId.")
+                ZevClipPreferences.setDiscoveryStatus(appContext, "Saved Mac address failed. Rediscovering paired Mac...")
+                val rediscoveredEndpoint = MacAddressRediscoverer.resolvePairedMac(appContext, deviceId)
+                if (rediscoveredEndpoint != null) {
+                    ZevClipPreferences.saveEndpoint(
+                        appContext,
+                        rediscoveredEndpoint.ipAddress,
+                        rediscoveredEndpoint.port.toString()
+                    )
+                    ZevClipPreferences.setDiscoveryStatus(
+                        appContext,
+                        "Rediscovered paired Mac at ${rediscoveredEndpoint.ipAddress}:${rediscoveredEndpoint.port}."
+                    )
+                    val retryResult = send(
+                        appContext,
+                        rediscoveredEndpoint.ipAddress,
+                        rediscoveredEndpoint.port,
+                        action,
+                        pairingToken,
+                        url
+                    )
+                    if (retryResult is SendResult.Success) {
+                        ZevClipPreferences.setActiveTransportMode(appContext, "Wi-Fi")
+                        return SendResult.Success(retryResult.message)
+                    }
+                }
+            }
         }
 
-        Log.i(TAG, "Saved Mac remote endpoint failed. Rediscovering paired Mac by deviceId.")
-        ZevClipPreferences.setDiscoveryStatus(appContext, "Saved Mac address failed. Rediscovering paired Mac...")
-        val rediscoveredEndpoint = MacAddressRediscoverer.resolvePairedMac(appContext, deviceId)
-            ?: return SendResult.Failure(
-                "${firstResult.message} Rediscovery did not find the paired Mac.",
-                retryableWithDiscovery = false
-            )
-
-        ZevClipPreferences.saveEndpoint(
-            appContext,
-            rediscoveredEndpoint.ipAddress,
-            rediscoveredEndpoint.port.toString()
-        )
-        ZevClipPreferences.setDiscoveryStatus(
-            appContext,
-            "Rediscovered paired Mac at ${rediscoveredEndpoint.ipAddress}:${rediscoveredEndpoint.port}."
-        )
-
-        return when (
-            val retryResult = send(
-                appContext,
-                rediscoveredEndpoint.ipAddress,
-                rediscoveredEndpoint.port,
-                action,
-                pairingToken,
-                url
-            )
-        ) {
-            is SendResult.Success -> SendResult.Success(retryResult.message)
-            is SendResult.Failure -> SendResult.Failure(
-                "Rediscovered Mac at ${rediscoveredEndpoint.ipAddress}:${rediscoveredEndpoint.port}, but retry failed: ${retryResult.message}",
-                retryableWithDiscovery = false
-            )
+        // Priority 2: Fallback to Bluetooth
+        if (BluetoothClientManager.isConnected()) {
+            val sent = BluetoothClientManager.sendRemote(appContext, action, url)
+            if (sent) {
+                ZevClipPreferences.setActiveTransportMode(appContext, "Bluetooth")
+                return SendResult.Success("Sent remote action via Bluetooth fallback.")
+            }
         }
+
+        return SendResult.Failure("Failed to send remote action via Wi-Fi or Bluetooth.")
     }
 
     fun send(

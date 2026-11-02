@@ -34,9 +34,16 @@ Builds:
     gradle:
       - yes
 
+  - versionName: 4.0.2
+    versionCode: 35
+    commit: v4.0.2
+    subdir: android/app
+    gradle:
+      - yes
+
 AllowedAPKSigningKeys: cb82eb88fc46c63e8057b958ae13b5e8aa4e6a50d95012a9fe0e5b1bdfbddb30
 
 AutoUpdateMode: Version
 UpdateCheckMode: Tags
-CurrentVersion: 3.2.0
-CurrentVersionCode: 34
+CurrentVersion: 4.0.2
+CurrentVersionCode: 35

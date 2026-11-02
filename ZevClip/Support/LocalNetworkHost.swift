@@ -136,7 +136,7 @@ enum LocalNetworkHost {
             normalizedAddress != "::"
     }
 
-    private static func octets(from address: String) -> [Int]? {
+    static func octets(from address: String) -> [Int]? {
         let octets = address
             .split(separator: ".")
             .compactMap { Int($0) }

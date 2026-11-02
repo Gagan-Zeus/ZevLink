@@ -976,7 +976,7 @@ class ClipboardAccessibilityService : AccessibilityService() {
 
                 if (!sent && attempt < COPY_READ_DELAYS_MS.lastIndex) {
                     scheduleClipboardReadAfterCopy(attempt + 1)
-                } else if (!sent) {
+                } else if (!sent && !ZevClipPreferences.isZevBoardEnabled(this)) {
                     sendTrustedAccessibilityFallback()
                 }
             },
@@ -1092,17 +1092,19 @@ class ClipboardAccessibilityService : AccessibilityService() {
     }
 
     private fun extractCopiedTextCandidate(text: String): String {
-        val normalized = text.replace(Regex("\\s+"), " ").trim()
-        if (normalized.isBlank()) {
+        val trimmed = text.trim()
+        if (trimmed.isBlank()) {
             return ""
         }
 
         return TELEGRAM_MESSAGE_PREFIXES.firstNotNullOfOrNull { prefix ->
-            normalized
-                .substringAfter(prefix, missingDelimiterValue = "")
-                .trim(' ', ',', ':', '-')
-                .takeIf { it.isNotBlank() }
-        } ?: normalized
+            if (trimmed.startsWith(prefix, ignoreCase = true)) {
+                trimmed.substring(prefix.length).trim(' ', ',', ':', '-')
+                    .takeIf { it.isNotBlank() }
+            } else {
+                null
+            }
+        } ?: trimmed
     }
 
     private fun isTrustedCopiedText(text: String): Boolean {

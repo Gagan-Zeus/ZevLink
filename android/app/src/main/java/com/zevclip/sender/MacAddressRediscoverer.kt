@@ -30,6 +30,15 @@ object MacAddressRediscoverer {
             return null
         }
 
+        // Fast-path for Phone Hotspot: check connected ARP clients immediately
+        val hotspotIps = LocalNetworkAccess.hotspotClientIPs()
+        for (ip in hotspotIps) {
+            if (EndpointSelector.isReachable(ip, 9876)) {
+                Log.i(TAG, "Found paired Mac on hotspot client list: $ip:9876")
+                return Endpoint(ip, 9876)
+            }
+        }
+
         if (Looper.myLooper() == Looper.getMainLooper()) {
             Log.w(TAG, "Refusing to run blocking NSD rediscovery on the main thread")
             return null

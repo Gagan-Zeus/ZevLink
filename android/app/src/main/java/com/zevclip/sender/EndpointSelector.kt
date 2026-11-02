@@ -28,9 +28,31 @@ object EndpointSelector {
             .map { NetworkInputValidator.normalizeHost(it) }
             .filter { NetworkInputValidator.validateHost(it) }
             .distinct()
-            .sortedWith(compareByDescending<String> { it.isGlobalIPv6Literal() }.thenBy { it })
+            .sortedWith(
+                compareByDescending<String> { it.isPrivateLanAddress() }
+                    .thenByDescending { it.isGlobalIPv6Literal() }
+                    .thenBy { it }
+            )
 
         return validHosts.firstOrNull { host -> canConnect(host, port) }
+    }
+
+    private fun String.isPrivateLanAddress(): Boolean {
+        return try {
+            val address = InetAddress.getByName(this)
+            if (address is java.net.Inet4Address) {
+                val bytes = address.address
+                val first = bytes[0].toInt() and 0xff
+                val second = bytes[1].toInt() and 0xff
+                first == 10 || (first == 172 && second in 16..31) || (first == 192 && second == 168)
+            } else false
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    fun isReachable(host: String, port: Int): Boolean {
+        return canConnect(host, port)
     }
 
     private fun canConnect(host: String, port: Int): Boolean {

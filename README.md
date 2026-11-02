@@ -1,6 +1,6 @@
 # ZevLink
 
-Local-first Android and Mac continuity: clipboard sync, AirPlay, notification mirroring, call controls, and battery/status presence on your own network.
+Local-first Android and Mac continuity: clipboard sync, Bluetooth offline sync, AirPlay, notification mirroring, call controls, Intent broadcasting, and battery/status presence on your own network.
 
 ZevLink is for people who use an Android phone with a Mac and want the useful cross-device conveniences of a single ecosystem without sending clipboard, notification, or call data through a cloud relay.
 

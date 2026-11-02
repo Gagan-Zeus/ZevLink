@@ -203,8 +203,6 @@
     <string name="qr_scan_empty">QR code did not contain text.</string>
     <string name="qr_scan_cancelled">QR scan cancelled.</string>
     <string name="qr_scan_failed">QR scan failed: %1$s</string>
-    <string name="qr_scanner_camera_needed">Camera permission is needed to scan the Mac QR code.</string>
-    <string name="qr_scanner_align">Align the Mac QR code inside the frame.</string>
     <string name="cancel">Cancel</string>
     <string name="qr_scan_invalid">QR code is not valid ZevLink pairing data.</string>
     <string name="qr_pairing_checking">Checking Mac reachability…</string>

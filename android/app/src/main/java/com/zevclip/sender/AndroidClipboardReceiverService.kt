@@ -1,11 +1,14 @@
 package com.zevclip.sender
 
 import android.app.Service
-import android.os.BatteryManager
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.ServiceInfo
+import android.os.BatteryManager
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.nsd.NsdManager
@@ -29,8 +32,39 @@ class AndroidClipboardReceiverService : Service() {
     private var activePort = AndroidClipboardHttpReceiver.DEFAULT_PORT
     private var networkCallbackRegistered = false
     private var networkReceiverRegistered = false
+    private var bluetoothReceiverRegistered = false
     private val mainHandler = Handler(Looper.getMainLooper())
     private lateinit var findMyPhoneRinger: FindMyPhoneRinger
+    private lateinit var intentBroadcastHandler: IntentBroadcastHandler
+
+    private val bluetoothReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            val ctx = context ?: return
+            when (intent?.action) {
+                BluetoothAdapter.ACTION_STATE_CHANGED -> {
+                    val state = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)
+                    when (state) {
+                        BluetoothAdapter.STATE_TURNING_OFF,
+                        BluetoothAdapter.STATE_OFF -> {
+                            BluetoothClientManager.onBluetoothAdapterDisabled(ctx)
+                        }
+                        BluetoothAdapter.STATE_ON -> {
+                            BluetoothClientManager.onBluetoothAdapterEnabled(ctx)
+                        }
+                    }
+                }
+                Intent.ACTION_SCREEN_ON -> {
+                    if (!BluetoothClientManager.isConnected() && ZevClipPreferences.isClipboardSyncEnabled(ctx)) {
+                        val bluetoothManager = ctx.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
+                        val adapter = bluetoothManager?.adapter
+                        if (adapter != null && adapter.isEnabled) {
+                            BluetoothClientManager.connect(ctx, forceScan = false)
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     private val advertisingRefreshRunnable = Runnable {
         refreshAdvertising("network changed")
@@ -76,22 +110,27 @@ class AndroidClipboardReceiverService : Service() {
                 findPhoneRinging = isRinging
             )
         }
+        intentBroadcastHandler = IntentBroadcastHandler(this)
         registerNetworkWatchers()
         Log.i(TAG, "Android clipboard receiver service created")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action != ACTION_STOP && ZevClipPreferences.isClipboardSyncEnabled(this)) {
+            ensureForeground()
+        }
         when (intent?.action ?: ACTION_START) {
             ACTION_START -> startReceiver()
             ACTION_STOP -> {
                 stopReceiver("Stopped.")
                 stopSelf(startId)
+                return START_NOT_STICKY
             }
             ACTION_STOP_FIND_PHONE -> findMyPhoneRinger.stop()
             else -> Log.w(TAG, "Ignoring unknown receiver service action: ${intent?.action}")
         }
 
-        return START_STICKY
+        return if (ZevClipPreferences.isClipboardSyncEnabled(this)) START_STICKY else START_NOT_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -102,11 +141,22 @@ class AndroidClipboardReceiverService : Service() {
         mainHandler.removeCallbacks(periodicAdvertisingRefreshRunnable)
         stopReceiver("Stopped because the service was destroyed.")
         findMyPhoneRinger.stop()
+        if (!ZevClipPreferences.isClipboardSyncEnabled(this)) {
+            BluetoothClientManager.disconnect(this)
+        }
+        stopForeground(STOP_FOREGROUND_REMOVE)
         Log.i(TAG, "Android clipboard receiver service destroyed")
         super.onDestroy()
     }
 
     private fun startReceiver() {
+        if (!ZevClipPreferences.isClipboardSyncEnabled(this)) {
+            stopSelf()
+            return
+        }
+        if (BluetoothClientManager.hasBluetoothPermissions(this)) {
+            BluetoothClientManager.connect(this)
+        }
         if (receiver != null) {
             Log.d(TAG, "Android clipboard receiver already running; refreshing discovery advertising")
             scheduleAdvertisingRefresh("start requested while already running")
@@ -195,6 +245,26 @@ class AndroidClipboardReceiverService : Service() {
             onMediaControlAction = { action ->
                 AirPlayMediaControlDispatcher.dispatch(this, action.toAirPlayDacpCommand())
             },
+            onIntentBroadcast = { body ->
+                val result = intentBroadcastHandler.handle(body)
+                val now = System.currentTimeMillis()
+                ZevClipPreferences.setAndroidReceiverLastReceived(
+                    this,
+                    now,
+                    if (result.success) {
+                        "Broadcasted Android Intent at ${formatTime(now)}."
+                    } else {
+                        "Rejected Android Intent at ${formatTime(now)}."
+                    }
+                )
+                ZevClipStatusNotification.update(this)
+                if (result.success) {
+                    Log.i(TAG, "Broadcasted Intent request ${result.requestId} (${result.status})")
+                } else {
+                    Log.w(TAG, "Intent broadcast request ${result.requestId} failed: ${result.message}")
+                }
+                result
+            },
             onFindPhone = { action ->
                 if (action == "stop") findMyPhoneRinger.stop() else findMyPhoneRinger.start()
             }
@@ -204,12 +274,39 @@ class AndroidClipboardReceiverService : Service() {
         newReceiver.start()
     }
 
+    private fun ensureForeground() {
+        try {
+            val notification = ZevClipStatusNotification.build(this)
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                startForeground(
+                    ZevClipStatusNotification.NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                startForeground(ZevClipStatusNotification.NOTIFICATION_ID, notification)
+            }
+        } catch (error: RuntimeException) {
+            Log.w(TAG, "Could not promote Android receiver to foreground service", error)
+            ZevClipPreferences.setAndroidReceiverState(
+                this,
+                isRunning = false,
+                status = "Background sync could not start reliably: ${error.message ?: "foreground service unavailable"}"
+            )
+            ZevClipStatusNotification.update(this)
+        }
+    }
+
     private fun stopReceiver(status: String) {
         mainHandler.removeCallbacks(advertisingRefreshRunnable)
         mainHandler.removeCallbacks(periodicAdvertisingRefreshRunnable)
         stopAdvertising()
         receiver?.stop()
         receiver = null
+        if (!ZevClipPreferences.isClipboardSyncEnabled(this)) {
+            BluetoothClientManager.disconnect(this)
+        }
         ZevClipPreferences.setAndroidReceiverState(
             this,
             isRunning = false,
@@ -325,6 +422,54 @@ class AndroidClipboardReceiverService : Service() {
         Log.d(TAG, "Scheduling Android receiver discovery refresh: $reason")
         mainHandler.removeCallbacks(advertisingRefreshRunnable)
         mainHandler.postDelayed(advertisingRefreshRunnable, NETWORK_REFRESH_DELAY_MS)
+        evaluateActiveTransportMode(reason)
+    }
+
+    private fun evaluateActiveTransportMode(reason: String) {
+        val manager = connectivityManager ?: return
+        val hasLocalNetwork = LocalNetworkAccess.canReachLocalPeers(manager)
+        thread(name = "ZevClipEvaluateTransport") {
+            if (hasLocalNetwork) {
+                val endpoint = ZevClipPreferences.endpoint(applicationContext)
+                val reachable = if (endpoint != null) {
+                    EndpointSelector.isReachable(endpoint.ipAddress, endpoint.port)
+                } else false
+
+                if (reachable) {
+                    ZevClipPreferences.setActiveTransportMode(applicationContext, "Wi-Fi")
+                } else {
+                    val deviceId = ZevClipPreferences.deviceId(applicationContext)
+                    val rediscovered = if (deviceId.isNotBlank()) {
+                        MacAddressRediscoverer.resolvePairedMac(applicationContext, deviceId)
+                    } else null
+
+                    if (rediscovered != null) {
+                        ZevClipPreferences.saveEndpoint(
+                            applicationContext,
+                            rediscovered.ipAddress,
+                            rediscovered.port.toString()
+                        )
+                        ZevClipPreferences.setActiveTransportMode(applicationContext, "Wi-Fi")
+                    } else {
+                        // Re-check latest endpoint in case BLE probe discovered and saved it while we were rediscovering
+                        val latestEndpoint = ZevClipPreferences.endpoint(applicationContext)
+                        val latestReachable = if (latestEndpoint != null && latestEndpoint != endpoint) {
+                            EndpointSelector.isReachable(latestEndpoint.ipAddress, latestEndpoint.port)
+                        } else false
+
+                        if (latestReachable) {
+                            ZevClipPreferences.setActiveTransportMode(applicationContext, "Wi-Fi")
+                        } else {
+                            val newMode = if (BluetoothClientManager.isConnected()) "Bluetooth" else "Disconnected"
+                            ZevClipPreferences.setActiveTransportMode(applicationContext, newMode)
+                        }
+                    }
+                }
+            } else {
+                val newMode = if (BluetoothClientManager.isConnected()) "Bluetooth" else "Disconnected"
+                ZevClipPreferences.setActiveTransportMode(applicationContext, newMode)
+            }
+        }
     }
 
     private fun refreshAdvertising(reason: String) {
@@ -415,6 +560,19 @@ class AndroidClipboardReceiverService : Service() {
                 Log.w(TAG, "Could not register Android receiver network receiver", error)
             }
         }
+
+        if (!bluetoothReceiverRegistered) {
+            val filter = IntentFilter().apply {
+                addAction(BluetoothAdapter.ACTION_STATE_CHANGED)
+                addAction(Intent.ACTION_SCREEN_ON)
+            }
+            try {
+                registerReceiver(bluetoothReceiver, filter)
+                bluetoothReceiverRegistered = true
+            } catch (error: RuntimeException) {
+                Log.w(TAG, "Could not register Bluetooth & Screen state receiver", error)
+            }
+        }
     }
 
     private fun unregisterNetworkWatchers() {
@@ -434,6 +592,15 @@ class AndroidClipboardReceiverService : Service() {
                 Log.w(TAG, "Could not unregister Android receiver network receiver", error)
             }
             networkReceiverRegistered = false
+        }
+
+        if (bluetoothReceiverRegistered) {
+            try {
+                unregisterReceiver(bluetoothReceiver)
+            } catch (error: RuntimeException) {
+                Log.w(TAG, "Could not unregister Bluetooth state receiver", error)
+            }
+            bluetoothReceiverRegistered = false
         }
     }
 
@@ -492,10 +659,15 @@ class AndroidClipboardReceiverService : Service() {
         private const val PRESENCE_RETRY_DELAY_MS = 5_000L
         private const val PRESENCE_UPDATE_ATTEMPTS = 4
 
-        fun start(context: Context) {
-            context.startService(Intent(context, AndroidClipboardReceiverService::class.java).apply {
+    fun start(context: Context) {
+            val intent = Intent(context, AndroidClipboardReceiverService::class.java).apply {
                 action = ACTION_START
-            })
+            }
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
         }
 
         fun stop(context: Context) {
@@ -512,7 +684,7 @@ class AndroidClipboardReceiverService : Service() {
     }
 }
 
-private fun String.toAirPlayDacpCommand(): AirPlayDacpCommand {
+internal fun String.toAirPlayDacpCommand(): AirPlayDacpCommand {
     return when (lowercase()) {
         "play" -> AirPlayDacpCommand.PlayPause
         "pause" -> AirPlayDacpCommand.Pause

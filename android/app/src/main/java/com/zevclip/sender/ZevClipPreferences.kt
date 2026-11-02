@@ -41,6 +41,11 @@ object ZevClipPreferences {
     const val KEY_AIRPLAY_SCREEN_MIRRORING = "airplay_screen_mirroring"
     const val KEY_AIRPLAY_BROADCAST_STATUS = "airplay_broadcast_status"
     const val KEY_AIRPLAY_BROADCAST_STREAMING = "airplay_broadcast_streaming"
+    const val KEY_BLUETOOTH_MAC_ADDRESS = "bluetooth_mac_address"
+    const val KEY_BLUETOOTH_STATUS = "bluetooth_status"
+    const val KEY_BLUETOOTH_LAST_RECEIVED = "bluetooth_last_received"
+    const val KEY_BLUETOOTH_LAST_SENT = "bluetooth_last_sent"
+    const val KEY_ACTIVE_TRANSPORT_MODE = "active_transport_mode"
 
     private const val KEY_ANDROID_DEVICE_ID = "android_device_id"
     private const val KEY_LAST_TILE_SUBTITLE = "last_tile_subtitle"
@@ -503,6 +508,52 @@ object ZevClipPreferences {
             .putLong(KEY_ANDROID_RECEIVER_LAST_RECEIVED_AT, timestampMillis)
             .putString(KEY_ANDROID_RECEIVER_LAST_RECEIVED_STATUS, status)
             .apply()
+    }
+
+    fun bluetoothMacAddress(context: Context): String {
+        return preferences(context).getString(KEY_BLUETOOTH_MAC_ADDRESS, "").orEmpty()
+    }
+
+    fun saveBluetoothMacAddress(context: Context, address: String?) {
+        preferences(context).edit().putString(KEY_BLUETOOTH_MAC_ADDRESS, address.orEmpty()).apply()
+    }
+
+    fun bluetoothStatus(context: Context): String {
+        return preferences(context).getString(KEY_BLUETOOTH_STATUS, "Disconnected").orEmpty()
+    }
+
+    fun setBluetoothStatus(context: Context, status: String) {
+        preferences(context).edit().putString(KEY_BLUETOOTH_STATUS, status).apply()
+    }
+
+    fun bluetoothLastReceived(context: Context): String {
+        return preferences(context).getString(KEY_BLUETOOTH_LAST_RECEIVED, "").orEmpty()
+    }
+
+    fun setBluetoothLastReceived(context: Context, text: String) {
+        preferences(context).edit().putString(KEY_BLUETOOTH_LAST_RECEIVED, text).apply()
+    }
+
+    fun bluetoothLastSent(context: Context): String {
+        return preferences(context).getString(KEY_BLUETOOTH_LAST_SENT, "").orEmpty()
+    }
+
+    fun setBluetoothLastSent(context: Context, text: String) {
+        preferences(context).edit().putString(KEY_BLUETOOTH_LAST_SENT, text).apply()
+    }
+
+    fun activeTransportMode(context: Context): String {
+        return preferences(context).getString(KEY_ACTIVE_TRANSPORT_MODE, "Disconnected").orEmpty()
+    }
+
+    fun setActiveTransportMode(context: Context, mode: String) {
+        val current = activeTransportMode(context)
+        if (current != mode) {
+            preferences(context).edit().putString(KEY_ACTIVE_TRANSPORT_MODE, mode).apply()
+            try {
+                ZevClipStatusNotification.update(context)
+            } catch (_: Exception) {}
+        }
     }
 
     private fun migrateLegacyActivityPreferences(

@@ -109,18 +109,28 @@ object ZevClipStatusNotification {
     private fun connectionStatusText(context: Context, canConnect: Boolean): String {
         if (!canConnect) return context.getString(R.string.notification_status_not_connected)
 
+        val isBtConnected = BluetoothClientManager.isConnected()
+        val mode = ZevClipPreferences.activeTransportMode(context)
+
+        val effectiveMode = when {
+            mode == "Wi-Fi" -> "Wi-Fi"
+            isBtConnected -> "Bluetooth"
+            else -> return context.getString(R.string.notification_status_not_connected)
+        }
+
+        val modeSuffix = " ($effectiveMode)"
+        val connectedText = "${context.getString(R.string.notification_status_connected)}$modeSuffix"
+
         val status = ZevClipPreferences.macBatteryStatus(context)
-        if (status.lastSeenAtMillis <= 0L) {
-            return context.getString(R.string.notification_status_not_connected)
+        if (status.lastSeenAtMillis <= 0L || !status.isAvailable) {
+            return connectedText
         }
 
         val ageMillis = System.currentTimeMillis() - status.lastSeenAtMillis
-        if (ageMillis > MAC_STATUS_STALE_MS) {
-            return context.getString(R.string.notification_status_not_connected)
+        val maxAge = if (effectiveMode == "Bluetooth") MAC_STATUS_BLUETOOTH_STALE_MS else MAC_STATUS_STALE_MS
+        if (ageMillis > maxAge) {
+            return connectedText
         }
-
-        val connectedText = context.getString(R.string.notification_status_connected)
-        if (!status.isAvailable) return connectedText
 
         val percentage = status.percentage ?: return connectedText
         val chargingSuffix = if (status.isCharging) " charging" else ""
@@ -222,15 +232,25 @@ object ZevClipStatusNotification {
             return
         }
 
+        val isBtConnected = BluetoothClientManager.isConnected()
+        val mode = ZevClipPreferences.activeTransportMode(context)
+        val effectiveMode = when {
+            mode == "Wi-Fi" -> "Wi-Fi"
+            isBtConnected -> "Bluetooth"
+            mode == "Bluetooth" -> "Bluetooth"
+            else -> "Disconnected"
+        }
+
+        val maxAge = if (effectiveMode == "Bluetooth") MAC_STATUS_BLUETOOTH_STALE_MS else MAC_STATUS_STALE_MS
         val ageMillis = System.currentTimeMillis() - status.lastSeenAtMillis
-        if (ageMillis >= MAC_STATUS_STALE_MS) {
+        if (ageMillis >= maxAge) {
             return
         }
 
         val appContext = context.applicationContext
         refreshHandler.postDelayed(
             { update(appContext) },
-            MAC_STATUS_STALE_MS - ageMillis + EXPIRY_REFRESH_GRACE_MS
+            maxAge - ageMillis + EXPIRY_REFRESH_GRACE_MS
         )
     }
 
@@ -256,6 +276,7 @@ object ZevClipStatusNotification {
     private const val AIRPLAY_SCREEN_ACTION_REQUEST_CODE = 1044
     private const val AIRPLAY_BROADCAST_ACTION_REQUEST_CODE = 1045
     private const val MAC_STATUS_STALE_MS = 90 * 1000L
+    private const val MAC_STATUS_BLUETOOTH_STALE_MS = 60 * 1000L
     private const val EXPIRY_REFRESH_GRACE_MS = 1_000L
     private val refreshHandler = Handler(Looper.getMainLooper())
 }

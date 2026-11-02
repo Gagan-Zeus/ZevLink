@@ -195,7 +195,25 @@ final class ClipboardReceiver: ObservableObject {
         }
     }
 
-    private func receive(_ text: String) {
+    func receive(_ text: String) {
+        if let lastReceived = lastReceivedText,
+           let lastAt = lastReceivedAt,
+           Date().timeIntervalSince(lastAt) < 2.0 {
+            if text == lastReceived {
+                return
+            }
+            let normLast = lastReceived.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression).trimmingCharacters(in: .whitespacesAndNewlines)
+            let normNew = text.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression).trimmingCharacters(in: .whitespacesAndNewlines)
+            if normLast == normNew {
+                if text.contains("\n") && !lastReceived.contains("\n") {
+                    // Incoming text has true formatting/newlines; upgrade the pasteboard
+                } else {
+                    // Duplicate flattened paragraph version of already copied text; ignore
+                    return
+                }
+            }
+        }
+
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
 
@@ -211,7 +229,7 @@ final class ClipboardReceiver: ObservableObject {
         detailMessage = "Received \(text.utf8.count) UTF-8 bytes."
     }
 
-    private func receiveAndroidNotification(_ data: Data) {
+    func receiveAndroidNotification(_ data: Data) {
         do {
             let notification = try JSONDecoder().decode(AndroidMirroredNotification.self, from: data)
             lastMirroredNotification = notification
@@ -225,7 +243,7 @@ final class ClipboardReceiver: ObservableObject {
         }
     }
 
-    private func receiveAndroidCall(_ data: Data) {
+    func receiveAndroidCall(_ data: Data) {
         do {
             let call = try JSONDecoder().decode(AndroidMirroredCall.self, from: data)
             lastMirroredCall = call
@@ -258,7 +276,7 @@ struct RemoteControlHTTPResult {
     }
 }
 
-private enum MacRemoteController {
+enum MacRemoteController {
     private struct RemoteRequest: Decodable {
         let action: Action
         let url: String?

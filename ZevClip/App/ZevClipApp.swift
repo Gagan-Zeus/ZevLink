@@ -30,7 +30,8 @@ final class ZevClipApp: NSObject, NSApplicationDelegate {
         _ sender: NSApplication,
         hasVisibleWindows flag: Bool
     ) -> Bool {
-        return false
+        ZevClipRuntime.shared.showSettingsWindow()
+        return true
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

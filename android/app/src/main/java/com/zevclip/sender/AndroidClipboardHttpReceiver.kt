@@ -17,6 +17,7 @@ import com.zevclip.sender.filetransfer.FileTransferReceiver
 import com.zevclip.sender.filetransfer.AndroidPublicDownloadsPublisher
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.IOException
 import java.io.InputStream
 import java.net.InetSocketAddress
 import java.net.ServerSocket
@@ -45,6 +46,9 @@ class AndroidClipboardHttpReceiver(
         AndroidCallActionResult(false, "Android call mirror is unavailable.")
     },
     private val onMediaControlAction: (String) -> Boolean = { false },
+    private val onIntentBroadcast: (ByteArray) -> IntentBroadcastResult = {
+        IntentBroadcastResult("", "broadcast_failed", false, "Android Intent relay is unavailable.")
+    },
     private val onFindPhone: (String) -> FindPhoneActionResult = {
         FindPhoneActionResult(false, "Find My Phone is unavailable.")
     }
@@ -119,10 +123,11 @@ class AndroidClipboardHttpReceiver(
     }
 
     private fun handleConnection(socket: Socket) {
-        socket.use { client ->
-            client.soTimeout = READ_TIMEOUT_MS
-            val input = client.getInputStream()
-            val output = client.getOutputStream()
+        try {
+            socket.use { client ->
+                client.soTimeout = READ_TIMEOUT_MS
+                val input = client.getInputStream()
+                val output = client.getOutputStream()
 
             while (!client.isClosed) {
             val headerBytes = try {
@@ -178,6 +183,7 @@ class AndroidClipboardHttpReceiver(
                 requestParts[1] != CALL_ACTION_PATH &&
                 requestParts[1] != MEDIA_CONTROL_PATH &&
                 requestParts[1] != FIND_PHONE_PATH &&
+                requestParts[1] != INTENT_BROADCAST_PATH &&
                 !requestParts[1].startsWith(TRANSFER_PREFIX)
             ) {
                 output.write(response("404 Not Found", "Unknown path.").toByteArray(Charsets.UTF_8))
@@ -245,6 +251,27 @@ class AndroidClipboardHttpReceiver(
                     response(
                         if (result.success) "200 OK" else "409 Conflict",
                         result.message
+                    ).toByteArray(Charsets.UTF_8)
+                )
+                output.flush()
+                continue
+            }
+
+            if (requestParts[1] == INTENT_BROADCAST_PATH) {
+                val result = onIntentBroadcast(body)
+                output.write(
+                    response(
+                        status = when {
+                            result.success -> "200 OK"
+                            result.status == "invalid_request" -> "400 Bad Request"
+                            else -> "409 Conflict"
+                        },
+                        body = result.toJson().toString(),
+                        contentType = "application/json; charset=utf-8",
+                        extraHeaders = mapOf(
+                            ANDROID_DEVICE_ID_HEADER to ZevClipPreferences.androidDeviceId(appContext),
+                            ANDROID_RECEIVER_NAME_HEADER to AndroidClipboardReceiverService.SERVICE_NAME
+                        )
                     ).toByteArray(Charsets.UTF_8)
                 )
                 output.flush()
@@ -324,7 +351,18 @@ class AndroidClipboardHttpReceiver(
                 ).toByteArray(Charsets.UTF_8)
             )
             output.flush()
+                }
             }
+        } catch (error: SocketException) {
+            // The Mac can close a keep-alive connection while Android is writing a response.
+            // Treat that as a disconnected peer, not as a process-fatal receiver failure.
+            Log.i(TAG, "HTTP client disconnected while Android was handling a request: ${error.message}")
+        } catch (error: IOException) {
+            Log.i(TAG, "HTTP client connection ended: ${error.message}")
+        } catch (error: Exception) {
+            // A malformed or abruptly terminated client request must never bring down the
+            // process that owns the AccessibilityService and notification listener.
+            Log.w(TAG, "Unexpected Android receiver client error", error)
         }
     }
 
@@ -897,6 +935,7 @@ class AndroidClipboardHttpReceiver(
         const val CALL_ACTION_PATH = "/call-action"
         const val MEDIA_CONTROL_PATH = "/media-control"
         const val FIND_PHONE_PATH = "/find-phone"
+        const val INTENT_BROADCAST_PATH = "/intent-broadcast"
         const val TRANSFER_PREFIX = "/transfer/"
         const val TRANSFER_OFFER_PATH = "/transfer/offer"
         const val TRANSFER_OFFER_STATUS_PATH = "/transfer/offer-status"

@@ -8,13 +8,25 @@
 
 /* Begin PBXBuildFile section */
 		003C797EAA8C8B95F5BC210B /* LocalNetworkHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB39B975B9C136C551CFBBC4 /* LocalNetworkHost.swift */; };
+		10104A8E9AFC8717C946D2C7 /* HumanTypingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F9FA21448BAD4E71B13BEA3 /* HumanTypingService.swift */; };
+		26CCB6DE61484DAE5474F50B /* FileTransferSender.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8AF23DDD51B4CC8FA41C2DA /* FileTransferSender.swift */; };
+		2E3C22B3D5B4BA43A6017AA5 /* ScreenMirrorReceiver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 391B5AE6E94CD0CBFD35ACEA /* ScreenMirrorReceiver.swift */; };
+		3C573D6FADEAD1966B6E0CF9 /* MacFileTransferServiceProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB9AA44324EC803F22EEEEFD /* MacFileTransferServiceProvider.swift */; };
 		3F129658B18A045EB75D744E /* PairingTokenKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = D349EA03D0A76DC6B676F25E /* PairingTokenKeychain.swift */; };
+		46C5C50D6C50440E1F9F4064 /* FileTransferModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0387FA70D9414CFB59EE6DD /* FileTransferModels.swift */; };
 		48E29FDD0D02FA27F13A1E60 /* MacNotificationPresenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7FDB42DA0110186B4DAEAF31 /* MacNotificationPresenter.swift */; };
+		51E4CEF497C3A4227E782375 /* AndroidFileTransferHTTPClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 930721B503764AF8B924877F /* AndroidFileTransferHTTPClient.swift */; };
 		5B2A64EEB803EC30746CA86F /* ClipboardReceiver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08BB497EA327D472BA901879 /* ClipboardReceiver.swift */; };
+		623A681BDE6874A3E6BF5E99 /* FileTransferStateMachine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32DDBFEC9DC0B593444C84C6 /* FileTransferStateMachine.swift */; };
 		65DDFB57E7BE037B327EB2FD /* MacBatteryStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4B8AB008D584F12EAE87B57 /* MacBatteryStatus.swift */; };
+		731F746B93444D96E29DF391 /* IntentCreatorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F80AF83724D3B1EE0E23E7DE /* IntentCreatorView.swift */; };
 		86592C60E6753F38F8F1A5CA /* MacClipboardWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1077912024FDF76610651B40 /* MacClipboardWatcher.swift */; };
 		8E5EB06FD1408D1DF63D9441 /* AndroidReceiverIdentityStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6C21E49D36796072EBAFC17 /* AndroidReceiverIdentityStore.swift */; };
+		9A21D4C90D35E2B657EAED52 /* ShortcutRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A1857176A29DE5C38F0618 /* ShortcutRecorder.swift */; };
+		9AB66A82D0BEAE355AA5B363 /* IntentModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B18882D6F2AD80A3FAEC297 /* IntentModels.swift */; };
+		A379F7BEFBF04144DF3C120A /* FileTransferSecurity.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7155B29ACEE12689D2AB12C /* FileTransferSecurity.swift */; };
 		A4082A7C2B57560785213E49 /* MenuBarContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DDD7A2F7CB9F1C7199F16D5 /* MenuBarContentView.swift */; };
+		A504314971ADFDBAEA09DF8C /* FileTransferService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAD9DA6FA860DDFF75490824 /* FileTransferService.swift */; };
 		A5FCBC4CEE48B27E7EA1A6DA /* AndroidReceiverDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BEBD56CA3E8F68B7C8F8931 /* AndroidReceiverDiscovery.swift */; };
 		A801C940E295D9F6D3AE997A /* PairingQRCodeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF4453CC0495AA8E55154E88 /* PairingQRCodeView.swift */; };
 		AD2AEC233BB7B73037AAB071 /* AppRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC212D4E76DE1F008110B141 /* AppRuntime.swift */; };
@@ -22,50 +34,50 @@
 		B5AAD53CA643D32F7FCA3E02 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F2EFD3F683F74CF002CD50F /* AppSettings.swift */; };
 		B8CA797C763F040EDE0356DE /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 320BFAD0195F6C551F287AC0 /* ContentView.swift */; };
 		C405F78AD025A73FDB6198B8 /* ZevClipApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7AA610A696A5F3C375689D0B /* ZevClipApp.swift */; };
+		DA59D5187273534842CEFAAD /* IntentPresetStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35CE7CFB3B2D733720F3CBD4 /* IntentPresetStore.swift */; };
+		DD6CEA5E9E5D80479512B944 /* MacBluetoothService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0263FFA6AB57E3C8373F3F0 /* MacBluetoothService.swift */; };
 		EA1F0F348E2F6935D2662676 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C1243D8396B04479B723679A /* Assets.xcassets */; };
-		F1A2B3C4D5E6F708192A3B4C /* FileTransferModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A2B3C4D5E6F708192A3B4E /* FileTransferModels.swift */; };
-		F1A2B3C4D5E6F708192A3B57 /* FileTransferService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A2B3C4D5E6F708192A3B5A /* FileTransferService.swift */; };
-		F1A2B3C4D5E6F708192A3B58 /* AndroidFileTransferHTTPClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A2B3C4D5E6F708192A3B5B /* AndroidFileTransferHTTPClient.swift */; };
-		F1A2B3C4D5E6F708192A3B59 /* MacFileTransferServiceProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A2B3C4D5E6F708192A3B5C /* MacFileTransferServiceProvider.swift */; };
-		F1A2B3C4D5E6F708192A3B53 /* FileTransferReceiver.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A2B3C4D5E6F708192A3B55 /* FileTransferReceiver.swift */; };
-		F1A2B3C4D5E6F708192A3B51 /* FileTransferSecurity.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A2B3C4D5E6F708192A3B52 /* FileTransferSecurity.swift */; };
-		F1A2B3C4D5E6F708192A3B54 /* FileTransferSender.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A2B3C4D5E6F708192A3B56 /* FileTransferSender.swift */; };
-		F1A2B3C4D5E6F708192A3B4D /* FileTransferStateMachine.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A2B3C4D5E6F708192A3B4F /* FileTransferStateMachine.swift */; };
 		F35C75705FE3D682B27E4964 /* AndroidClipboardSender.swift in Sources */ = {isa = PBXBuildFile; fileRef = 216D04B84726F014340F6DE2 /* AndroidClipboardSender.swift */; };
 		F720DDC4973512A61918258B /* ClipboardHTTPServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BAF94C62FB5C5E506492DFD /* ClipboardHTTPServer.swift */; };
-		F8C1A5019B75456C8AE50101 /* ScreenMirrorReceiver.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8C1A5009B75456C8AE50101 /* ScreenMirrorReceiver.swift */; };
+		FB56AB23D4F67E132A85555B /* FileTransferReceiver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B5175BA31233976784E0C65 /* FileTransferReceiver.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		08BB497EA327D472BA901879 /* ClipboardReceiver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardReceiver.swift; sourceTree = "<group>"; };
+		0B5175BA31233976784E0C65 /* FileTransferReceiver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTransferReceiver.swift; sourceTree = "<group>"; };
 		1077912024FDF76610651B40 /* MacClipboardWatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacClipboardWatcher.swift; sourceTree = "<group>"; };
 		1DDD7A2F7CB9F1C7199F16D5 /* MenuBarContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarContentView.swift; sourceTree = "<group>"; };
+		1F9FA21448BAD4E71B13BEA3 /* HumanTypingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HumanTypingService.swift; sourceTree = "<group>"; };
 		216D04B84726F014340F6DE2 /* AndroidClipboardSender.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AndroidClipboardSender.swift; sourceTree = "<group>"; };
-		21B01AEF6AD3FEB44682B65B /* ZevLink.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ZevLink.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		21B01AEF6AD3FEB44682B65B /* ZevClip.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ZevClip.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		320BFAD0195F6C551F287AC0 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		32DDBFEC9DC0B593444C84C6 /* FileTransferStateMachine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTransferStateMachine.swift; sourceTree = "<group>"; };
+		35CE7CFB3B2D733720F3CBD4 /* IntentPresetStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntentPresetStore.swift; sourceTree = "<group>"; };
+		391B5AE6E94CD0CBFD35ACEA /* ScreenMirrorReceiver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenMirrorReceiver.swift; sourceTree = "<group>"; };
 		4AFF2250F5F626D53C0BE6CF /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		4F2EFD3F683F74CF002CD50F /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
+		51A1857176A29DE5C38F0618 /* ShortcutRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutRecorder.swift; sourceTree = "<group>"; };
 		5BAF94C62FB5C5E506492DFD /* ClipboardHTTPServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardHTTPServer.swift; sourceTree = "<group>"; };
 		7AA610A696A5F3C375689D0B /* ZevClipApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZevClipApp.swift; sourceTree = "<group>"; };
 		7FDB42DA0110186B4DAEAF31 /* MacNotificationPresenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacNotificationPresenter.swift; sourceTree = "<group>"; };
+		8B18882D6F2AD80A3FAEC297 /* IntentModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntentModels.swift; sourceTree = "<group>"; };
+		930721B503764AF8B924877F /* AndroidFileTransferHTTPClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AndroidFileTransferHTTPClient.swift; sourceTree = "<group>"; };
 		9BEBD56CA3E8F68B7C8F8931 /* AndroidReceiverDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AndroidReceiverDiscovery.swift; sourceTree = "<group>"; };
 		9F80D315D93BC2EBAB672C9A /* DeviceIdentityStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceIdentityStore.swift; sourceTree = "<group>"; };
 		BB39B975B9C136C551CFBBC4 /* LocalNetworkHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalNetworkHost.swift; sourceTree = "<group>"; };
+		BB9AA44324EC803F22EEEEFD /* MacFileTransferServiceProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacFileTransferServiceProvider.swift; sourceTree = "<group>"; };
 		BF4453CC0495AA8E55154E88 /* PairingQRCodeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingQRCodeView.swift; sourceTree = "<group>"; };
 		C1243D8396B04479B723679A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		C6C21E49D36796072EBAFC17 /* AndroidReceiverIdentityStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AndroidReceiverIdentityStore.swift; sourceTree = "<group>"; };
+		C8AF23DDD51B4CC8FA41C2DA /* FileTransferSender.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTransferSender.swift; sourceTree = "<group>"; };
+		D0387FA70D9414CFB59EE6DD /* FileTransferModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTransferModels.swift; sourceTree = "<group>"; };
 		D349EA03D0A76DC6B676F25E /* PairingTokenKeychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingTokenKeychain.swift; sourceTree = "<group>"; };
 		DC212D4E76DE1F008110B141 /* AppRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRuntime.swift; sourceTree = "<group>"; };
+		E0263FFA6AB57E3C8373F3F0 /* MacBluetoothService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacBluetoothService.swift; sourceTree = "<group>"; };
 		E4B8AB008D584F12EAE87B57 /* MacBatteryStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacBatteryStatus.swift; sourceTree = "<group>"; };
-		F1A2B3C4D5E6F708192A3B4E /* FileTransferModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTransferModels.swift; sourceTree = "<group>"; };
-		F1A2B3C4D5E6F708192A3B5A /* FileTransferService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTransferService.swift; sourceTree = "<group>"; };
-		F1A2B3C4D5E6F708192A3B5B /* AndroidFileTransferHTTPClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AndroidFileTransferHTTPClient.swift; sourceTree = "<group>"; };
-		F1A2B3C4D5E6F708192A3B5C /* MacFileTransferServiceProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacFileTransferServiceProvider.swift; sourceTree = "<group>"; };
-		F1A2B3C4D5E6F708192A3B55 /* FileTransferReceiver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTransferReceiver.swift; sourceTree = "<group>"; };
-		F1A2B3C4D5E6F708192A3B56 /* FileTransferSender.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTransferSender.swift; sourceTree = "<group>"; };
-		F1A2B3C4D5E6F708192A3B4F /* FileTransferStateMachine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTransferStateMachine.swift; sourceTree = "<group>"; };
-		F1A2B3C4D5E6F708192A3B52 /* FileTransferSecurity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTransferSecurity.swift; sourceTree = "<group>"; };
-		F8C1A5009B75456C8AE50101 /* ScreenMirrorReceiver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenMirrorReceiver.swift; sourceTree = "<group>"; };
+		F7155B29ACEE12689D2AB12C /* FileTransferSecurity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTransferSecurity.swift; sourceTree = "<group>"; };
+		F80AF83724D3B1EE0E23E7DE /* IntentCreatorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntentCreatorView.swift; sourceTree = "<group>"; };
+		FAD9DA6FA860DDFF75490824 /* FileTransferService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTransferService.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -73,8 +85,10 @@
 			isa = PBXGroup;
 			children = (
 				320BFAD0195F6C551F287AC0 /* ContentView.swift */,
+				F80AF83724D3B1EE0E23E7DE /* IntentCreatorView.swift */,
 				1DDD7A2F7CB9F1C7199F16D5 /* MenuBarContentView.swift */,
 				BF4453CC0495AA8E55154E88 /* PairingQRCodeView.swift */,
+				51A1857176A29DE5C38F0618 /* ShortcutRecorder.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -94,7 +108,7 @@
 				C1243D8396B04479B723679A /* Assets.xcassets */,
 				4AFF2250F5F626D53C0BE6CF /* Info.plist */,
 				5A0371B9E8F1A7DF113C8B94 /* App */,
-				F1A2B3C4D5E6F708192A3B50 /* FileTransfer */,
+				90A4689AB9B0943B6489EA83 /* FileTransfer */,
 				F02D8D283B2206D4FCADBA05 /* Services */,
 				66DE4E9CF14E575465868B29 /* Stores */,
 				EDBF2194EC3EFD010F57AC2C /* Support */,
@@ -110,23 +124,10 @@
 				4F2EFD3F683F74CF002CD50F /* AppSettings.swift */,
 				08BB497EA327D472BA901879 /* ClipboardReceiver.swift */,
 				9F80D315D93BC2EBAB672C9A /* DeviceIdentityStore.swift */,
+				8B18882D6F2AD80A3FAEC297 /* IntentModels.swift */,
+				35CE7CFB3B2D733720F3CBD4 /* IntentPresetStore.swift */,
 			);
 			path = Stores;
-			sourceTree = "<group>";
-		};
-		F1A2B3C4D5E6F708192A3B50 /* FileTransfer */ = {
-			isa = PBXGroup;
-			children = (
-				F1A2B3C4D5E6F708192A3B5B /* AndroidFileTransferHTTPClient.swift */,
-				F1A2B3C4D5E6F708192A3B4E /* FileTransferModels.swift */,
-				F1A2B3C4D5E6F708192A3B55 /* FileTransferReceiver.swift */,
-				F1A2B3C4D5E6F708192A3B52 /* FileTransferSecurity.swift */,
-				F1A2B3C4D5E6F708192A3B56 /* FileTransferSender.swift */,
-				F1A2B3C4D5E6F708192A3B5A /* FileTransferService.swift */,
-				F1A2B3C4D5E6F708192A3B4F /* FileTransferStateMachine.swift */,
-				F1A2B3C4D5E6F708192A3B5C /* MacFileTransferServiceProvider.swift */,
-			);
-			path = FileTransfer;
 			sourceTree = "<group>";
 		};
 		7D82C13FDCFC5D24E396E126 = {
@@ -137,10 +138,25 @@
 			);
 			sourceTree = "<group>";
 		};
+		90A4689AB9B0943B6489EA83 /* FileTransfer */ = {
+			isa = PBXGroup;
+			children = (
+				930721B503764AF8B924877F /* AndroidFileTransferHTTPClient.swift */,
+				D0387FA70D9414CFB59EE6DD /* FileTransferModels.swift */,
+				0B5175BA31233976784E0C65 /* FileTransferReceiver.swift */,
+				F7155B29ACEE12689D2AB12C /* FileTransferSecurity.swift */,
+				C8AF23DDD51B4CC8FA41C2DA /* FileTransferSender.swift */,
+				FAD9DA6FA860DDFF75490824 /* FileTransferService.swift */,
+				32DDBFEC9DC0B593444C84C6 /* FileTransferStateMachine.swift */,
+				BB9AA44324EC803F22EEEEFD /* MacFileTransferServiceProvider.swift */,
+			);
+			path = FileTransfer;
+			sourceTree = "<group>";
+		};
 		ED36DB6D63CB1C593DF8CD68 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				21B01AEF6AD3FEB44682B65B /* ZevLink.app */,
+				21B01AEF6AD3FEB44682B65B /* ZevClip.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -160,10 +176,12 @@
 				216D04B84726F014340F6DE2 /* AndroidClipboardSender.swift */,
 				9BEBD56CA3E8F68B7C8F8931 /* AndroidReceiverDiscovery.swift */,
 				5BAF94C62FB5C5E506492DFD /* ClipboardHTTPServer.swift */,
+				1F9FA21448BAD4E71B13BEA3 /* HumanTypingService.swift */,
+				E0263FFA6AB57E3C8373F3F0 /* MacBluetoothService.swift */,
 				1077912024FDF76610651B40 /* MacClipboardWatcher.swift */,
 				7FDB42DA0110186B4DAEAF31 /* MacNotificationPresenter.swift */,
 				D349EA03D0A76DC6B676F25E /* PairingTokenKeychain.swift */,
-				F8C1A5009B75456C8AE50101 /* ScreenMirrorReceiver.swift */,
+				391B5AE6E94CD0CBFD35ACEA /* ScreenMirrorReceiver.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -185,8 +203,8 @@
 			name = ZevClip;
 			packageProductDependencies = (
 			);
-			productName = ZevLink;
-			productReference = 21B01AEF6AD3FEB44682B65B /* ZevLink.app */;
+			productName = ZevClip;
+			productReference = 21B01AEF6AD3FEB44682B65B /* ZevClip.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -197,6 +215,8 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+				};
 			};
 			buildConfigurationList = 65B49480E40D14CBC7CCC285 /* Build configuration list for PBXProject "ZevClip" */;
 			developmentRegion = en;
@@ -234,6 +254,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				F35C75705FE3D682B27E4964 /* AndroidClipboardSender.swift in Sources */,
+				51E4CEF497C3A4227E782375 /* AndroidFileTransferHTTPClient.swift in Sources */,
 				A5FCBC4CEE48B27E7EA1A6DA /* AndroidReceiverDiscovery.swift in Sources */,
 				8E5EB06FD1408D1DF63D9441 /* AndroidReceiverIdentityStore.swift in Sources */,
 				AD2AEC233BB7B73037AAB071 /* AppRuntime.swift in Sources */,
@@ -242,22 +263,27 @@
 				5B2A64EEB803EC30746CA86F /* ClipboardReceiver.swift in Sources */,
 				B8CA797C763F040EDE0356DE /* ContentView.swift in Sources */,
 				AEE8CDAB4F0D66EBEDD57F6F /* DeviceIdentityStore.swift in Sources */,
-				F1A2B3C4D5E6F708192A3B58 /* AndroidFileTransferHTTPClient.swift in Sources */,
-				F1A2B3C4D5E6F708192A3B4C /* FileTransferModels.swift in Sources */,
-				F1A2B3C4D5E6F708192A3B53 /* FileTransferReceiver.swift in Sources */,
-				F1A2B3C4D5E6F708192A3B51 /* FileTransferSecurity.swift in Sources */,
-				F1A2B3C4D5E6F708192A3B54 /* FileTransferSender.swift in Sources */,
-				F1A2B3C4D5E6F708192A3B57 /* FileTransferService.swift in Sources */,
-				F1A2B3C4D5E6F708192A3B4D /* FileTransferStateMachine.swift in Sources */,
-				F1A2B3C4D5E6F708192A3B59 /* MacFileTransferServiceProvider.swift in Sources */,
+				46C5C50D6C50440E1F9F4064 /* FileTransferModels.swift in Sources */,
+				FB56AB23D4F67E132A85555B /* FileTransferReceiver.swift in Sources */,
+				A379F7BEFBF04144DF3C120A /* FileTransferSecurity.swift in Sources */,
+				26CCB6DE61484DAE5474F50B /* FileTransferSender.swift in Sources */,
+				A504314971ADFDBAEA09DF8C /* FileTransferService.swift in Sources */,
+				623A681BDE6874A3E6BF5E99 /* FileTransferStateMachine.swift in Sources */,
+				10104A8E9AFC8717C946D2C7 /* HumanTypingService.swift in Sources */,
+				731F746B93444D96E29DF391 /* IntentCreatorView.swift in Sources */,
+				9AB66A82D0BEAE355AA5B363 /* IntentModels.swift in Sources */,
+				DA59D5187273534842CEFAAD /* IntentPresetStore.swift in Sources */,
 				003C797EAA8C8B95F5BC210B /* LocalNetworkHost.swift in Sources */,
 				65DDFB57E7BE037B327EB2FD /* MacBatteryStatus.swift in Sources */,
+				DD6CEA5E9E5D80479512B944 /* MacBluetoothService.swift in Sources */,
 				86592C60E6753F38F8F1A5CA /* MacClipboardWatcher.swift in Sources */,
+				3C573D6FADEAD1966B6E0CF9 /* MacFileTransferServiceProvider.swift in Sources */,
 				48E29FDD0D02FA27F13A1E60 /* MacNotificationPresenter.swift in Sources */,
 				A4082A7C2B57560785213E49 /* MenuBarContentView.swift in Sources */,
 				A801C940E295D9F6D3AE997A /* PairingQRCodeView.swift in Sources */,
 				3F129658B18A045EB75D744E /* PairingTokenKeychain.swift in Sources */,
-				F8C1A5019B75456C8AE50101 /* ScreenMirrorReceiver.swift in Sources */,
+				2E3C22B3D5B4BA43A6017AA5 /* ScreenMirrorReceiver.swift in Sources */,
+				9A21D4C90D35E2B657EAED52 /* ShortcutRecorder.swift in Sources */,
 				C405F78AD025A73FDB6198B8 /* ZevClipApp.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -325,11 +351,9 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 34;
-				"DEVELOPMENT_TEAM[sdk=macosx*]" = MXM45UV8RV;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_DEBUG_DYLIB = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -351,11 +375,9 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 34;
-				"DEVELOPMENT_TEAM[sdk=macosx*]" = MXM45UV8RV;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_DEBUG_DYLIB = NO;
 				ENABLE_HARDENED_RUNTIME = YES;

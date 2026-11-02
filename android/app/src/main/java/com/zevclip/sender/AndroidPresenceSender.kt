@@ -1,6 +1,7 @@
 package com.zevclip.sender
 
 import android.content.Context
+import android.net.ConnectivityManager
 import org.json.JSONObject
 import java.io.IOException
 import java.net.ConnectException
@@ -21,49 +22,82 @@ object AndroidPresenceSender {
     ): SendResult {
         val appContext = context.applicationContext
         val endpoint = ZevClipPreferences.endpoint(appContext)
-            ?: return SendResult.Failure("No valid Mac IP and port.")
         val pairingToken = ZevClipPreferences.pairingToken(appContext)
-        if (pairingToken.isBlank()) {
-            return SendResult.Failure("No pairing token.")
+
+        val connectivityManager = appContext.getSystemService(ConnectivityManager::class.java)
+        val hasLocalNetwork = LocalNetworkAccess.canReachLocalPeers(connectivityManager)
+        val activeMode = ZevClipPreferences.activeTransportMode(appContext)
+
+        // Fast-path: If active transport mode is Bluetooth and BT is connected, send via Bluetooth directly
+        if (activeMode == "Bluetooth" && BluetoothClientManager.isConnected()) {
+            val sent = BluetoothClientManager.sendPresence(appContext, findPhoneRinging)
+            if (sent) {
+                return SendResult.Success("Sent presence via Bluetooth.")
+            }
         }
 
-        val firstResult = send(
-            appContext,
-            endpoint.ipAddress,
-            endpoint.port,
-            pairingToken,
-            androidReceiverPort,
-            findPhoneRinging
-        )
-        if (firstResult !is SendResult.Failure || !firstResult.retryableWithDiscovery) {
-            return firstResult
+        // Fast-path: If local network is not available (no Wi-Fi/Hotspot), try Bluetooth directly
+        if (!hasLocalNetwork) {
+            if (BluetoothClientManager.isConnected()) {
+                val sent = BluetoothClientManager.sendPresence(appContext, findPhoneRinging)
+                if (sent) {
+                    ZevClipPreferences.setActiveTransportMode(appContext, "Bluetooth")
+                    return SendResult.Success("Sent presence via Bluetooth.")
+                }
+            }
         }
 
-        val deviceId = ZevClipPreferences.deviceId(appContext)
-        if (deviceId.isBlank()) {
-            return firstResult
-        }
-
-        val rediscoveredEndpoint = MacAddressRediscoverer.resolvePairedMac(appContext, deviceId)
-            ?: return SendResult.Failure(
-                "${firstResult.message} Rediscovery did not find the paired Mac.",
-                retryableWithDiscovery = false
+        // Priority 1: Try Wi-Fi first if local network is available and endpoint is present
+        if (hasLocalNetwork && endpoint != null && pairingToken.isNotBlank()) {
+            val firstResult = send(
+                appContext,
+                endpoint.ipAddress,
+                endpoint.port,
+                pairingToken,
+                androidReceiverPort,
+                findPhoneRinging
             )
+            if (firstResult is SendResult.Success) {
+                ZevClipPreferences.setActiveTransportMode(appContext, "Wi-Fi")
+                return firstResult
+            }
 
-        ZevClipPreferences.saveEndpoint(
-            appContext,
-            rediscoveredEndpoint.ipAddress,
-            rediscoveredEndpoint.port.toString()
-        )
+            val failure = firstResult as? SendResult.Failure
+            val deviceId = ZevClipPreferences.deviceId(appContext)
+            if (deviceId.isNotBlank() && failure?.retryableWithDiscovery == true) {
+                val rediscoveredEndpoint = MacAddressRediscoverer.resolvePairedMac(appContext, deviceId)
+                if (rediscoveredEndpoint != null) {
+                    ZevClipPreferences.saveEndpoint(
+                        appContext,
+                        rediscoveredEndpoint.ipAddress,
+                        rediscoveredEndpoint.port.toString()
+                    )
+                    val retryResult = send(
+                        appContext,
+                        rediscoveredEndpoint.ipAddress,
+                        rediscoveredEndpoint.port,
+                        pairingToken,
+                        androidReceiverPort,
+                        findPhoneRinging
+                    )
+                    if (retryResult is SendResult.Success) {
+                        ZevClipPreferences.setActiveTransportMode(appContext, "Wi-Fi")
+                        return retryResult
+                    }
+                }
+            }
+        }
 
-        return send(
-            appContext,
-            rediscoveredEndpoint.ipAddress,
-            rediscoveredEndpoint.port,
-            pairingToken,
-            androidReceiverPort,
-            findPhoneRinging
-        )
+        // Priority 2: Fallback to Bluetooth
+        if (BluetoothClientManager.isConnected()) {
+            val sent = BluetoothClientManager.sendPresence(appContext, findPhoneRinging)
+            if (sent) {
+                ZevClipPreferences.setActiveTransportMode(appContext, "Bluetooth")
+                return SendResult.Success("Sent presence via Bluetooth fallback.")
+            }
+        }
+
+        return SendResult.Failure("Failed to send presence via Wi-Fi or Bluetooth.")
     }
 
     private fun send(

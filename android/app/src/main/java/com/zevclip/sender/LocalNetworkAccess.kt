@@ -10,6 +10,41 @@ object LocalNetworkAccess {
         return hasLocalNetworkTransport(connectivityManager) || hasHotspotLanInterface()
     }
 
+    fun localIPv4Addresses(): List<String> {
+        val interfaces = try {
+            NetworkInterface.getNetworkInterfaces()?.toList().orEmpty()
+        } catch (_: Exception) {
+            return emptyList()
+        }
+
+        return interfaces
+            .filter { try { it.isUp && !it.isLoopback } catch (_: Exception) { false } }
+            .flatMap { it.inetAddresses.toList() }
+            .filterIsInstance<Inet4Address>()
+            .filter { !it.isLoopbackAddress && !it.isLinkLocalAddress && it.isPrivateLanAddress() }
+            .map { it.hostAddress ?: "" }
+            .filter { it.isNotBlank() }
+    }
+
+    fun hotspotClientIPs(): List<String> {
+        val ips = mutableListOf<String>()
+        try {
+            val file = java.io.File("/proc/net/arp")
+            if (file.exists() && file.canRead()) {
+                file.forEachLine { line ->
+                    val tokens = line.trim().split("\\s+".toRegex())
+                    if (tokens.size >= 4 && tokens[0] != "IP" && tokens[2] == "0x2") {
+                        val ip = tokens[0]
+                        if (ip.matches(Regex("\\d+\\.\\d+\\.\\d+\\.\\d+"))) {
+                            ips.add(ip)
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+        return ips
+    }
+
     fun unavailableMessage(): String {
         return "No local network found. Connect to Wi-Fi/LAN or turn on the phone hotspot with the Mac connected to it."
     }

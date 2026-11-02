@@ -298,10 +298,10 @@ final class AndroidReceiverDiscovery: NSObject {
     }
 
     private func hostRank(_ host: String) -> Int {
-        if host.contains(":") {
+        if host.hasPrefix("10.") || host.hasPrefix("192.168.") || host.range(of: #"^172\.(1[6-9]|2[0-9]|3[0-1])\."#, options: .regularExpression) != nil {
             return 0
         }
-        if host.hasPrefix("10.") || host.hasPrefix("192.168.") || host.range(of: #"^172\.(1[6-9]|2[0-9]|3[0-1])\."#, options: .regularExpression) != nil {
+        if host.contains(":") {
             return 1
         }
         return 2
@@ -319,6 +319,7 @@ final class AndroidReceiverDiscovery: NSObject {
     private static let discoveryTimeout: TimeInterval = 8
     private static let resolveTimeout: TimeInterval = 5
     private static let selectionDelay: TimeInterval = 1.2
+
 }
 
 extension AndroidReceiverDiscovery: NetServiceBrowserDelegate {

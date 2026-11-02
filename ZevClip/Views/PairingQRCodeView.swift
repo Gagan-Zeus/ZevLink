@@ -104,7 +104,7 @@ struct PairingQRCodeView: View {
 
     private var pairingPayloadData: Data? {
         let currentHost = host
-        let payload: [String: Any] = [
+        var payload: [String: Any] = [
             "name": ClipboardReceiver.serviceName,
             "deviceId": deviceId,
             "host": currentHost,
@@ -113,6 +113,10 @@ struct PairingQRCodeView: View {
             "token": token,
             "transferCert": transferCertificateSHA256
         ]
+
+        if let btAddress = MacBluetoothService.shared.bluetoothAddress {
+            payload["btAddress"] = btAddress
+        }
 
         return try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
     }

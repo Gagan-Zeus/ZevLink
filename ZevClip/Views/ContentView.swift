@@ -5,6 +5,7 @@ struct ContentView: View {
     @ObservedObject var macClipboardWatcher: MacClipboardWatcher
     @ObservedObject var androidClipboardSender: AndroidClipboardSender
     @ObservedObject var appSettings: AppSettings
+    @ObservedObject var bluetoothService: MacBluetoothService = .shared
 
     private var isSyncRunning: Bool {
         receiver.status == .running && macClipboardWatcher.isRunning
@@ -139,6 +140,39 @@ struct ContentView: View {
                 Divider()
 
                 VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Text("Bluetooth")
+                            .font(.headline)
+                        Spacer()
+                        Circle()
+                            .fill(bluetoothService.isConnected ? Color.green : (bluetoothService.isAdvertising ? Color.orange : Color.secondary))
+                            .frame(width: 9, height: 9)
+                        Text(bluetoothService.isConnected ? "Connected" : (bluetoothService.isAdvertising ? "Ready" : "Idle"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if bluetoothService.isConnected {
+                        statusRow("Status", "Connected to Phone", color: .green)
+                        if let battery = bluetoothService.phoneBatteryPercentage {
+                            statusRow("Phone Battery", "\(battery)%", color: .primary)
+                        }
+                    } else if bluetoothService.isAdvertising {
+                        statusRow("Status", "Ready for phone connection", color: .secondary)
+                    } else {
+                        statusRow("Status", bluetoothService.statusText, color: .secondary)
+                    }
+
+                    if !bluetoothService.isAdvertising && !bluetoothService.isConnected {
+                        Button("Start Advertising") {
+                            bluetoothService.startAdvertisingIfNeeded()
+                        }
+                    }
+                }
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 12) {
                     Text("Preferences")
                         .font(.headline)
 
@@ -191,6 +225,38 @@ struct ContentView: View {
                             set: { appSettings.setFileTransferChunkDeduplication($0) }
                         )
                     )
+
+                    VStack(alignment: .leading) {
+                        Text("Human Typing Speed")
+                        HStack {
+                            Slider(
+                                value: Binding(
+                                    get: { appSettings.humanTypingSpeed },
+                                    set: { appSettings.setHumanTypingSpeed($0) }
+                                ),
+                                in: 1...100,
+                                step: 1
+                            )
+                            Text("\(Int(appSettings.humanTypingSpeed)) cps")
+                                .frame(width: 50, alignment: .trailing)
+                        }
+                    }
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Human Typing Shortcuts")
+                            .font(.subheadline)
+                        ShortcutRecorder(
+                            title: "Type / Resume:",
+                            shortcut: Binding(
+                                get: { appSettings.humanTypingStartShortcut },
+                                set: { appSettings.setHumanTypingStartShortcut($0) }
+                            )
+                        )
+
+                        Text("If a shortcut is empty, the feature is disabled.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.top, 8)
                 }
             }
             .padding(24)

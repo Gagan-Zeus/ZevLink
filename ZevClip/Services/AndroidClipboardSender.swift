@@ -1,8 +1,16 @@
 import Foundation
+import Network
 
 @MainActor
 final class AndroidClipboardSender: ObservableObject {
+    enum TransportMode: String {
+        case wifi = "Wi-Fi"
+        case bluetooth = "Bluetooth"
+        case disconnected = "Disconnected"
+    }
+
     @Published private(set) var status = "Android clipboard sender is idle."
+    @Published private(set) var activeTransportMode: TransportMode = .disconnected
     @Published private(set) var isDiscovering = false
     @Published private(set) var isSending = false
     @Published private(set) var isFindingPhone = false
@@ -10,6 +18,8 @@ final class AndroidClipboardSender: ObservableObject {
     @Published private(set) var pairedDeviceId: String?
     @Published private(set) var lastSentText: String?
     @Published private(set) var lastSentAt: Date?
+    @Published private(set) var intentBroadcastStatus: IntentBroadcastDeliveryStatus = .idle
+    @Published private(set) var intentBroadcastMessage = "No Intent has been sent."
 
     private let tokenProvider: () -> String
     private var discovery: AndroidReceiverDiscovery?
@@ -17,7 +27,11 @@ final class AndroidClipboardSender: ObservableObject {
     private var sendTask: Task<Void, Never>?
     private var statusTask: Task<Void, Never>?
     private var statusRefreshTimer: Timer?
+    private var pathMonitor: NWPathMonitor?
+    private var lastKnownHosts: Set<String> = []
     private var retriedChangeIDs: Set<UUID> = []
+    private var pendingIntentBroadcastCompletions: [String: (IntentBroadcastAcknowledgement) -> Void] = [:]
+    private var pendingIntentBroadcastTimeouts: [String: Task<Void, Never>] = [:]
 
     init(tokenProvider: @escaping () -> String) {
         self.tokenProvider = tokenProvider
@@ -48,6 +62,142 @@ final class AndroidClipboardSender: ObservableObject {
         discoverAndroidReceiver()
     }
 
+    func sendIntentBroadcast(
+        _ preset: IntentPreset,
+        completion: ((IntentBroadcastAcknowledgement) -> Void)? = nil
+    ) {
+        let request: IntentBroadcastRequest
+        do {
+            request = try preset.makeRequest()
+        } catch {
+            intentBroadcastStatus = .invalidConfiguration
+            intentBroadcastMessage = error.localizedDescription
+            return
+        }
+
+        guard let requestData = try? JSONEncoder().encode(request),
+              let requestBody = String(data: requestData, encoding: .utf8)
+        else {
+            intentBroadcastStatus = .invalidConfiguration
+            intentBroadcastMessage = "Could not encode the Intent request."
+            return
+        }
+
+        let requestId = request.requestId
+        intentBroadcastStatus = .sending
+        intentBroadcastMessage = "Sending Intent request…"
+
+        if (activeTransportMode == .bluetooth || resolvedEndpoint == nil), MacBluetoothService.shared.isConnected {
+            guard MacBluetoothService.shared.sendBluetoothMessage(
+                path: "/intent-broadcast",
+                body: requestBody
+            ) else {
+                intentBroadcastStatus = .broadcastOperationFailed
+                intentBroadcastMessage = "Bluetooth is connected but could not queue the Intent request."
+                return
+            }
+
+            activeTransportMode = .bluetooth
+            intentBroadcastStatus = .requestDelivered
+            intentBroadcastMessage = "Intent request delivered over Bluetooth; waiting for Android acknowledgement…"
+            registerIntentBroadcastWaiter(requestId: requestId, completion: completion)
+            return
+        }
+
+        guard let endpoint = resolvedEndpoint else {
+            intentBroadcastStatus = .notConnected
+            intentBroadcastMessage = "Connect an Android device before sending an Intent."
+            return
+        }
+
+        let token = tokenProvider().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !token.isEmpty else {
+            intentBroadcastStatus = .notConnected
+            intentBroadcastMessage = "Pairing token is unavailable."
+            return
+        }
+
+        Task { [weak self] in
+            let result = await AndroidClipboardHTTPClient.sendIntentBroadcast(
+                requestData: requestData,
+                on: endpoint,
+                token: token
+            )
+            await MainActor.run {
+                self?.handleIntentBroadcastHTTPResult(result, completion: completion)
+            }
+        }
+    }
+
+    func handleIntentBroadcastAcknowledgement(_ data: Data) {
+        guard let acknowledgement = try? JSONDecoder().decode(
+            IntentBroadcastAcknowledgement.self,
+            from: data
+        ) else {
+            intentBroadcastStatus = .broadcastOperationFailed
+            intentBroadcastMessage = "Android returned an invalid Intent acknowledgement."
+            return
+        }
+
+        pendingIntentBroadcastTimeouts[acknowledgement.requestId]?.cancel()
+        pendingIntentBroadcastTimeouts[acknowledgement.requestId] = nil
+        let completion = pendingIntentBroadcastCompletions.removeValue(forKey: acknowledgement.requestId)
+        applyIntentBroadcastAcknowledgement(acknowledgement)
+        completion?(acknowledgement)
+    }
+
+    private func registerIntentBroadcastWaiter(
+        requestId: String,
+        completion: ((IntentBroadcastAcknowledgement) -> Void)?
+    ) {
+        if let completion {
+            pendingIntentBroadcastCompletions[requestId] = completion
+        }
+        pendingIntentBroadcastTimeouts[requestId]?.cancel()
+        pendingIntentBroadcastTimeouts[requestId] = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(8))
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                guard let self else { return }
+                let hadPendingRequest = self.pendingIntentBroadcastCompletions.removeValue(forKey: requestId) != nil ||
+                    self.pendingIntentBroadcastTimeouts[requestId] != nil
+                guard hadPendingRequest else { return }
+                self.pendingIntentBroadcastTimeouts[requestId] = nil
+                self.intentBroadcastStatus = .requestTimedOut
+                self.intentBroadcastMessage = "Android did not acknowledge the Intent request within 8 seconds."
+            }
+        }
+    }
+
+    private func handleIntentBroadcastHTTPResult(
+        _ result: AndroidClipboardHTTPClient.IntentBroadcastResult,
+        completion: ((IntentBroadcastAcknowledgement) -> Void)?
+    ) {
+        switch result {
+        case .success(let acknowledgement):
+            activeTransportMode = .wifi
+            intentBroadcastStatus = .intentBroadcastRequested
+            intentBroadcastMessage = acknowledgement.message
+            completion?(acknowledgement)
+        case .failure(let acknowledgement):
+            intentBroadcastStatus = acknowledgement.status == "timeout_or_transport_error"
+                ? .requestTimedOut
+                : .broadcastOperationFailed
+            intentBroadcastMessage = acknowledgement.message
+            completion?(acknowledgement)
+        }
+    }
+
+    private func applyIntentBroadcastAcknowledgement(_ acknowledgement: IntentBroadcastAcknowledgement) {
+        if acknowledgement.success {
+            intentBroadcastStatus = .intentBroadcastRequested
+            intentBroadcastMessage = acknowledgement.message
+        } else {
+            intentBroadcastStatus = .broadcastOperationFailed
+            intentBroadcastMessage = acknowledgement.message
+        }
+    }
+
     func updateEndpointSeenFromAndroid(_ endpoint: AndroidReceiverEndpoint) {
         if let pairedDeviceId, let endpointDeviceId = endpoint.deviceId, endpointDeviceId != pairedDeviceId {
             return
@@ -57,6 +207,7 @@ final class AndroidClipboardSender: ObservableObject {
         discovery = nil
         isDiscovering = false
         resolvedEndpoint = endpoint
+        activeTransportMode = .wifi
         if let findPhoneRinging = endpoint.findPhoneRinging {
             setFindingPhone(findPhoneRinging)
         }
@@ -69,8 +220,23 @@ final class AndroidClipboardSender: ObservableObject {
         sendPendingChangeIfPossible()
     }
 
+    func clearResolvedEndpoint() {
+        resolvedEndpoint = nil
+        activeTransportMode = MacBluetoothService.shared.isConnected ? .bluetooth : .disconnected
+        status = "Disconnected from Android."
+    }
+
     func startStatusMonitoring() {
         guard statusRefreshTimer == nil else { return }
+
+        let monitor = NWPathMonitor()
+        monitor.pathUpdateHandler = { [weak self] path in
+            Task { @MainActor in
+                self?.handleNetworkPathUpdate(path)
+            }
+        }
+        monitor.start(queue: DispatchQueue.global(qos: .utility))
+        pathMonitor = monitor
 
         let timer = Timer(timeInterval: Self.statusRefreshInterval, repeats: true) { [weak self] _ in
             Task { @MainActor in
@@ -83,36 +249,123 @@ final class AndroidClipboardSender: ObservableObject {
         refreshConnectionStatus()
     }
 
-    func dismissAndroidNotification(notificationKey: String) {
-        let trimmedKey = notificationKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedKey.isEmpty else { return }
-        guard let endpoint = resolvedEndpoint else {
-            discoverAndroidReceiver()
-            return
+    private func handleNetworkPathUpdate(_ path: NWPath) {
+        let currentHosts = Set(LocalNetworkHost.currentPairingHosts())
+        let hostsChanged = !lastKnownHosts.isEmpty && (currentHosts != lastKnownHosts)
+        lastKnownHosts = currentHosts
+
+        var endpointUnreachable = false
+        if let endpoint = resolvedEndpoint {
+            endpointUnreachable = !isEndpointSubnetReachable(endpoint, localHosts: currentHosts)
         }
 
-        let token = tokenProvider().trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !token.isEmpty else { return }
+        if path.status != .satisfied || currentHosts.isEmpty || hostsChanged || endpointUnreachable {
+            if resolvedEndpoint != nil || activeTransportMode == .wifi {
+                clearResolvedEndpoint()
+            }
+        }
 
-        Task { [weak self] in
-            let result = await AndroidClipboardHTTPClient.dismissNotification(
-                notificationKey: trimmedKey,
-                on: endpoint,
-                token: token
-            )
+        if path.status == .satisfied && !currentHosts.isEmpty {
+            if resolvedEndpoint != nil {
+                statusTask?.cancel()
+                statusTask = nil
+                refreshAndroidStatus()
+            } else {
+                discoverAndroidReceiver()
+            }
+        }
+    }
 
-            await MainActor.run {
-                switch result {
-                case .success:
-                    self?.status = "Dismissed Android notification from Mac."
-                case .failure(let message, let isRetryable):
-                    self?.status = message
-                    if isRetryable {
-                        self?.resolvedEndpoint = nil
-                        self?.discoverAndroidReceiver()
+    private func isEndpointSubnetReachable(_ endpoint: AndroidReceiverEndpoint, localHosts: Set<String>) -> Bool {
+        if localHosts.isEmpty { return false }
+        let target = endpoint.host
+        guard let targetOctets = LocalNetworkHost.octets(from: target) else {
+            return true
+        }
+        for localHost in localHosts {
+            if let localOctets = LocalNetworkHost.octets(from: localHost) {
+                if targetOctets[0] == localOctets[0] && targetOctets[1] == localOctets[1] {
+                    if targetOctets[0] == 192 && targetOctets[1] == 168 {
+                        if targetOctets[2] == localOctets[2] { return true }
+                    } else if targetOctets[0] == 10 {
+                        return true
+                    } else if targetOctets[0] == 172 {
+                        if targetOctets[1] == localOctets[1] { return true }
                     }
                 }
             }
+        }
+        return false
+    }
+
+    func dismissAndroidNotification(notificationKey: String) {
+        let trimmedKey = notificationKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedKey.isEmpty else { return }
+
+        // Fast-path: Bluetooth active or no Wi-Fi endpoint
+        if (activeTransportMode == .bluetooth || resolvedEndpoint == nil) && MacBluetoothService.shared.isConnected {
+            MacBluetoothService.shared.sendBluetoothMessage(
+                path: "/notification-action",
+                notificationKey: trimmedKey,
+                actionId: "dismiss"
+            )
+            activeTransportMode = .bluetooth
+            status = "Dismissed Android notification via Bluetooth."
+            return
+        }
+
+        // Priority 1: Try Wi-Fi if resolvedEndpoint is available
+        if let endpoint = resolvedEndpoint {
+            let token = tokenProvider().trimmingCharacters(in: .whitespacesAndNewlines)
+            if !token.isEmpty {
+                Task { [weak self] in
+                    let result = await AndroidClipboardHTTPClient.dismissNotification(
+                        notificationKey: trimmedKey,
+                        on: endpoint,
+                        token: token
+                    )
+
+                    await MainActor.run {
+                        switch result {
+                        case .success:
+                            self?.activeTransportMode = .wifi
+                            self?.status = "Dismissed Android notification from Mac."
+                        case .failure(let message, let isRetryable):
+                            // Fallback to Bluetooth
+                            if MacBluetoothService.shared.isConnected {
+                                MacBluetoothService.shared.sendBluetoothMessage(
+                                    path: "/notification-action",
+                                    notificationKey: trimmedKey,
+                                    actionId: "dismiss"
+                                )
+                                self?.activeTransportMode = .bluetooth
+                                self?.resolvedEndpoint = nil
+                                self?.status = "Dismissed notification via Bluetooth fallback."
+                            } else {
+                                self?.status = message
+                                if isRetryable {
+                                    self?.resolvedEndpoint = nil
+                                    self?.discoverAndroidReceiver()
+                                }
+                            }
+                        }
+                    }
+                }
+                return
+            }
+        }
+
+        // Priority 2: Bluetooth fallback if Wi-Fi endpoint unavailable
+        if MacBluetoothService.shared.isConnected {
+            MacBluetoothService.shared.sendBluetoothMessage(
+                path: "/notification-action",
+                notificationKey: trimmedKey,
+                actionId: "dismiss"
+            )
+            activeTransportMode = .bluetooth
+            status = "Dismissed Android notification via Bluetooth."
+        } else {
+            discoverAndroidReceiver()
         }
     }
 
@@ -128,41 +381,82 @@ final class AndroidClipboardSender: ObservableObject {
             completion?(false, "Notification action is missing.")
             return
         }
-        guard let endpoint = resolvedEndpoint else {
-            discoverAndroidReceiver()
-            completion?(false, "Rediscovering Android receiver...")
-            return
-        }
 
-        let token = tokenProvider().trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !token.isEmpty else {
-            completion?(false, "Pairing token is empty.")
-            return
-        }
-
-        Task { [weak self] in
-            let result = await AndroidClipboardHTTPClient.performNotificationAction(
+        // Fast-path: Bluetooth active or no Wi-Fi endpoint
+        if (activeTransportMode == .bluetooth || resolvedEndpoint == nil) && MacBluetoothService.shared.isConnected {
+            MacBluetoothService.shared.sendBluetoothMessage(
+                path: "/notification-action",
                 notificationKey: trimmedKey,
                 actionId: trimmedActionId,
-                replyText: replyText,
-                on: endpoint,
-                token: token
+                replyText: replyText
             )
+            activeTransportMode = .bluetooth
+            status = "Performed notification action via Bluetooth."
+            completion?(true, "Action sent via Bluetooth.")
+            return
+        }
 
-            await MainActor.run {
-                switch result {
-                case .success:
-                    self?.status = "Performed Android notification action from Mac."
-                    completion?(true, "Android notification action sent.")
-                case .failure(let message, let isRetryable):
-                    self?.status = message
-                    completion?(false, message)
-                    if isRetryable {
-                        self?.resolvedEndpoint = nil
-                        self?.discoverAndroidReceiver()
+        // Priority 1: Try Wi-Fi
+        if let endpoint = resolvedEndpoint {
+            let token = tokenProvider().trimmingCharacters(in: .whitespacesAndNewlines)
+            if !token.isEmpty {
+                Task { [weak self] in
+                    let result = await AndroidClipboardHTTPClient.performNotificationAction(
+                        notificationKey: trimmedKey,
+                        actionId: trimmedActionId,
+                        replyText: replyText,
+                        on: endpoint,
+                        token: token
+                    )
+
+                    await MainActor.run {
+                        switch result {
+                        case .success:
+                            self?.activeTransportMode = .wifi
+                            self?.status = "Performed Android notification action from Mac."
+                            completion?(true, "Android notification action sent.")
+                        case .failure(let message, let isRetryable):
+                            // Fallback to Bluetooth
+                            if MacBluetoothService.shared.isConnected {
+                                MacBluetoothService.shared.sendBluetoothMessage(
+                                    path: "/notification-action",
+                                    notificationKey: trimmedKey,
+                                    actionId: trimmedActionId,
+                                    replyText: replyText
+                                )
+                                self?.activeTransportMode = .bluetooth
+                                self?.resolvedEndpoint = nil
+                                self?.status = "Performed notification action via Bluetooth fallback."
+                                completion?(true, "Action sent via Bluetooth.")
+                            } else {
+                                self?.status = message
+                                completion?(false, message)
+                                if isRetryable {
+                                    self?.resolvedEndpoint = nil
+                                    self?.discoverAndroidReceiver()
+                                }
+                            }
+                        }
                     }
                 }
+                return
             }
+        }
+
+        // Priority 2: Bluetooth fallback
+        if MacBluetoothService.shared.isConnected {
+            MacBluetoothService.shared.sendBluetoothMessage(
+                path: "/notification-action",
+                notificationKey: trimmedKey,
+                actionId: trimmedActionId,
+                replyText: replyText
+            )
+            activeTransportMode = .bluetooth
+            status = "Performed notification action via Bluetooth."
+            completion?(true, "Action sent via Bluetooth.")
+        } else {
+            discoverAndroidReceiver()
+            completion?(false, "Rediscovering Android receiver...")
         }
     }
 
@@ -177,155 +471,288 @@ final class AndroidClipboardSender: ObservableObject {
             completion?(false, "Call action is missing.")
             return
         }
-        guard let endpoint = resolvedEndpoint else {
-            discoverAndroidReceiver()
-            completion?(false, "Rediscovering Android receiver...")
-            return
-        }
 
-        let token = tokenProvider().trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !token.isEmpty else {
-            completion?(false, "Pairing token is empty.")
-            return
-        }
-
-        Task { [weak self] in
-            let result = await AndroidClipboardHTTPClient.sendCallAction(
+        // Fast-path: Bluetooth active or no Wi-Fi endpoint
+        if (activeTransportMode == .bluetooth || resolvedEndpoint == nil) && MacBluetoothService.shared.isConnected {
+            MacBluetoothService.shared.sendBluetoothMessage(
+                path: "/call-action",
                 action: trimmedAction,
-                callId: trimmedCallId,
-                on: endpoint,
-                token: token
+                callId: trimmedCallId
             )
+            activeTransportMode = .bluetooth
+            status = "Call action sent via Bluetooth."
+            completion?(true, "Call action sent via Bluetooth.")
+            return
+        }
 
-            await MainActor.run {
-                switch result {
-                case .success(let message):
-                    self?.status = message
-                    completion?(true, message)
-                case .failure(let message, let isRetryable):
-                    self?.status = message
-                    completion?(false, message)
-                    if isRetryable {
-                        self?.resolvedEndpoint = nil
-                        self?.discoverAndroidReceiver()
+        // Priority 1: Try Wi-Fi
+        if let endpoint = resolvedEndpoint {
+            let token = tokenProvider().trimmingCharacters(in: .whitespacesAndNewlines)
+            if !token.isEmpty {
+                Task { [weak self] in
+                    let result = await AndroidClipboardHTTPClient.sendCallAction(
+                        action: trimmedAction,
+                        callId: trimmedCallId,
+                        on: endpoint,
+                        token: token
+                    )
+
+                    await MainActor.run {
+                        switch result {
+                        case .success(let message):
+                            self?.activeTransportMode = .wifi
+                            self?.status = message
+                            completion?(true, message)
+                        case .failure(let message, let isRetryable):
+                            if MacBluetoothService.shared.isConnected {
+                                MacBluetoothService.shared.sendBluetoothMessage(
+                                    path: "/call-action",
+                                    action: trimmedAction,
+                                    callId: trimmedCallId
+                                )
+                                self?.activeTransportMode = .bluetooth
+                                self?.resolvedEndpoint = nil
+                                self?.status = "Call action sent via Bluetooth fallback."
+                                completion?(true, "Call action sent via Bluetooth.")
+                            } else {
+                                self?.status = message
+                                completion?(false, message)
+                                if isRetryable {
+                                    self?.resolvedEndpoint = nil
+                                    self?.discoverAndroidReceiver()
+                                }
+                            }
+                        }
                     }
                 }
+                return
             }
+        }
+
+        // Priority 2: Bluetooth fallback
+        if MacBluetoothService.shared.isConnected {
+            MacBluetoothService.shared.sendBluetoothMessage(
+                path: "/call-action",
+                action: trimmedAction,
+                callId: trimmedCallId
+            )
+            activeTransportMode = .bluetooth
+            status = "Call action sent via Bluetooth."
+            completion?(true, "Call action sent via Bluetooth.")
+        } else {
+            discoverAndroidReceiver()
+            completion?(false, "Rediscovering Android receiver...")
         }
     }
 
     func sendAndroidMediaCommand(action: String) {
         let trimmedAction = action.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedAction.isEmpty else { return }
-        guard let endpoint = resolvedEndpoint else {
-            discoverAndroidReceiver()
-            status = "Rediscovering Android receiver for media control..."
-            return
-        }
 
-        let token = tokenProvider().trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !token.isEmpty else {
-            status = "Pairing token is empty; cannot control Android media."
-            return
-        }
-
-        Task { [weak self] in
-            let result = await AndroidClipboardHTTPClient.sendMediaCommand(
-                action: trimmedAction,
-                on: endpoint,
-                token: token
+        // Fast-path: Bluetooth active or no Wi-Fi endpoint
+        if (activeTransportMode == .bluetooth || resolvedEndpoint == nil) && MacBluetoothService.shared.isConnected {
+            MacBluetoothService.shared.sendBluetoothMessage(
+                path: "/media-command",
+                action: trimmedAction
             )
+            activeTransportMode = .bluetooth
+            status = "Media command sent via Bluetooth."
+            return
+        }
 
-            await MainActor.run {
-                switch result {
-                case .success(let message):
-                    self?.status = message
-                case .failure(let message, let isRetryable):
-                    self?.status = message
-                    if isRetryable {
-                        self?.resolvedEndpoint = nil
-                        self?.discoverAndroidReceiver()
+        // Priority 1: Try Wi-Fi
+        if let endpoint = resolvedEndpoint {
+            let token = tokenProvider().trimmingCharacters(in: .whitespacesAndNewlines)
+            if !token.isEmpty {
+                Task { [weak self] in
+                    let result = await AndroidClipboardHTTPClient.sendMediaCommand(
+                        action: trimmedAction,
+                        on: endpoint,
+                        token: token
+                    )
+
+                    await MainActor.run {
+                        switch result {
+                        case .success(let message):
+                            self?.activeTransportMode = .wifi
+                            self?.status = message
+                        case .failure(let message, let isRetryable):
+                            if MacBluetoothService.shared.isConnected {
+                                MacBluetoothService.shared.sendBluetoothMessage(
+                                    path: "/media-command",
+                                    action: trimmedAction
+                                )
+                                self?.activeTransportMode = .bluetooth
+                                self?.resolvedEndpoint = nil
+                                self?.status = "Media command sent via Bluetooth fallback."
+                            } else {
+                                self?.status = message
+                                if isRetryable {
+                                    self?.resolvedEndpoint = nil
+                                    self?.discoverAndroidReceiver()
+                                }
+                            }
+                        }
                     }
                 }
+                return
             }
+        }
+
+        // Priority 2: Bluetooth fallback
+        if MacBluetoothService.shared.isConnected {
+            MacBluetoothService.shared.sendBluetoothMessage(
+                path: "/media-command",
+                action: trimmedAction
+            )
+            activeTransportMode = .bluetooth
+            status = "Media command sent via Bluetooth."
+        } else {
+            discoverAndroidReceiver()
+            status = "Rediscovering Android receiver for media control..."
         }
     }
 
     func toggleFindMyPhone(completion: ((Bool, String) -> Void)? = nil) {
-        guard let endpoint = resolvedEndpoint else {
+        let action = isFindingPhone ? "stop" : "start"
+        status = action == "start" ? "Asking Android phone to ring..." : "Stopping Android phone ring..."
+
+        // Fast-path: Bluetooth active or no Wi-Fi endpoint
+        if (activeTransportMode == .bluetooth || resolvedEndpoint == nil) && MacBluetoothService.shared.isConnected {
+            MacBluetoothService.shared.sendBluetoothMessage(
+                path: "/find-phone",
+                action: action
+            )
+            activeTransportMode = .bluetooth
+            setFindingPhone(action == "start")
+            status = "Find My Phone sent via Bluetooth."
+            completion?(true, "Find My Phone sent via Bluetooth.")
+            return
+        }
+
+        // Priority 1: Try Wi-Fi
+        if let endpoint = resolvedEndpoint {
+            let token = tokenProvider().trimmingCharacters(in: .whitespacesAndNewlines)
+            if !token.isEmpty {
+                Task { [weak self] in
+                    let result = await AndroidClipboardHTTPClient.findMyPhone(
+                        action: action,
+                        on: endpoint,
+                        token: token
+                    )
+
+                    await MainActor.run {
+                        switch result {
+                        case .success(let message):
+                            self?.activeTransportMode = .wifi
+                            self?.status = message
+                            self?.setFindingPhone(action == "start")
+                            completion?(true, message)
+                        case .failure(let message, let isRetryable):
+                            if MacBluetoothService.shared.isConnected {
+                                MacBluetoothService.shared.sendBluetoothMessage(
+                                    path: "/find-phone",
+                                    action: action
+                                )
+                                self?.activeTransportMode = .bluetooth
+                                self?.resolvedEndpoint = nil
+                                self?.setFindingPhone(action == "start")
+                                self?.status = "Find My Phone sent via Bluetooth fallback."
+                                completion?(true, "Find My Phone sent via Bluetooth.")
+                            } else {
+                                self?.status = message
+                                completion?(false, message)
+                                if isRetryable {
+                                    self?.resolvedEndpoint = nil
+                                    self?.discoverAndroidReceiver()
+                                }
+                            }
+                        }
+                    }
+                }
+                return
+            }
+        }
+
+        // Priority 2: Bluetooth fallback
+        if MacBluetoothService.shared.isConnected {
+            MacBluetoothService.shared.sendBluetoothMessage(
+                path: "/find-phone",
+                action: action
+            )
+            activeTransportMode = .bluetooth
+            setFindingPhone(action == "start")
+            status = "Find My Phone sent via Bluetooth."
+            completion?(true, "Find My Phone sent via Bluetooth.")
+        } else {
             discoverAndroidReceiver()
             status = "Rediscovering Android receiver for Find My Phone..."
             completion?(false, status)
-            return
-        }
-
-        let token = tokenProvider().trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !token.isEmpty else {
-            status = "Pairing token is empty; cannot ring Android phone."
-            completion?(false, status)
-            return
-        }
-
-        let action = isFindingPhone ? "stop" : "start"
-        status = action == "start" ? "Asking Android phone to ring..." : "Stopping Android phone ring..."
-        Task { [weak self] in
-            let result = await AndroidClipboardHTTPClient.findMyPhone(
-                action: action,
-                on: endpoint,
-                token: token
-            )
-
-            await MainActor.run {
-                switch result {
-                case .success(let message):
-                    self?.status = message
-                    self?.setFindingPhone(action == "start")
-                    completion?(true, message)
-                case .failure(let message, let isRetryable):
-                    self?.status = message
-                    completion?(false, message)
-                    if isRetryable {
-                        self?.resolvedEndpoint = nil
-                        self?.discoverAndroidReceiver()
-                    }
-                }
-            }
         }
     }
 
-    private func setFindingPhone(_ isFinding: Bool) {
+    func setFindingPhone(_ isFinding: Bool) {
         isFindingPhone = isFinding
     }
 
     private func sendPendingChangeIfPossible() {
         guard sendTask == nil else { return }
         guard let change = pendingChange else { return }
-        guard let endpoint = resolvedEndpoint else {
-            discoverAndroidReceiver()
-            return
-        }
 
-        let token = tokenProvider().trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !token.isEmpty else {
-            status = "Pairing token is empty; cannot send to Android."
-            return
-        }
-
-        pendingChange = nil
-        isSending = true
-        status = "Sending Mac clipboard to Android..."
-
-        sendTask = Task { [weak self] in
-            let result = await AndroidClipboardHTTPClient.send(
-                content: change.content,
-                to: endpoint,
-                token: token
-            )
-
-            await MainActor.run {
-                self?.handleSendResult(result, for: change, endpoint: endpoint)
+        // Fast-path: Bluetooth active or no Wi-Fi endpoint
+        if (activeTransportMode == .bluetooth || resolvedEndpoint == nil) && MacBluetoothService.shared.isConnected, case .text(let text) = change.content {
+            let sent = MacBluetoothService.shared.sendBluetoothMessage(path: "/clipboard", body: text)
+            if sent {
+                pendingChange = nil
+                lastSentText = text
+                lastSentAt = Date()
+                activeTransportMode = .bluetooth
+                status = "Sent clipboard via Bluetooth."
+                return
             }
         }
+
+        // Priority 1: Try Wi-Fi if resolvedEndpoint is available
+        if let endpoint = resolvedEndpoint {
+            let token = tokenProvider().trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !token.isEmpty else {
+                status = "Pairing token is empty; cannot send to Android."
+                return
+            }
+
+            pendingChange = nil
+            isSending = true
+            status = "Sending Mac clipboard to Android (Wi-Fi)..."
+
+            sendTask = Task { [weak self] in
+                let result = await AndroidClipboardHTTPClient.send(
+                    content: change.content,
+                    to: endpoint,
+                    token: token
+                )
+
+                await MainActor.run {
+                    self?.handleSendResult(result, for: change, endpoint: endpoint)
+                }
+            }
+            return
+        }
+
+        // Priority 2: Fallback to Bluetooth if connected
+        if MacBluetoothService.shared.isConnected, case .text(let text) = change.content {
+            let sent = MacBluetoothService.shared.sendBluetoothMessage(path: "/clipboard", body: text)
+            if sent {
+                pendingChange = nil
+                lastSentText = text
+                lastSentAt = Date()
+                activeTransportMode = .bluetooth
+                status = "Sent clipboard via Bluetooth fallback."
+                return
+            }
+        }
+
+        // Otherwise start discovery
+        discoverAndroidReceiver()
     }
 
     private func discoverAndroidReceiver() {
@@ -378,6 +805,7 @@ final class AndroidClipboardSender: ObservableObject {
             }
             lastSentAt = Date()
             resolvedEndpoint = endpoint
+            activeTransportMode = .wifi
             saveConfirmedAndroidIdentity(
                 confirmedDeviceId ?? endpoint.deviceId,
                 transferCertificateSHA256: endpoint.transferCertificateSHA256
@@ -392,6 +820,19 @@ final class AndroidClipboardSender: ObservableObject {
             }
 
         case .failure(let message, let isRetryable):
+            if MacBluetoothService.shared.isConnected, case .text(let text) = change.content {
+                let sent = MacBluetoothService.shared.sendBluetoothMessage(path: "/clipboard", body: text)
+                if sent {
+                    retriedChangeIDs.remove(change.id)
+                    lastSentText = text
+                    lastSentAt = Date()
+                    activeTransportMode = .bluetooth
+                    resolvedEndpoint = nil
+                    status = "Sent clipboard via Bluetooth fallback (Wi-Fi failed)."
+                    return
+                }
+            }
+
             if isRetryable && !retriedChangeIDs.contains(change.id) {
                 retriedChangeIDs.insert(change.id)
                 pendingChange = change
@@ -446,6 +887,7 @@ final class AndroidClipboardSender: ObservableObject {
                 batteryPercentage ?? endpoint.batteryPercentage
             )
             resolvedEndpoint = updatedEndpoint
+            activeTransportMode = .wifi
             saveConfirmedAndroidIdentity(
                 confirmedDeviceId ?? endpoint.deviceId,
                 transferCertificateSHA256: endpoint.transferCertificateSHA256
@@ -455,6 +897,7 @@ final class AndroidClipboardSender: ObservableObject {
             status = message
             if isRetryable {
                 resolvedEndpoint = nil
+                activeTransportMode = MacBluetoothService.shared.isConnected ? .bluetooth : .disconnected
                 discoverAndroidReceiver()
             }
         }
@@ -475,13 +918,46 @@ final class AndroidClipboardSender: ObservableObject {
         pairedDeviceId = AndroidReceiverIdentityStore.pairedDeviceId()
     }
 
+    func tryConnectToPhoneIps(_ ips: [String], port: Int) {
+        let token = tokenProvider().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !token.isEmpty else { return }
+
+        Task { [weak self] in
+            for ip in ips {
+                let endpoint = AndroidReceiverEndpoint(
+                    name: "ZevLink Android Receiver",
+                    deviceId: self?.pairedDeviceId,
+                    batteryPercentage: nil,
+                    findPhoneRinging: nil,
+                    transferCertificateSHA256: nil,
+                    host: ip,
+                    port: port
+                )
+                let result = await AndroidClipboardHTTPClient.fetchStatus(from: endpoint, token: token)
+                if case .success = result {
+                    await MainActor.run {
+                        self?.updateEndpointSeenFromAndroid(endpoint)
+                    }
+                    break
+                }
+            }
+        }
+    }
+
     private static let maximumTextBodyLength = 1_048_576
     private static let maximumImageBodyLength = 20 * 1_024 * 1_024
-    private static let statusRefreshInterval: TimeInterval = 60
-    private static let statusRefreshTolerance: TimeInterval = 15
+    private static let statusRefreshInterval: TimeInterval = 2
+    private static let statusRefreshTolerance: TimeInterval = 0.5
 }
 
 private enum AndroidClipboardHTTPClient {
+    private static let statusSession: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 1.0
+        config.timeoutIntervalForResource = 1.0
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        return URLSession(configuration: config)
+    }()
     enum Result {
         case success(confirmedDeviceId: String?)
         case failure(String, isRetryable: Bool)
@@ -495,6 +971,77 @@ private enum AndroidClipboardHTTPClient {
     enum CallActionResult {
         case success(String)
         case failure(String, isRetryable: Bool)
+    }
+
+    enum IntentBroadcastResult {
+        case success(IntentBroadcastAcknowledgement)
+        case failure(IntentBroadcastAcknowledgement)
+    }
+
+    static func sendIntentBroadcast(
+        requestData: Data,
+        on endpoint: AndroidReceiverEndpoint,
+        token: String
+    ) async -> IntentBroadcastResult {
+        guard let url = url(for: endpoint, path: "/intent-broadcast") else {
+            return .failure(
+                IntentBroadcastAcknowledgement(
+                    requestId: "",
+                    status: "invalid_request",
+                    success: false,
+                    message: "Android Intent receiver URL is invalid."
+                )
+            )
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 8
+        request.setValue(token, forHTTPHeaderField: "X-ZevClip-Token")
+        request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
+        applyMacBatteryHeaders(to: &request)
+        request.httpBody = requestData
+
+        do {
+            let (responseData, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                return .failure(
+                    IntentBroadcastAcknowledgement(
+                        requestId: "",
+                        status: "invalid_response",
+                        success: false,
+                        message: "Android returned an invalid Intent response."
+                    )
+                )
+            }
+
+            let responsePreview = String(data: responseData, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let acknowledgement = (try? JSONDecoder().decode(
+                IntentBroadcastAcknowledgement.self,
+                from: responseData
+            )) ?? IntentBroadcastAcknowledgement(
+                requestId: "",
+                status: "invalid_response",
+                success: false,
+                message: responsePreview?.isEmpty == false ? responsePreview! :
+                    "Android returned an invalid Intent response."
+            )
+
+            if httpResponse.statusCode == 200, acknowledgement.success {
+                return .success(acknowledgement)
+            }
+            return .failure(acknowledgement)
+        } catch {
+            return .failure(
+                IntentBroadcastAcknowledgement(
+                    requestId: "",
+                    status: "timeout_or_transport_error",
+                    success: false,
+                    message: "Could not deliver the Intent request to Android: \(error.localizedDescription)"
+                )
+            )
+        }
     }
 
     static func send(
@@ -573,12 +1120,12 @@ private enum AndroidClipboardHTTPClient {
 
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
-        request.timeoutInterval = 5
+        request.timeoutInterval = 1.0
         request.setValue(token, forHTTPHeaderField: "X-ZevClip-Token")
         applyMacBatteryHeaders(to: &request)
 
         do {
-            let (body, response) = try await URLSession.shared.data(for: request)
+            let (body, response) = try await statusSession.data(for: request)
             guard let httpResponse = response as? HTTPURLResponse else {
                 return .failure("Android receiver returned an invalid status response.", isRetryable: true)
             }

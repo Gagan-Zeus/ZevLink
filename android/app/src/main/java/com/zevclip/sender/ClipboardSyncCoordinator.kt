@@ -20,10 +20,13 @@ object ClipboardSyncCoordinator {
     private const val REMOTE_CLIPBOARD_ECHO_WINDOW_MS = 2_000L
 
     private val pendingHashes = mutableSetOf<String>()
+    private val pendingNormalizedHashes = mutableSetOf<String>()
     private val sendStateLock = Any()
     private var lastCompletedHash: String? = null
+    private var lastCompletedNormalizedHash: String? = null
     private var lastCompletedAt = 0L
     private var lastRemoteClipboardHash: String? = null
+    private var lastRemoteClipboardNormalizedHash: String? = null
     private var lastRemoteClipboardAt = 0L
 
     private val networkExecutor = Executors.newSingleThreadExecutor { runnable ->
@@ -52,19 +55,22 @@ object ClipboardSyncCoordinator {
         }
 
         val textHash = sha256(text)
+        val normalizedHash = sha256(text.replace(Regex("\\s+"), " ").trim())
         val decision = synchronized(sendStateLock) {
-            val isRecentlyReceivedFromMac = textHash == lastRemoteClipboardHash &&
-                SystemClock.elapsedRealtime() - lastRemoteClipboardAt < REMOTE_CLIPBOARD_ECHO_WINDOW_MS
-            val isRecentlyCompletedDuplicate = textHash == lastCompletedHash &&
-                SystemClock.elapsedRealtime() - lastCompletedAt < RECENT_DUPLICATE_WINDOW_MS
+            val now = SystemClock.elapsedRealtime()
+            val isRecentlyReceivedFromMac = (textHash == lastRemoteClipboardHash || normalizedHash == lastRemoteClipboardNormalizedHash) &&
+                now - lastRemoteClipboardAt < REMOTE_CLIPBOARD_ECHO_WINDOW_MS
+            val isRecentlyCompletedDuplicate = (textHash == lastCompletedHash || normalizedHash == lastCompletedNormalizedHash) &&
+                now - lastCompletedAt < RECENT_DUPLICATE_WINDOW_MS
 
             when {
                 isRecentlyReceivedFromMac ->
                     SendDecision.RemoteEcho
-                textHash in pendingHashes || isRecentlyCompletedDuplicate ->
+                textHash in pendingHashes || normalizedHash in pendingNormalizedHashes || isRecentlyCompletedDuplicate ->
                     SendDecision.Duplicate
                 else -> {
                     pendingHashes += textHash
+                    pendingNormalizedHashes += normalizedHash
                     SendDecision.Send
                 }
             }
@@ -87,8 +93,10 @@ object ClipboardSyncCoordinator {
 
             synchronized(sendStateLock) {
                 pendingHashes -= textHash
+                pendingNormalizedHashes -= normalizedHash
                 if (result is SendResult.Success) {
                     lastCompletedHash = textHash
+                    lastCompletedNormalizedHash = normalizedHash
                     lastCompletedAt = SystemClock.elapsedRealtime()
                 }
             }
@@ -105,6 +113,7 @@ object ClipboardSyncCoordinator {
     fun rememberRemoteClipboardWrite(text: String) {
         synchronized(sendStateLock) {
             lastRemoteClipboardHash = sha256(text)
+            lastRemoteClipboardNormalizedHash = sha256(text.replace(Regex("\\s+"), " ").trim())
             lastRemoteClipboardAt = SystemClock.elapsedRealtime()
         }
     }

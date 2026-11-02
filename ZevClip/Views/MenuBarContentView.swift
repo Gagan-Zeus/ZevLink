@@ -4,12 +4,14 @@ import SwiftUI
 struct MenuBarContentView: View {
     @ObservedObject var receiver: ClipboardReceiver
     @ObservedObject var appSettings: AppSettings
+    @ObservedObject private var bluetoothService = MacBluetoothService.shared
 
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         Section {
             Label("Receiver: \(receiver.status.title)", systemImage: statusSystemImage)
+            Text(currentModeText)
             Text(receiver.detailMessage.truncatedForMenu())
             Text(receiver.isAdvertising ? "Bonjour: Advertising" : "Bonjour: Not advertising")
             Text("Port: \(ClipboardReceiver.port)")
@@ -67,6 +69,17 @@ struct MenuBarContentView: View {
                 NSApplication.shared.terminate(nil)
             }
             .keyboardShortcut("q")
+        }
+    }
+
+    private var currentModeText: String {
+        let hasLocalNetwork = !LocalNetworkHost.currentPairingHosts().isEmpty
+        if hasLocalNetwork && receiver.status == .running {
+            return bluetoothService.isConnected ? "Mode: Wi-Fi (Bluetooth Ready)" : "Mode: Wi-Fi"
+        } else if bluetoothService.isConnected {
+            return "Mode: Bluetooth"
+        } else {
+            return "Mode: Disconnected"
         }
     }
 

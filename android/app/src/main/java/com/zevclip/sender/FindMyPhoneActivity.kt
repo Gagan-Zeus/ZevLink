@@ -141,7 +141,9 @@ class FindMyPhoneActivity : Activity() {
                     gravity = Gravity.CENTER
                     background = roundedDrawable(colors.primary, 18)
                     setOnClickListener {
+                        FindMyPhoneRinger.stop(context)
                         startService(AndroidClipboardReceiverService.stopFindMyPhoneIntent(context))
+                        closeOverlay()
                     }
                 }, matchWidth())
             }, matchWidth())

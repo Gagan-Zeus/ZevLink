@@ -11,6 +11,8 @@ final class AppSettings: ObservableObject {
         static let showMenuBarIcon = "showMenuBarIcon"
         static let fileTransferAutoAccept = "fileTransferAutoAccept"
         static let fileTransferChunkDeduplication = "fileTransferChunkDeduplication"
+        static let humanTypingSpeed = "humanTypingSpeed"
+        static let humanTypingStartShortcut = "humanTypingStartShortcut"
     }
 
     @Published private(set) var launchAtLoginEnabled: Bool
@@ -19,6 +21,8 @@ final class AppSettings: ObservableObject {
     @Published private(set) var showMenuBarIcon: Bool
     @Published private(set) var fileTransferAutoAccept: Bool
     @Published private(set) var fileTransferChunkDeduplication: Bool
+    @Published private(set) var humanTypingSpeed: Double
+    @Published private(set) var humanTypingStartShortcut: KeyShortcut?
 
     init() {
         Self.migrateLegacyDefaultsIfNeeded()
@@ -47,6 +51,14 @@ final class AppSettings: ObservableObject {
         fileTransferChunkDeduplication = UserDefaults.standard.object(
             forKey: DefaultsKey.fileTransferChunkDeduplication
         ) as? Bool ?? true
+        humanTypingSpeed = UserDefaults.standard.object(
+            forKey: DefaultsKey.humanTypingSpeed
+        ) as? Double ?? 15.0
+
+        if let startData = UserDefaults.standard.data(forKey: DefaultsKey.humanTypingStartShortcut),
+           let startShortcut = try? JSONDecoder().decode(KeyShortcut.self, from: startData) {
+            humanTypingStartShortcut = startShortcut
+        }
 
         if launchAtLoginEnabled && !installedPathIsRegistered {
             Task { @MainActor [weak self] in
@@ -77,6 +89,22 @@ final class AppSettings: ObservableObject {
         UserDefaults.standard.set(isEnabled, forKey: DefaultsKey.fileTransferChunkDeduplication)
         fileTransferChunkDeduplication = isEnabled
     }
+
+    func setHumanTypingSpeed(_ speed: Double) {
+        UserDefaults.standard.set(speed, forKey: DefaultsKey.humanTypingSpeed)
+        humanTypingSpeed = speed
+    }
+
+    func setHumanTypingStartShortcut(_ shortcut: KeyShortcut?) {
+        if let shortcut = shortcut, let data = try? JSONEncoder().encode(shortcut) {
+            UserDefaults.standard.set(data, forKey: DefaultsKey.humanTypingStartShortcut)
+        } else {
+            UserDefaults.standard.removeObject(forKey: DefaultsKey.humanTypingStartShortcut)
+        }
+        humanTypingStartShortcut = shortcut
+        HumanTypingService.shared.refresh(promptIfNeeded: shortcut != nil)
+    }
+
 
     nonisolated static func savedRemoteControlEnabled() -> Bool {
         UserDefaults.standard.bool(forKey: DefaultsKey.remoteControlEnabled)
@@ -212,7 +240,8 @@ final class AppSettings: ObservableObject {
                 DefaultsKey.remoteControlEnabled,
                 DefaultsKey.showMenuBarIcon,
                 DefaultsKey.fileTransferAutoAccept,
-                DefaultsKey.fileTransferChunkDeduplication
+                DefaultsKey.fileTransferChunkDeduplication,
+                DefaultsKey.humanTypingSpeed
             ] where defaults.object(forKey: key) == nil {
                 defaults.set(legacyDomain[key], forKey: key)
             }
