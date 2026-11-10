@@ -6,6 +6,7 @@ import java.io.File
 import java.io.FileInputStream
 import java.nio.file.Files
 import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -55,6 +56,22 @@ class FileTransferSenderTest {
     }
 
     @Test
+    fun rejectsStaleSourceSizeBeforeBuildingManifest() {
+        val root = Files.createTempDirectory("zevlink-sender-stale-size-test")
+        try {
+            val file = root.resolve("payload.bin").toFile()
+            file.writeBytes(ByteArray(2048) { it.toByte() })
+            val source = TestFileTransferSource(file, size = file.length() - 17L)
+
+            assertThrows(IllegalStateException::class.java) {
+                FileTransferAndroidSender().sha256Hex(source)
+            }
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
     fun choosesFastestMeasuredStreamCount() {
         val selector = FileTransferAdaptiveStreamSelector()
         val selected = selector.chooseBestStreamCount(
@@ -70,11 +87,11 @@ class FileTransferSenderTest {
     }
 
     private class TestFileTransferSource(
-        private val file: File
+        private val file: File,
+        override val size: Long = file.length()
     ) : FileTransferSource {
         override val fileId: String = "file-1"
         override val displayName: String = file.name
-        override val size: Long = file.length()
         override val mediaType: String = "application/octet-stream"
 
         override fun openChannel(): OpenedFileTransferSource {

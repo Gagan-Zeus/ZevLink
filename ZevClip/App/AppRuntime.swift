@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import Network
+import QuartzCore
 import SwiftUI
 
 @MainActor
@@ -82,6 +83,9 @@ final class ZevClipRuntime {
         }
         MacBluetoothService.shared.onPhoneIpsDiscovered = { [weak self] phoneIps, phonePort in
             self?.androidClipboardSender.tryConnectToPhoneIps(phoneIps, port: phonePort)
+        }
+        MacBluetoothService.shared.onTransportModeReceived = { [weak self] mode in
+            self?.androidClipboardSender.handlePhoneTransportMode(mode)
         }
         MacBluetoothService.shared.onDisconnectReceived = { [weak self] in
             Task { @MainActor in
@@ -254,6 +258,13 @@ private final class SettingsWindowController {
 
 @MainActor
 private final class StatusItemController: NSObject, NSMenuDelegate {
+    private enum ConnectionMode: String {
+        case wifi = "Wi-Fi"
+        case bluetooth = "Bluetooth"
+        case hotspot = "Hotspot"
+        case disconnected = "Disconnected"
+    }
+
     private let receiver: ClipboardReceiver
     private let macClipboardWatcher: MacClipboardWatcher
     private let androidClipboardSender: AndroidClipboardSender
@@ -265,6 +276,15 @@ private final class StatusItemController: NSObject, NSMenuDelegate {
     private var statusItem: NSStatusItem?
     private var cancellables: Set<AnyCancellable> = []
     private var pathMonitor: NWPathMonitor?
+    private var isMenuOpen = false
+    private var isStatusRefreshScheduled = false
+    private var lastRenderedStatus: RenderedStatus?
+    private lazy var phoneStatusImage: NSImage? = Self.makePhoneStatusImage()
+
+    private enum RenderedStatus: Equatable {
+        case battery(mode: ConnectionMode, percentage: Int)
+        case phone(mode: ConnectionMode)
+    }
 
     private var isClipboardSyncRunning: Bool {
         receiver.status == .running && macClipboardWatcher.isRunning
@@ -300,7 +320,7 @@ private final class StatusItemController: NSObject, NSMenuDelegate {
         receiver.objectWillChange
             .sink { [weak self] _ in
                 DispatchQueue.main.async {
-                    self?.updateMenu()
+                    self?.scheduleStatusRefresh()
                 }
             }
             .store(in: &cancellables)
@@ -308,7 +328,7 @@ private final class StatusItemController: NSObject, NSMenuDelegate {
         macClipboardWatcher.objectWillChange
             .sink { [weak self] _ in
                 DispatchQueue.main.async {
-                    self?.updateMenu()
+                    self?.scheduleStatusRefresh()
                 }
             }
             .store(in: &cancellables)
@@ -316,7 +336,7 @@ private final class StatusItemController: NSObject, NSMenuDelegate {
         androidClipboardSender.objectWillChange
             .sink { [weak self] _ in
                 DispatchQueue.main.async {
-                    self?.updateMenu()
+                    self?.scheduleStatusRefresh()
                 }
             }
             .store(in: &cancellables)
@@ -324,7 +344,7 @@ private final class StatusItemController: NSObject, NSMenuDelegate {
         appSettings.objectWillChange
             .sink { [weak self] _ in
                 DispatchQueue.main.async {
-                    self?.updateMenu()
+                    self?.scheduleStatusRefresh()
                 }
             }
             .store(in: &cancellables)
@@ -332,7 +352,7 @@ private final class StatusItemController: NSObject, NSMenuDelegate {
         presetStore.objectWillChange
             .sink { [weak self] _ in
                 DispatchQueue.main.async {
-                    self?.updateMenu()
+                    self?.scheduleStatusRefresh()
                 }
             }
             .store(in: &cancellables)
@@ -340,7 +360,7 @@ private final class StatusItemController: NSObject, NSMenuDelegate {
         MacBluetoothService.shared.objectWillChange
             .sink { [weak self] _ in
                 DispatchQueue.main.async {
-                    self?.updateMenu()
+                    self?.scheduleStatusRefresh()
                 }
             }
             .store(in: &cancellables)
@@ -348,7 +368,7 @@ private final class StatusItemController: NSObject, NSMenuDelegate {
         let monitor = NWPathMonitor()
         monitor.pathUpdateHandler = { [weak self] _ in
             DispatchQueue.main.async {
-                self?.updateMenu()
+                self?.scheduleStatusRefresh()
             }
         }
         monitor.start(queue: DispatchQueue.global(qos: .utility))
@@ -372,6 +392,7 @@ private final class StatusItemController: NSObject, NSMenuDelegate {
         }
 
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        lastRenderedStatus = nil
         configureStatusButton(item.button)
         item.menu = makeMenu()
         statusItem = item
@@ -382,40 +403,72 @@ private final class StatusItemController: NSObject, NSMenuDelegate {
 
         NSStatusBar.system.removeStatusItem(statusItem)
         self.statusItem = nil
+        lastRenderedStatus = nil
+    }
+
+    private func refreshStatusItem() {
+        guard let statusItem else { return }
+
+        configureStatusButton(statusItem.button)
+        if isMenuOpen, let menu = statusItem.menu {
+            refreshConnectionMenuItems(in: menu)
+        }
+    }
+
+    private func scheduleStatusRefresh() {
+        guard !isStatusRefreshScheduled else { return }
+
+        isStatusRefreshScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.isStatusRefreshScheduled = false
+            self.refreshStatusItem()
+        }
     }
 
     private func updateMenu() {
         guard let statusItem else { return }
 
         configureStatusButton(statusItem.button)
-        let menu = makeMenu()
-        menu.delegate = self
-        statusItem.menu = menu
+        if let menu = statusItem.menu {
+            populateMenu(menu)
+        }
+    }
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        refreshMenuBeforeDisplay(menu)
     }
 
     func menuWillOpen(_ menu: NSMenu) {
-        updateMenu()
+        isMenuOpen = true
+        refreshMenuBeforeDisplay(menu)
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        isMenuOpen = false
+    }
+
+    private func refreshMenuBeforeDisplay(_ menu: NSMenu) {
+        configureStatusButton(statusItem?.button)
+        populateMenu(menu)
     }
 
     private func makeMenu() -> NSMenu {
         let menu = NSMenu()
+        menu.delegate = self
+        populateMenu(menu)
+        return menu
+    }
 
-        let hasLocalNetwork = !LocalNetworkHost.currentPairingHosts().isEmpty
-        let currentMode: String
-        if hasLocalNetwork && androidClipboardSender.activeTransportMode == .wifi && androidClipboardSender.resolvedEndpoint != nil {
-            currentMode = "Mode: Wi-Fi"
-        } else if MacBluetoothService.shared.isConnected {
-            currentMode = "Mode: Bluetooth"
-        } else {
-            currentMode = "Mode: Disconnected"
-        }
-        addDisabledItem(currentMode, to: menu)
+    private func populateMenu(_ menu: NSMenu) {
+        menu.removeAllItems()
+        addDisabledItem("Mode: \(currentConnectionMode.rawValue)", to: menu)
         menu.addItem(.separator())
 
         menu.addItem(actionItem(
             title: androidClipboardSender.isFindingPhone ? "Stop Ringing" : "Find My Phone",
             action: #selector(findMyPhone),
-            isEnabled: androidClipboardSender.activeTransportMode == .wifi || MacBluetoothService.shared.isConnected
+            isEnabled: currentConnectionMode != .disconnected
         ))
         menu.addItem(actionItem(
             title: "Reconnect Android",
@@ -431,8 +484,37 @@ private final class StatusItemController: NSObject, NSMenuDelegate {
 
         menu.addItem(.separator())
         menu.addItem(actionItem(title: "Quit ZevLink", action: #selector(quit)))
+    }
 
-        return menu
+    private func refreshConnectionMenuItems(in menu: NSMenu) {
+        let mode = currentConnectionMode
+        menu.items.first?.title = "Mode: \(mode.rawValue)"
+
+        if let findPhoneItem = menu.items.first(where: { $0.action == #selector(findMyPhone) }) {
+            findPhoneItem.title = androidClipboardSender.isFindingPhone ? "Stop Ringing" : "Find My Phone"
+            findPhoneItem.isEnabled = mode != .disconnected
+        }
+    }
+
+    private var currentConnectionMode: ConnectionMode {
+        if androidClipboardSender.phoneReportedDisconnected {
+            return .disconnected
+        }
+
+        if androidClipboardSender.phoneReportedBluetooth {
+            return .bluetooth
+        }
+
+        if androidClipboardSender.activeTransportMode == .wifi,
+           let endpoint = androidClipboardSender.resolvedEndpoint {
+            return LocalNetworkHost.isHostDefaultRouter(endpoint.host) ? .hotspot : .wifi
+        }
+
+        if MacBluetoothService.shared.isConnected {
+            return .bluetooth
+        }
+
+        return .disconnected
     }
 
     private func makeIntentsMenu() -> NSMenuItem {
@@ -462,67 +544,95 @@ private final class StatusItemController: NSObject, NSMenuDelegate {
     private func configureStatusButton(_ button: NSStatusBarButton?) {
         guard let button else { return }
 
-        let hasLocalNetwork = !LocalNetworkHost.currentPairingHosts().isEmpty
-
-        // Priority 1: Verified Wi-Fi
-        if hasLocalNetwork && androidClipboardSender.activeTransportMode == .wifi, let endpoint = androidClipboardSender.resolvedEndpoint {
-            button.image = nil
-            button.attributedTitle = batteryMenuAttributedTitle(for: endpoint)
-            button.toolTip = "ZevLink (Mode: Wi-Fi) • Phone Battery: \(batteryMenuTitle(for: endpoint))"
-            return
+        let mode = currentConnectionMode
+        let batteryPercentage: Int?
+        switch mode {
+        case .wifi, .hotspot:
+            batteryPercentage = androidClipboardSender.resolvedEndpoint?.batteryPercentage
+        case .bluetooth:
+            batteryPercentage = MacBluetoothService.shared.phoneBatteryPercentage
+        case .disconnected:
+            batteryPercentage = nil
         }
 
-        // Priority 2: Bluetooth connected
-        if MacBluetoothService.shared.isConnected {
-            button.image = nil
-            let battery = MacBluetoothService.shared.phoneBatteryPercentage ?? (androidClipboardSender.activeTransportMode == .wifi ? androidClipboardSender.resolvedEndpoint?.batteryPercentage : nil)
-            if let battery {
-                button.attributedTitle = NSAttributedString(
-                    string: "\(battery)%",
-                    attributes: [
-                        .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
-                        .foregroundColor: NSColor.labelColor
-                    ]
-                )
-                button.toolTip = "ZevLink (Mode: Bluetooth) • Phone Battery: \(battery)%"
-            } else {
-                button.attributedTitle = NSAttributedString(
-                    string: "BT",
-                    attributes: [
-                        .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
-                        .foregroundColor: NSColor.labelColor
-                    ]
-                )
-                button.toolTip = "ZevLink (Mode: Bluetooth)"
+        let renderedStatus: RenderedStatus
+        if let batteryPercentage {
+            renderedStatus = .battery(mode: mode, percentage: batteryPercentage)
+        } else {
+            renderedStatus = .phone(mode: mode)
+        }
+
+        if renderedStatus != lastRenderedStatus {
+            if case .battery(_, let oldBattery)? = lastRenderedStatus,
+               case .battery(_, let newBattery) = renderedStatus,
+               oldBattery != newBattery {
+                animateBatteryChange(on: button, rising: newBattery > oldBattery)
             }
-            return
+
+            switch renderedStatus {
+            case .battery(_, let batteryPercentage):
+                setStatusTitle("\(batteryPercentage)%", on: button)
+            case .phone:
+                setStatusImage(phoneStatusImage, on: button)
+            }
+            lastRenderedStatus = renderedStatus
         }
 
-        button.attributedTitle = NSAttributedString()
-        button.title = ""
-        button.image = phoneStatusImage()
-        button.toolTip = "ZevLink: Android not connected"
-    }
-
-    private func batteryMenuTitle(for endpoint: AndroidReceiverEndpoint) -> String {
-        if let batteryPercentage = endpoint.batteryPercentage {
-            return "\(batteryPercentage)%"
+        let toolTip: String
+        if mode != .disconnected, let batteryPercentage {
+            toolTip = "ZevLink (Mode: \(mode.rawValue)) • Phone Battery: \(batteryPercentage)%"
+        } else if mode == .disconnected {
+            toolTip = "ZevLink (Mode: \(mode.rawValue))"
+        } else {
+            toolTip = "ZevLink (Mode: \(mode.rawValue)) • Phone battery unavailable"
         }
-
-        return "--%"
+        setStatusToolTip(toolTip, on: button)
     }
 
-    private func batteryMenuAttributedTitle(for endpoint: AndroidReceiverEndpoint) -> NSAttributedString {
-        NSAttributedString(
-            string: batteryMenuTitle(for: endpoint),
+    private func setStatusTitle(_ title: String, on button: NSStatusBarButton) {
+        guard button.attributedTitle.string != title || button.image != nil else { return }
+
+        button.attributedTitle = NSAttributedString(
+            string: title,
             attributes: [
                 .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
                 .foregroundColor: NSColor.labelColor
             ]
         )
+        button.image = nil
     }
 
-    private func phoneStatusImage() -> NSImage? {
+    private func setStatusImage(_ image: NSImage?, on button: NSStatusBarButton) {
+        if button.attributedTitle.string.isEmpty && button.image === image { return }
+
+        button.image = image
+        if !button.attributedTitle.string.isEmpty {
+            button.attributedTitle = NSAttributedString()
+            button.title = ""
+        }
+    }
+
+    private func setStatusToolTip(_ toolTip: String, on button: NSStatusBarButton) {
+        guard button.toolTip != toolTip else { return }
+
+        button.toolTip = toolTip
+    }
+
+    private func animateBatteryChange(on button: NSStatusBarButton, rising: Bool) {
+        button.wantsLayer = true
+        guard let layer = button.layer else { return }
+
+        let transition = CATransition()
+        transition.type = .push
+        // The incoming number travels upward as the charge increases and
+        // downward as it decreases.
+        transition.subtype = rising ? .fromBottom : .fromTop
+        transition.duration = 0.28
+        transition.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        layer.add(transition, forKey: "zevlink-battery-flip")
+    }
+
+    private static func makePhoneStatusImage() -> NSImage? {
         if let url = Bundle.main.url(forResource: "PhoneStatusIcon", withExtension: "png"),
            let image = NSImage(contentsOf: url) {
             image.size = NSSize(width: 18, height: 18)
