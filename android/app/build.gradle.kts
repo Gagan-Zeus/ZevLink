@@ -10,12 +10,32 @@ android {
         applicationId = "com.zevclip.sender"
         minSdk = 26
         targetSdk = 36
-        versionCode = 35
-        versionName = "4.0.2"
+        versionCode = 36
+        versionName = "4.0.3"
+    }
+
+    val releaseKeystore = file("release.jks")
+    signingConfigs {
+        create("release") {
+            if (releaseKeystore.exists()) {
+                storeFile = releaseKeystore
+                storePassword = "zevlinkandroid"
+                keyAlias = "zevlink"
+                keyPassword = "zevlinkandroid"
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
+            }
+        }
     }
 
     buildTypes {
         release {
+            signingConfig = if (releaseKeystore.exists()) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),

@@ -1,0 +1,9 @@
+.gradle/
+.idea/
+.android-sdk/
+local.properties
+local.properties.docker
+**/build/
+*.iml
+*.jks
+*.keystore
