@@ -889,10 +889,15 @@ class MainActivity : Activity() {
                 val btConnected = BluetoothClientManager.isConnected()
                 val wifiEndpoint = endpoint != null
                 val mode = ZevClipPreferences.activeTransportMode(this)
+                val hotspotEndpoint = endpoint?.let {
+                    LocalNetworkAccess.isEndpointOnPhoneHotspot(connectivityManager, it.ipAddress)
+                } == true
 
                 val displayMode = when {
+                    mode == "Wi-Fi" && hotspotEndpoint -> "Mode: Hotspot"
                     mode == "Wi-Fi" -> "Mode: Wi-Fi"
                     mode == "Bluetooth" -> "Mode: Bluetooth"
+                    hasLocalNetwork && wifiEndpoint && hotspotEndpoint -> "Mode: Hotspot"
                     hasLocalNetwork && wifiEndpoint -> "Mode: Wi-Fi"
                     btConnected -> "Mode: Bluetooth"
                     else -> "Mode: Disconnected"
@@ -902,6 +907,7 @@ class MainActivity : Activity() {
                 transportModeBadge.setTextColor(
                     when (displayMode) {
                         "Mode: Wi-Fi" -> colors.success
+                        "Mode: Hotspot" -> colors.success
                         "Mode: Bluetooth" -> colors.primary
                         else -> colors.muted
                     }

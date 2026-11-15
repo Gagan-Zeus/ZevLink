@@ -72,6 +72,7 @@ final class MacBluetoothService: NSObject, ObservableObject {
     var onIntentBroadcastAcknowledgement: ((Data) -> Void)?
     var onPresenceReceived: (([String: Any]) -> Void)?
     var onPhoneIpsDiscovered: (([String], Int) -> Void)?
+    var onTransportModeReceived: ((String) -> Void)?
     var onDisconnectReceived: (() -> Void)?
 
     private var peripheralManager: CBPeripheralManager?
@@ -84,6 +85,7 @@ final class MacBluetoothService: NSObject, ObservableObject {
     private var lastStatusRequestAt: Date?
 
     private static let maximumFramePayload = 1_048_576
+    private static let batteryRefreshInterval: TimeInterval = 5
 
     override init() {
         super.init()
@@ -179,9 +181,9 @@ final class MacBluetoothService: NSObject, ObservableObject {
                         self.startAdvertising()
                     }
                 } else if self.isConnected {
-                    // Periodic battery polling: request phone status every 20 seconds
+                    // Keep Bluetooth battery updates close to the Wi-Fi status refresh rate.
                     let now = Date()
-                    if self.lastStatusRequestAt == nil || now.timeIntervalSince(self.lastStatusRequestAt!) >= 20 {
+                    if self.lastStatusRequestAt == nil || now.timeIntervalSince(self.lastStatusRequestAt!) >= Self.batteryRefreshInterval {
                         self.lastStatusRequestAt = now
                         self.sendBluetoothMessage(path: "/status-request")
                     }
@@ -351,9 +353,14 @@ final class MacBluetoothService: NSObject, ObservableObject {
             return
         }
 
-        // Extract battery percentage if present
-        if let battery = json["battery"] as? Int, battery >= 0, battery <= 100 {
-            phoneBatteryPercentage = battery
+        // Treat missing/invalid battery data as unavailable instead of keeping
+        // a previous percentage on screen.
+        phoneBatteryPercentage = (json["battery"] as? Int).flatMap { battery in
+            (0...100).contains(battery) ? battery : nil
+        }
+
+        if let transportMode = json["transportMode"] as? String {
+            onTransportModeReceived?(transportMode)
         }
 
         // Check Phone Wi-Fi / Hotspot IPs shared via BLE

@@ -3,6 +3,8 @@ package com.zevclip.sender.filetransfer
 import android.content.ContentResolver
 import android.database.Cursor
 import android.net.Uri
+import android.system.Os
+import android.system.OsConstants
 import android.provider.OpenableColumns
 import java.io.Closeable
 import java.io.FileInputStream
@@ -42,8 +44,9 @@ class ContentResolverFileTransferSource(
     }
 
     override val size: Long by lazy {
-        queryLong(OpenableColumns.SIZE)
-            ?: contentResolver.openAssetFileDescriptor(uri, "r")?.use { it.length }?.takeIf { it >= 0L }
+        regularFileDescriptorSize()
+            ?: assetDescriptorSize()
+            ?: queryLong(OpenableColumns.SIZE)
             ?: error("Could not determine file size for $uri.")
     }
 
@@ -81,6 +84,25 @@ class ContentResolverFileTransferSource(
                 null
             }
         }
+    }
+
+    private fun regularFileDescriptorSize(): Long? {
+        return runCatching {
+            contentResolver.openFileDescriptor(uri, "r")?.use { descriptor ->
+                val stat = Os.fstat(descriptor.fileDescriptor)
+                if ((stat.st_mode and OsConstants.S_IFMT) == OsConstants.S_IFREG) {
+                    stat.st_size
+                } else {
+                    null
+                }
+            }
+        }.getOrNull()?.takeIf { it >= 0L }
+    }
+
+    private fun assetDescriptorSize(): Long? {
+        return runCatching {
+            contentResolver.openAssetFileDescriptor(uri, "r")?.use { it.length }
+        }.getOrNull()?.takeIf { it >= 0L }
     }
 
     private fun <T> query(block: (Cursor) -> T?): T? {
@@ -148,9 +170,14 @@ class FileTransferAndroidSender {
 
     fun sha256Hex(source: FileTransferSource, bufferSize: Int = 1024 * 1024): String {
         val digest = MessageDigest.getInstance("SHA-256")
+        var bytesHashed = 0L
         source.openChannel().use { opened ->
             val buffer = ByteBuffer.allocateDirect(bufferSize)
-            while (opened.channel.read(buffer) >= 0) {
+            while (true) {
+                val read = opened.channel.read(buffer)
+                if (read < 0) break
+                if (read == 0) continue
+                bytesHashed += read
                 buffer.flip()
                 if (buffer.hasRemaining()) {
                     val bytes = ByteArray(buffer.remaining())
@@ -159,6 +186,9 @@ class FileTransferAndroidSender {
                 }
                 buffer.clear()
             }
+        }
+        check(bytesHashed == source.size) {
+            "File size changed or provider metadata is stale for ${source.displayName}: expected ${source.size} bytes but read $bytesHashed."
         }
         return digest.digest().joinToString("") { "%02x".format(it) }
     }

@@ -3,6 +3,7 @@ package com.zevclip.sender
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import java.net.Inet4Address
+import java.net.InetAddress
 import java.net.NetworkInterface
 
 object LocalNetworkAccess {
@@ -43,6 +44,40 @@ object LocalNetworkAccess {
             }
         } catch (_: Exception) {}
         return ips
+    }
+
+    @Suppress("DEPRECATION")
+    fun isEndpointOnPhoneHotspot(connectivityManager: ConnectivityManager, endpointIp: String): Boolean {
+        val endpointAddress = parseIPv4(endpointIp) ?: return false
+        val wifiClientInterfaces = connectivityManager.allNetworks
+            .filter { network ->
+                val capabilities = connectivityManager.getNetworkCapabilities(network)
+                capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true &&
+                    capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            }
+            .mapNotNull { network -> connectivityManager.getLinkProperties(network)?.interfaceName }
+            .toSet()
+
+        val interfaces = try {
+            NetworkInterface.getNetworkInterfaces()?.toList().orEmpty()
+        } catch (_: Exception) {
+            return false
+        }
+
+        return interfaces.any { networkInterface ->
+            runCatching { networkInterface.isUp && !networkInterface.isLoopback }.getOrDefault(false) &&
+                networkInterface.name.isPotentialHotspotInterface() &&
+                networkInterface.name !in wifiClientInterfaces &&
+                runCatching {
+                    networkInterface.interfaceAddresses.any { interfaceAddress ->
+                        val localAddress = interfaceAddress.address as? Inet4Address ?: return@any false
+                        !localAddress.isLoopbackAddress &&
+                            !localAddress.isLinkLocalAddress &&
+                            localAddress.isPrivateLanAddress() &&
+                            endpointAddress.isOnSubnet(localAddress, interfaceAddress.networkPrefixLength.toInt())
+                    }
+                }.getOrDefault(false)
+        }
     }
 
     fun unavailableMessage(): String {
@@ -99,6 +134,30 @@ object LocalNetworkAccess {
         return first == 10 ||
             (first == 172 && second in 16..31) ||
             (first == 192 && second == 168)
+    }
+
+    private fun String.isPotentialHotspotInterface(): Boolean {
+        val interfaceName = lowercase()
+        return listOf("wlan", "swlan", "ap", "softap", "wifi").any { interfaceName.startsWith(it) }
+    }
+
+    private fun parseIPv4(value: String): Inet4Address? {
+        val octets = value.split('.').mapNotNull { it.toIntOrNull() }
+        if (octets.size != 4 || octets.any { it !in 0..255 }) return null
+        return try {
+            InetAddress.getByAddress(octets.map { it.toByte() }.toByteArray()) as? Inet4Address
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun Inet4Address.isOnSubnet(other: Inet4Address, prefixLength: Int): Boolean {
+        if (prefixLength !in 1..32) return false
+        fun addressValue(address: Inet4Address): Long = address.address.fold(0L) { value, byte ->
+            (value shl 8) or (byte.toLong() and 0xff)
+        }
+        val mask = (0xffffffffL shl (32 - prefixLength)) and 0xffffffffL
+        return (addressValue(this) and mask) == (addressValue(other) and mask)
     }
 
     private val hotspotInterfacePrefixes = listOf(

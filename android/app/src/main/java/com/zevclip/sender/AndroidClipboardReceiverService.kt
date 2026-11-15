@@ -8,7 +8,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ServiceInfo
-import android.os.BatteryManager
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.nsd.NsdManager
@@ -630,9 +629,7 @@ class AndroidClipboardReceiverService : Service() {
     }
 
     private fun currentBatteryPercentage(): Int? {
-        val batteryManager = getSystemService(BatteryManager::class.java)
-        val percentage = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
-        return percentage.takeIf { it in 0..100 }
+        return AndroidBatteryStatus.percentage(this)
     }
 
     private fun String.utf8Size(): Int {

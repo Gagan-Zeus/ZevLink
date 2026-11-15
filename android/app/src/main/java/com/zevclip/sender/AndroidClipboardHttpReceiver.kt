@@ -4,7 +4,6 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.os.Environment
-import android.os.BatteryManager
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -870,9 +869,7 @@ class AndroidClipboardHttpReceiver(
     }
 
     private fun currentBatteryPercentage(): Int? {
-        val batteryManager = appContext.getSystemService(BatteryManager::class.java)
-        val percentage = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
-        return percentage.takeIf { it in 0..100 }
+        return AndroidBatteryStatus.percentage(appContext)
     }
 
     private fun rememberMacBatteryStatus(headers: Map<String, String>) {

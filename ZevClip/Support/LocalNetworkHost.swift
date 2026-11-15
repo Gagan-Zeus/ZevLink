@@ -1,9 +1,32 @@
 import Darwin
 import Foundation
+import SystemConfiguration
 
 enum LocalNetworkHost {
     static func currentPairingHost() -> String {
         currentPairingHosts().first ?? Host.current().localizedName ?? "localhost"
+    }
+
+    static func defaultRouterAddress() -> String? {
+        guard let store = SCDynamicStoreCreate(nil, "ZevLink" as CFString, nil, nil),
+              let settings = SCDynamicStoreCopyValue(
+                store,
+                "State:/Network/Global/IPv4" as CFString
+              ) as? [String: Any]
+        else {
+            return nil
+        }
+
+        return settings["Router"] as? String
+    }
+
+    static func isHostDefaultRouter(_ host: String) -> Bool {
+        guard let router = defaultRouterAddress() else { return false }
+        return normalizedAddress(host) == normalizedAddress(router)
+    }
+
+    private static func normalizedAddress(_ address: String) -> String {
+        address.trimmingCharacters(in: CharacterSet(charactersIn: "[]")).lowercased()
     }
 
     static func currentPairingHosts() -> [String] {

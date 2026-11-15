@@ -11,6 +11,8 @@ final class AndroidClipboardSender: ObservableObject {
 
     @Published private(set) var status = "Android clipboard sender is idle."
     @Published private(set) var activeTransportMode: TransportMode = .disconnected
+    @Published private(set) var phoneReportedBluetooth = false
+    @Published private(set) var phoneReportedDisconnected = false
     @Published private(set) var isDiscovering = false
     @Published private(set) var isSending = false
     @Published private(set) var isFindingPhone = false
@@ -28,7 +30,11 @@ final class AndroidClipboardSender: ObservableObject {
     private var statusTask: Task<Void, Never>?
     private var statusRefreshTimer: Timer?
     private var pathMonitor: NWPathMonitor?
-    private var lastKnownHosts: Set<String> = []
+    private var lastNetworkPathSignature: String?
+    private var isNetworkPathSatisfied = false
+    private var networkRecoveryTask: Task<Void, Never>?
+    private var statusProbeGeneration = 0
+    private var consecutiveStatusFailures = 0
     private var retriedChangeIDs: Set<UUID> = []
     private var pendingIntentBroadcastCompletions: [String: (IntentBroadcastAcknowledgement) -> Void] = [:]
     private var pendingIntentBroadcastTimeouts: [String: Task<Void, Never>] = [:]
@@ -203,11 +209,22 @@ final class AndroidClipboardSender: ObservableObject {
             return
         }
 
+        phoneReportedBluetooth = false
+        phoneReportedDisconnected = false
+        statusProbeGeneration += 1
+        statusTask?.cancel()
+        statusTask = nil
         discovery?.stop()
         discovery = nil
         isDiscovering = false
+        consecutiveStatusFailures = 0
         resolvedEndpoint = endpoint
-        activeTransportMode = .wifi
+        // Android presence normally carries a live battery sample.  If it
+        // does not, wait for /status before presenting this as an active
+        // Wi-Fi connection instead of creating a battery-less UI state.
+        activeTransportMode = endpoint.batteryPercentage == nil
+            ? (MacBluetoothService.shared.isConnected ? .bluetooth : .disconnected)
+            : .wifi
         if let findPhoneRinging = endpoint.findPhoneRinging {
             setFindingPhone(findPhoneRinging)
         }
@@ -221,9 +238,52 @@ final class AndroidClipboardSender: ObservableObject {
     }
 
     func clearResolvedEndpoint() {
+        phoneReportedBluetooth = false
+        phoneReportedDisconnected = false
+        statusProbeGeneration += 1
+        statusTask?.cancel()
+        statusTask = nil
+        consecutiveStatusFailures = 0
         resolvedEndpoint = nil
         activeTransportMode = MacBluetoothService.shared.isConnected ? .bluetooth : .disconnected
         status = "Disconnected from Android."
+    }
+
+    func handlePhoneTransportMode(_ mode: String) {
+        switch mode.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "bluetooth":
+            phoneReportedBluetooth = true
+            phoneReportedDisconnected = false
+            statusProbeGeneration += 1
+            statusTask?.cancel()
+            statusTask = nil
+            discovery?.stop()
+            discovery = nil
+            isDiscovering = false
+            consecutiveStatusFailures = 0
+            resolvedEndpoint = nil
+            activeTransportMode = .bluetooth
+            status = "Android is using Bluetooth."
+            sendPendingChangeIfPossible()
+        case "wi-fi", "wifi", "hotspot":
+            phoneReportedBluetooth = false
+            phoneReportedDisconnected = false
+        case "disconnected":
+            phoneReportedBluetooth = false
+            phoneReportedDisconnected = true
+            statusProbeGeneration += 1
+            statusTask?.cancel()
+            statusTask = nil
+            discovery?.stop()
+            discovery = nil
+            isDiscovering = false
+            consecutiveStatusFailures = 0
+            resolvedEndpoint = nil
+            activeTransportMode = .disconnected
+            status = "Android is disconnected."
+        default:
+            break
+        }
     }
 
     func startStatusMonitoring() {
@@ -251,51 +311,83 @@ final class AndroidClipboardSender: ObservableObject {
 
     private func handleNetworkPathUpdate(_ path: NWPath) {
         let currentHosts = Set(LocalNetworkHost.currentPairingHosts())
-        let hostsChanged = !lastKnownHosts.isEmpty && (currentHosts != lastKnownHosts)
-        lastKnownHosts = currentHosts
+        let interfaceNames = path.availableInterfaces.map(\.name).sorted().joined(separator: ",")
+        let signature = [
+            path.status == .satisfied ? "up" : "down",
+            path.usesInterfaceType(.wifi) ? "wifi" : "",
+            path.usesInterfaceType(.wiredEthernet) ? "ethernet" : "",
+            path.usesInterfaceType(.cellular) ? "cellular" : "",
+            interfaceNames,
+            currentHosts.sorted().joined(separator: ",")
+        ].joined(separator: "|")
+        let pathChanged = signature != lastNetworkPathSignature
+        lastNetworkPathSignature = signature
+        isNetworkPathSatisfied = path.status == .satisfied
 
-        var endpointUnreachable = false
-        if let endpoint = resolvedEndpoint {
-            endpointUnreachable = !isEndpointSubnetReachable(endpoint, localHosts: currentHosts)
+        guard isNetworkPathSatisfied else {
+            networkRecoveryTask?.cancel()
+            networkRecoveryTask = nil
+            restartWifiDiscoveryState()
+            return
         }
 
-        if path.status != .satisfied || currentHosts.isEmpty || hostsChanged || endpointUnreachable {
-            if resolvedEndpoint != nil || activeTransportMode == .wifi {
-                clearResolvedEndpoint()
-            }
+        guard !currentHosts.isEmpty else {
+            scheduleNetworkRecoveryRetry()
+            return
         }
 
-        if path.status == .satisfied && !currentHosts.isEmpty {
-            if resolvedEndpoint != nil {
-                statusTask?.cancel()
-                statusTask = nil
-                refreshAndroidStatus()
-            } else {
-                discoverAndroidReceiver()
-            }
+        networkRecoveryTask?.cancel()
+        networkRecoveryTask = nil
+        if pathChanged {
+            restartWifiDiscoveryState()
+        }
+
+        if resolvedEndpoint != nil {
+            refreshAndroidStatus()
+        } else {
+            discoverAndroidReceiver()
         }
     }
 
-    private func isEndpointSubnetReachable(_ endpoint: AndroidReceiverEndpoint, localHosts: Set<String>) -> Bool {
-        if localHosts.isEmpty { return false }
-        let target = endpoint.host
-        guard let targetOctets = LocalNetworkHost.octets(from: target) else {
-            return true
+    private func restartWifiDiscoveryState() {
+        statusProbeGeneration += 1
+        discovery?.stop()
+        discovery = nil
+        isDiscovering = false
+        statusTask?.cancel()
+        statusTask = nil
+        consecutiveStatusFailures = 0
+
+        // A local network path change cannot override Android's explicit BLE mode.
+        // Keep Bluetooth selected until Android reports Wi-Fi or the BLE link ends.
+        if phoneReportedBluetooth {
+            resolvedEndpoint = nil
+            activeTransportMode = .bluetooth
+            return
         }
-        for localHost in localHosts {
-            if let localOctets = LocalNetworkHost.octets(from: localHost) {
-                if targetOctets[0] == localOctets[0] && targetOctets[1] == localOctets[1] {
-                    if targetOctets[0] == 192 && targetOctets[1] == 168 {
-                        if targetOctets[2] == localOctets[2] { return true }
-                    } else if targetOctets[0] == 10 {
-                        return true
-                    } else if targetOctets[0] == 172 {
-                        if targetOctets[1] == localOctets[1] { return true }
-                    }
+
+        phoneReportedDisconnected = false
+        if resolvedEndpoint != nil || activeTransportMode == .wifi {
+            resolvedEndpoint = nil
+            activeTransportMode = MacBluetoothService.shared.isConnected ? .bluetooth : .disconnected
+        }
+    }
+
+    private func scheduleNetworkRecoveryRetry() {
+        guard networkRecoveryTask == nil else { return }
+        networkRecoveryTask = Task { [weak self] in
+            for _ in 0..<8 {
+                try? await Task.sleep(for: .milliseconds(500))
+                guard !Task.isCancelled else { return }
+                guard let self, self.isNetworkPathSatisfied else { return }
+                if !LocalNetworkHost.currentPairingHosts().isEmpty {
+                    self.networkRecoveryTask = nil
+                    self.discoverAndroidReceiver()
+                    return
                 }
             }
+            self?.networkRecoveryTask = nil
         }
-        return false
     }
 
     func dismissAndroidNotification(notificationKey: String) {
@@ -756,7 +848,7 @@ final class AndroidClipboardSender: ObservableObject {
     }
 
     private func discoverAndroidReceiver() {
-        guard !isDiscovering else { return }
+        guard !isDiscovering, !phoneReportedBluetooth, !phoneReportedDisconnected else { return }
 
         let discovery = AndroidReceiverDiscovery(
             onStatusChanged: { [weak self] status, isDiscovering in
@@ -765,6 +857,7 @@ final class AndroidClipboardSender: ObservableObject {
             onEndpointResolved: { [weak self] endpoint in
                 self?.resolvedEndpoint = endpoint
                 self?.isDiscovering = false
+                self?.consecutiveStatusFailures = 0
                 self?.refreshAndroidStatus()
                 self?.sendPendingChangeIfPossible()
             }
@@ -849,6 +942,8 @@ final class AndroidClipboardSender: ObservableObject {
     }
 
     private func refreshConnectionStatus() {
+        guard !phoneReportedBluetooth, !phoneReportedDisconnected else { return }
+
         if resolvedEndpoint == nil {
             discoverAndroidReceiver()
         } else {
@@ -859,10 +954,13 @@ final class AndroidClipboardSender: ObservableObject {
     private func refreshAndroidStatus() {
         guard statusTask == nil else { return }
         guard let endpoint = resolvedEndpoint else { return }
+        guard !phoneReportedBluetooth, !phoneReportedDisconnected else { return }
 
         let token = tokenProvider().trimmingCharacters(in: .whitespacesAndNewlines)
         guard !token.isEmpty else { return }
 
+        statusProbeGeneration += 1
+        let probeGeneration = statusProbeGeneration
         statusTask = Task { [weak self] in
             let result = await AndroidClipboardHTTPClient.fetchStatus(
                 from: endpoint,
@@ -870,24 +968,28 @@ final class AndroidClipboardSender: ObservableObject {
             )
 
             await MainActor.run {
-                self?.handleStatusResult(result, endpoint: endpoint)
+                self?.handleStatusResult(result, endpoint: endpoint, generation: probeGeneration)
             }
         }
     }
 
     private func handleStatusResult(
         _ result: AndroidClipboardHTTPClient.StatusResult,
-        endpoint: AndroidReceiverEndpoint
+        endpoint: AndroidReceiverEndpoint,
+        generation: Int
     ) {
+        guard generation == statusProbeGeneration else { return }
         statusTask = nil
 
         switch result {
         case .success(let batteryPercentage, let confirmedDeviceId):
-            let updatedEndpoint = endpoint.updatingBatteryPercentage(
-                batteryPercentage ?? endpoint.batteryPercentage
-            )
+            phoneReportedDisconnected = false
+            consecutiveStatusFailures = 0
+            let updatedEndpoint = endpoint.updatingBatteryPercentage(batteryPercentage)
             resolvedEndpoint = updatedEndpoint
-            activeTransportMode = .wifi
+            activeTransportMode = batteryPercentage == nil
+                ? (MacBluetoothService.shared.isConnected ? .bluetooth : .disconnected)
+                : .wifi
             saveConfirmedAndroidIdentity(
                 confirmedDeviceId ?? endpoint.deviceId,
                 transferCertificateSHA256: endpoint.transferCertificateSHA256
@@ -896,7 +998,11 @@ final class AndroidClipboardSender: ObservableObject {
         case .failure(let message, let isRetryable):
             status = message
             if isRetryable {
+                consecutiveStatusFailures += 1
+                guard consecutiveStatusFailures >= Self.maximumConsecutiveStatusFailures else { return }
+
                 resolvedEndpoint = nil
+                consecutiveStatusFailures = 0
                 activeTransportMode = MacBluetoothService.shared.isConnected ? .bluetooth : .disconnected
                 discoverAndroidReceiver()
             }
@@ -919,6 +1025,7 @@ final class AndroidClipboardSender: ObservableObject {
     }
 
     func tryConnectToPhoneIps(_ ips: [String], port: Int) {
+        guard !phoneReportedBluetooth, !phoneReportedDisconnected else { return }
         let token = tokenProvider().trimmingCharacters(in: .whitespacesAndNewlines)
         guard !token.isEmpty else { return }
 
@@ -934,9 +1041,18 @@ final class AndroidClipboardSender: ObservableObject {
                     port: port
                 )
                 let result = await AndroidClipboardHTTPClient.fetchStatus(from: endpoint, token: token)
-                if case .success = result {
+                if case .success(let batteryPercentage, let confirmedDeviceId) = result {
+                    let liveEndpoint = AndroidReceiverEndpoint(
+                        name: endpoint.name,
+                        deviceId: confirmedDeviceId ?? endpoint.deviceId,
+                        batteryPercentage: batteryPercentage,
+                        findPhoneRinging: endpoint.findPhoneRinging,
+                        transferCertificateSHA256: endpoint.transferCertificateSHA256,
+                        host: endpoint.host,
+                        port: endpoint.port
+                    )
                     await MainActor.run {
-                        self?.updateEndpointSeenFromAndroid(endpoint)
+                        self?.updateEndpointSeenFromAndroid(liveEndpoint)
                     }
                     break
                 }
@@ -948,13 +1064,14 @@ final class AndroidClipboardSender: ObservableObject {
     private static let maximumImageBodyLength = 20 * 1_024 * 1_024
     private static let statusRefreshInterval: TimeInterval = 2
     private static let statusRefreshTolerance: TimeInterval = 0.5
+    private static let maximumConsecutiveStatusFailures = 3
 }
 
 private enum AndroidClipboardHTTPClient {
     private static let statusSession: URLSession = {
         let config = URLSessionConfiguration.ephemeral
-        config.timeoutIntervalForRequest = 1.0
-        config.timeoutIntervalForResource = 1.0
+        config.timeoutIntervalForRequest = 3.0
+        config.timeoutIntervalForResource = 3.0
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
         return URLSession(configuration: config)
     }()
@@ -1120,7 +1237,7 @@ private enum AndroidClipboardHTTPClient {
 
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
-        request.timeoutInterval = 1.0
+        request.timeoutInterval = 3.0
         request.setValue(token, forHTTPHeaderField: "X-ZevClip-Token")
         applyMacBatteryHeaders(to: &request)
 

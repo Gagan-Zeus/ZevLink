@@ -1,7 +1,6 @@
 package com.zevclip.sender
 
 import android.content.Context
-import android.os.BatteryManager
 import com.zevclip.sender.filetransfer.FileTransferIdentityStore
 import java.net.HttpURLConnection
 
@@ -22,8 +21,6 @@ object AndroidReceiverIdentityHeaders {
     }
 
     private fun currentBatteryPercentage(context: Context): Int? {
-        val batteryManager = context.getSystemService(BatteryManager::class.java)
-        val percentage = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
-        return percentage.takeIf { it in 0..100 }
+        return AndroidBatteryStatus.percentage(context)
     }
 }

@@ -19,9 +19,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
 import android.content.pm.PackageManager
-import android.os.BatteryManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -866,19 +864,7 @@ object BluetoothClientManager {
     }
 
     fun getBatteryPercentage(context: Context): Int {
-        val batteryManager = context.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
-        val capacity = batteryManager?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: -1
-        if (capacity in 0..100) return capacity
-
-        try {
-            val intent = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-            val level = intent?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
-            val scale = intent?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
-            if (level >= 0 && scale > 0) {
-                return (level * 100) / scale
-            }
-        } catch (_: Exception) {}
-        return -1
+        return AndroidBatteryStatus.percentage(context) ?: -1
     }
 
     private fun buildEnvelope(context: Context, path: String): JSONObject {
@@ -892,6 +878,7 @@ object BluetoothClientManager {
             .put("token", ZevClipPreferences.pairingToken(context))
             .put("deviceId", ZevClipPreferences.androidDeviceId(context))
             .put("battery", if (batteryLevel in 0..100) batteryLevel else JSONObject.NULL)
+            .put("transportMode", ZevClipPreferences.activeTransportMode(context))
             .put("phoneIps", jsonIps)
             .put("phonePort", AndroidClipboardHttpReceiver.DEFAULT_PORT)
     }

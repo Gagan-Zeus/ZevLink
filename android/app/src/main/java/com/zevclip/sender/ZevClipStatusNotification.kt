@@ -8,6 +8,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.ConnectivityManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -111,8 +112,14 @@ object ZevClipStatusNotification {
 
         val isBtConnected = BluetoothClientManager.isConnected()
         val mode = ZevClipPreferences.activeTransportMode(context)
+        val connectivityManager = context.getSystemService(ConnectivityManager::class.java)
+        val endpoint = ZevClipPreferences.endpoint(context)
+        val hotspotEndpoint = mode == "Wi-Fi" && endpoint?.let {
+            LocalNetworkAccess.isEndpointOnPhoneHotspot(connectivityManager, it.ipAddress)
+        } == true
 
         val effectiveMode = when {
+            mode == "Wi-Fi" && hotspotEndpoint -> "Hotspot"
             mode == "Wi-Fi" -> "Wi-Fi"
             isBtConnected -> "Bluetooth"
             else -> return context.getString(R.string.notification_status_not_connected)
